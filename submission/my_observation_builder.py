@@ -386,6 +386,7 @@ class FastTreeObsBuilder(ObservationBuilder):
 
         if agent.position is None:
             if not self._occupied_by_other(agent.initial_position, handle):
+                mask[self.DO_NOTHING] = 0.0
                 mask[self.MOVE_FORWARD] = 1.0
             return mask
 
