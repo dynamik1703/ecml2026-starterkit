@@ -256,7 +256,7 @@ class FastTreeObsBuilder(ObservationBuilder):
             visited.append(new_position)
 
             # Detect another agent in this cell.
-            opp_a = self.env.agent_positions[new_position]
+            opp_a = self._agent_at(new_position)
             if opp_a != -1 and opp_a != handle:
                 if self.env.agents[opp_a].direction != new_direction:
                     has_opp_agent = 1
