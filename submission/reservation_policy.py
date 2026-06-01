@@ -98,6 +98,7 @@ class ReservationPolicy:
 
         best_action = None
         best_score = np.inf
+        action_scores = []
         for action in candidates:
             score = self._score_movement_action(
                 handle,
@@ -107,6 +108,7 @@ class ReservationPolicy:
                 planned_targets,
                 obs_builder,
             )
+            action_scores.append((score, action))
             if score < best_score:
                 best_score = score
                 best_action = action
@@ -118,6 +120,24 @@ class ReservationPolicy:
             and self._state_matches(agent.state, "STOPPED")
         ):
             wait_action = self.DO_NOTHING
+
+        forward_score = min(
+            (
+                score
+                for score, action in action_scores
+                if action == self.MOVE_FORWARD
+            ),
+            default=np.inf,
+        )
+        side_candidates = [
+            (score, action)
+            for score, action in action_scores
+            if action != self.MOVE_FORWARD and np.isfinite(score)
+        ]
+        if forward_score >= self.OPPOSING_PENALTY and side_candidates:
+            side_score, side_action = min(side_candidates)
+            if side_score < self.OPPOSING_PENALTY * 2:
+                return side_action
 
         if best_action is not None and (
             best_score <= wait_score or best_score < self.OPPOSING_PENALTY
