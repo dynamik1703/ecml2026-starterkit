@@ -504,7 +504,9 @@ class FastTreeObsBuilder(ObservationBuilder):
             deadline = agent.latest_arrival
         if deadline is None:
             return np.inf
-        return deadline - self.env._elapsed_steps - distance
+        speed = float(agent.speed_counter.speed)
+        travel_time = distance / speed if speed > 0 and np.isfinite(distance) else distance
+        return deadline - self.env._elapsed_steps - travel_time
 
     def _priority_key(self, handle):
         agent = self.env.agents[handle]
