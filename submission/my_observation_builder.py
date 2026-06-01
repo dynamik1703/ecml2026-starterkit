@@ -313,9 +313,15 @@ class FastTreeObsBuilder(ObservationBuilder):
         if not self._is_in_bounds(position):
             return -1
         try:
-            return self.env.agent_positions[position]
+            handle = self.env.agent_positions[position]
+            if handle != -1:
+                return handle
         except (IndexError, KeyError, TypeError):
-            return -1
+            pass
+        for handle, agent in enumerate(self.env.agents):
+            if agent.position == position:
+                return handle
+        return -1
 
     def _occupied_by_other(self, position, handle):
         other = self._agent_at(position)
