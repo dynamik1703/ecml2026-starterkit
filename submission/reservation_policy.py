@@ -45,6 +45,7 @@ class ReservationPolicy:
             agent.position for agent in env.agents if agent.position is not None
         }
         reserved_edges: set[tuple[tuple[int, int] | None, tuple[int, int]]] = set()
+        planned_targets: dict[int, tuple[int, int] | None] = {}
 
         for handle in sorted(handles, key=lambda h: self._priority_key(obs_builder, h)):
             action = self._choose_action(
@@ -52,11 +53,13 @@ class ReservationPolicy:
                 obs_by_handle.get(handle),
                 reserved_positions,
                 reserved_edges,
+                planned_targets,
                 obs_builder,
             )
             actions[handle] = RailEnvActions(action)
 
             source, target = self._movement_edge(obs_builder, handle, action)
+            planned_targets[handle] = target
             if target is not None:
                 reserved_positions.add(target)
             if source is not None and target is not None:
@@ -70,6 +73,7 @@ class ReservationPolicy:
         observation: Any,
         reserved_positions: set[tuple[int, int]],
         reserved_edges: set[tuple[tuple[int, int] | None, tuple[int, int]]],
+        planned_targets: dict[int, tuple[int, int] | None],
         obs_builder: Any,
     ) -> int:
         env = obs_builder.env
@@ -100,6 +104,7 @@ class ReservationPolicy:
                 action,
                 reserved_positions,
                 reserved_edges,
+                planned_targets,
                 obs_builder,
             )
             if score < best_score:
@@ -128,6 +133,7 @@ class ReservationPolicy:
         action: int,
         reserved_positions: set[tuple[int, int]],
         reserved_edges: set[tuple[tuple[int, int] | None, tuple[int, int]]],
+        planned_targets: dict[int, tuple[int, int] | None],
         obs_builder: Any,
     ) -> float:
         env = obs_builder.env
@@ -166,6 +172,7 @@ class ReservationPolicy:
             handle,
             target_position,
             target_direction,
+            planned_targets,
             obs_builder,
         )
         if opposing:
@@ -187,6 +194,7 @@ class ReservationPolicy:
         handle: int,
         position: tuple[int, int],
         direction: int,
+        planned_targets: dict[int, tuple[int, int] | None],
         obs_builder: Any,
         max_cells: int = 40,
     ) -> tuple[bool, bool]:
@@ -202,6 +210,22 @@ class ReservationPolicy:
             other = obs_builder._agent_at(current_position)
             if other != -1 and other != handle:
                 other_agent = env.agents[other]
+                if (
+                    other in planned_targets
+                    and planned_targets[other] is not None
+                    and planned_targets[other] != other_agent.position
+                ):
+                    current_direction = self._next_direction(
+                        current_position,
+                        current_direction,
+                        obs_builder,
+                    )
+                    if current_direction is None:
+                        return False, has_same_direction
+                    current_position = get_new_position(
+                        current_position, current_direction
+                    )
+                    continue
                 other_direction = (
                     other_agent.direction
                     if other_agent.direction is not None
@@ -227,6 +251,17 @@ class ReservationPolicy:
             current_position = get_new_position(current_position, current_direction)
 
         return False, has_same_direction
+
+    @staticmethod
+    def _next_direction(
+        position: tuple[int, int],
+        direction: int,
+        obs_builder: Any,
+    ) -> int | None:
+        possible_transitions = obs_builder.env.rail.get_transitions((position, direction))
+        if fast_count_nonzero(possible_transitions) != 1:
+            return None
+        return fast_argmax(possible_transitions)
 
     def _movement_edge(
         self,
