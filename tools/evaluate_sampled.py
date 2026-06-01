@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import json
 import os
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,55 @@ def normalized_reward(env: Any, rewards: list[float]) -> float:
     )
 
 
+def state_name(state: Any) -> str:
+    return getattr(state, "name", str(state))
+
+
+def failed_agent_details(
+    env: Any,
+    positions: dict[int, list[Any]],
+    actions_by_agent: dict[int, list[int]],
+) -> list[dict[str, Any]]:
+    details = []
+    for handle, agent in enumerate(env.agents):
+        if agent.state == 6:
+            continue
+
+        agent_positions = positions.get(handle, [])
+        last_position = next(
+            (position for position in reversed(agent_positions) if position is not None),
+            None,
+        )
+        last_change_time = 0
+        previous_position = object()
+        for step, position in enumerate(agent_positions, start=1):
+            if position != previous_position:
+                last_change_time = step
+                previous_position = position
+        action_counts = Counter(actions_by_agent.get(handle, []))
+        latest_arrival = agent.latest_arrival
+        details.append(
+            {
+                "agent_id": handle,
+                "state": state_name(agent.state),
+                "position": str(agent.position),
+                "last_position": str(last_position),
+                "direction": agent.direction,
+                "speed": float(agent.speed_counter.speed),
+                "earliest_departure": agent.earliest_departure,
+                "latest_arrival": latest_arrival,
+                "missed_by": (
+                    max(0, env._elapsed_steps - latest_arrival)
+                    if latest_arrival is not None
+                    else None
+                ),
+                "stationary_tail": max(0, env._elapsed_steps - last_change_time),
+                "action_counts": dict(sorted(action_counts.items())),
+            }
+        )
+    return details
+
+
 def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = load_symbol(args.rewards)()
@@ -78,6 +128,8 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
     observations, _ = env.reset(random_seed=seed)
 
     reward_values: list[float] = []
+    positions: dict[int, list[Any]] = defaultdict(list)
+    actions_by_agent: dict[int, list[int]] = defaultdict(list)
     done = False
     env_time = 0
     while not done and env_time < env._max_episode_steps:
@@ -89,7 +141,11 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
                 observation_list(observations, handles),
             ).items()
         }
+        for handle, action in actions.items():
+            actions_by_agent[handle].append(action)
         observations, rewards_by_agent, dones, _ = env.step(actions)
+        for handle in handles:
+            positions[handle].append(env.agents[handle].position)
         reward_values.extend(float(rewards_by_agent.get(handle, 0.0)) for handle in handles)
         done = bool(dones.get("__all__", False))
         env_time = int(env._elapsed_steps)
@@ -104,6 +160,7 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
         "max_episode_steps": env._max_episode_steps,
         "line_length": args.line_length,
         "scene": args.scene or "scene_5",
+        "failed_agents": failed_agent_details(env, positions, actions_by_agent),
     }
 
 
@@ -129,6 +186,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-csv", type=Path)
+    parser.add_argument(
+        "--agent-details",
+        action="store_true",
+        help="Print compact failed-agent diagnostics for incomplete episodes.",
+    )
     return parser.parse_args()
 
 
@@ -155,6 +217,16 @@ def main() -> int:
             f"{row['normalized_reward']:.6g},{row['num_agents']},"
             f"{row['max_episode_steps']}"
         )
+        if args.agent_details and row["failed_agents"]:
+            for agent in row["failed_agents"]:
+                print(
+                    "  "
+                    f"agent={agent['agent_id']} state={agent['state']} "
+                    f"last={agent['last_position']} dir={agent['direction']} "
+                    f"latest={agent['latest_arrival']} missed_by={agent['missed_by']} "
+                    f"stationary_tail={agent['stationary_tail']} "
+                    f"actions={agent['action_counts']}"
+                )
     print(
         "\nTotals: "
         f"reward_mean={summary['reward_mean']:.6g}, "
