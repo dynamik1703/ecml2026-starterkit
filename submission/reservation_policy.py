@@ -99,6 +99,7 @@ class ReservationPolicy:
         best_action = None
         best_score = np.inf
         action_scores = []
+        forward_has_opposing = False
         for action in candidates:
             score = self._score_movement_action(
                 handle,
@@ -109,6 +110,13 @@ class ReservationPolicy:
                 obs_builder,
             )
             action_scores.append((score, action))
+            if action == self.MOVE_FORWARD:
+                forward_has_opposing = self._action_has_opposing(
+                    handle,
+                    action,
+                    planned_targets,
+                    obs_builder,
+                )
             if score < best_score:
                 best_score = score
                 best_action = action
@@ -134,7 +142,7 @@ class ReservationPolicy:
             for score, action in action_scores
             if action != self.MOVE_FORWARD and np.isfinite(score)
         ]
-        if forward_score >= self.OPPOSING_PENALTY and side_candidates:
+        if forward_has_opposing and side_candidates:
             side_score, side_action = min(side_candidates)
             if side_score < self.OPPOSING_PENALTY * 2:
                 return side_action
@@ -271,6 +279,28 @@ class ReservationPolicy:
             current_position = get_new_position(current_position, current_direction)
 
         return False, has_same_direction
+
+    def _action_has_opposing(
+        self,
+        handle: int,
+        action: int,
+        planned_targets: dict[int, tuple[int, int] | None],
+        obs_builder: Any,
+    ) -> bool:
+        agent = obs_builder.env.agents[handle]
+        if agent.position is None:
+            return False
+        target_position, target_direction = obs_builder._action_target(handle, action)
+        if target_position is None or target_direction is None:
+            return False
+        opposing, _ = self._scan_ahead(
+            handle,
+            target_position,
+            target_direction,
+            planned_targets,
+            obs_builder,
+        )
+        return opposing
 
     @staticmethod
     def _next_direction(
