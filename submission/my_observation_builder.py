@@ -399,11 +399,16 @@ class FastTreeObsBuilder(ObservationBuilder):
         distance_map = self._get_distance_map(handle)
         current_dist = distance_map[agent.position[0], agent.position[1], direction]
         possible_transitions = self.env.rail.get_transitions((agent.position, direction))
+        agents_on_switch, agents_near_to_switch, _ = self.check_agent_decision(
+            agent.position, direction
+        )
+        entering_corridor = agents_on_switch or agents_near_to_switch
 
         candidates = []
         progress_actions = []
         non_conflict_actions = []
         progress_non_conflict_actions = []
+        opposite_conflict_actions = []
         conflict_seen = False
 
         for action in (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT):
@@ -429,12 +434,29 @@ class FastTreeObsBuilder(ObservationBuilder):
             is_non_conflict = not has_opposite and not has_same
             conflict_seen = conflict_seen or has_opposite or has_same
 
+            if has_opposite:
+                opposite_conflict_actions.append(action)
             if is_progress:
                 progress_actions.append(action)
             if is_non_conflict:
                 non_conflict_actions.append(action)
             if is_progress and is_non_conflict:
                 progress_non_conflict_actions.append(action)
+
+        if entering_corridor and opposite_conflict_actions:
+            blocked = set(opposite_conflict_actions)
+            candidates = [action for action in candidates if action not in blocked]
+            progress_actions = [
+                action for action in progress_actions if action not in blocked
+            ]
+            progress_non_conflict_actions = [
+                action for action in progress_non_conflict_actions
+                if action not in blocked
+            ]
+            if not candidates:
+                mask[:] = 0.0
+                mask[self.STOP_MOVING] = 1.0
+                return mask
 
         preferred_actions = (
             progress_non_conflict_actions
@@ -448,9 +470,6 @@ class FastTreeObsBuilder(ObservationBuilder):
             for action in preferred_actions:
                 mask[action] = 1.0
 
-            agents_on_switch, agents_near_to_switch, _ = self.check_agent_decision(
-                agent.position, direction
-            )
             if conflict_seen or agents_on_switch or agents_near_to_switch:
                 mask[self.STOP_MOVING] = 1.0
             return mask
