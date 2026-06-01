@@ -5,7 +5,7 @@ FROM ghcr.io/flatland-association/flatland-baselines:${TAG}
 
 COPY submission/ submission/
 
-ENV POLICY=submission.my_policy.MyPolicy
+ENV POLICY=submission.hybrid_policy.MyPolicy
 ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
 
 # install requirements in env activated in entrypoint

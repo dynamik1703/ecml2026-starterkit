@@ -13,7 +13,7 @@ from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.rail_env_action import RailEnvActions
 
 
-DEFAULT_POLICY = "submission.my_policy.MyPolicy"
+DEFAULT_POLICY = "submission.hybrid_policy.MyPolicy"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
 DEFAULT_REWARDS = "flatland.envs.rewards.ECML2026Rewards"
 
