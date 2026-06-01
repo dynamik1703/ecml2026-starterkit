@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 from typing import List
 from numpy.random.mtrand import RandomState
-from importlib.resources import files
+from pathlib import Path
 
 from flatland.envs.line_generators import sparse_line_generator
 from flatland.envs.rail_env import RailEnv
@@ -154,7 +154,7 @@ def sampling_env_generator(env: RailEnv, line_length: int = 2, scene: str = None
 
     _previous_rail_generator = env.rail_generator
  
-    with files('ecml2026-starterkit.reinforcement-learning').joinpath('stations.pkl').open('rb') as f:
+    with Path(__file__).with_name("stations.pkl").open('rb') as f:
         data = pickle.load(f)
 
     assert scene is None or scene in {"scene_1", "scene_2", "scene_3", "scene_4", "scene_5"}, "Scene should be 'scene_1', 'scene_2', 'scene_3', 'scene_4', 'scene_5' or None (equivalent to 'scene_5', i.e. all stations)"
