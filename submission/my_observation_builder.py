@@ -6,6 +6,8 @@ from flatland.core.grid.grid4_utils import get_new_position
 from flatland.envs.step_utils.states import TrainState
 from flatland.envs.fast_methods import fast_count_nonzero, fast_argmax
 
+from submission import runtime_context
+
 """
 Based on the FastTreeObs implementation by Adrian Egli (adrian.egli@gmail.com)
 Extended by the Flatland Association team for environments with intermediate waypoints and additional observation features.
@@ -622,6 +624,7 @@ class FastTreeObsBuilder(ObservationBuilder):
 
     def _build_action_mask(self, handle):
         self._ensure_step_coordination()
+        runtime_context.update(self.env, self, self._coordination_masks)
         return self._coordination_masks.get(handle, self._build_local_action_mask(handle))
 
     # ------------------------------------------------------------------

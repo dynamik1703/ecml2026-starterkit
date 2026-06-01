@@ -51,6 +51,12 @@ def action_name(action: int) -> str:
         return str(action)
 
 
+def action_id(action: Any) -> int:
+    if hasattr(action, "value"):
+        return int(action.value)
+    return int(action)
+
+
 def state_name(state: Any) -> str:
     return getattr(state, "name", str(state))
 
@@ -131,10 +137,11 @@ def main() -> int:
 
     for _ in range(max_steps):
         observations = env._get_observations()
-        actions = {}
-        for handle in handles:
-            observation = observation_for(observations, handle)
-            actions[handle] = int(policy.act(observation)) if observation is not None else 0
+        observation_list = [observation_for(observations, handle) for handle in handles]
+        actions = {
+            handle: action_id(action)
+            for handle, action in policy.act_many(handles, observation_list).items()
+        }
 
         elapsed = int(env._elapsed_steps)
         if elapsed >= args.from_step:
