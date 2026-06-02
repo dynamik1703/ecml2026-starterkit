@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.rewards import ECML2026Rewards
+from torch.distributions import Categorical
 
 from submission.my_policy import ActorCritic
 
@@ -176,6 +177,15 @@ def bootstrap_values(policy: ActorCritic, observations: dict[int, Any], handles:
     return values
 
 
+def action_distribution(
+    policy: ActorCritic,
+    observations: torch.Tensor,
+    temperature: float,
+) -> tuple[Categorical, torch.Tensor]:
+    logits, values = policy.masked_forward(observations)
+    return Categorical(logits=logits / max(1e-6, temperature)), values
+
+
 def collect_rollout(
     args: argparse.Namespace,
     policy: ActorCritic,
@@ -208,7 +218,13 @@ def collect_rollout(
         current_slacks = slack_values(obs_builder, handles)
         obs_t = torch.as_tensor(obs_np, dtype=torch.float32)
         with torch.no_grad():
-            actions, log_probs, _, values = policy.sample_actions(obs_t)
+            distribution, values = action_distribution(
+                policy,
+                obs_t,
+                args.rollout_temperature,
+            )
+            actions = distribution.sample()
+            log_probs = distribution.log_prob(actions)
 
         actions_np = actions.cpu().numpy()
         action_dict = {
@@ -328,10 +344,13 @@ def ppo_update(
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
-            log_probs, entropy, values = policy.evaluate_actions(
+            distribution, values = action_distribution(
+                policy,
                 observations[batch_idx],
-                actions[batch_idx],
+                args.rollout_temperature,
             )
+            log_probs = distribution.log_prob(actions[batch_idx])
+            entropy = distribution.entropy()
             ratio = torch.exp(log_probs - old_log_probs[batch_idx])
             unclipped = ratio * advantages[batch_idx]
             clipped = torch.clamp(
@@ -443,6 +462,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
     parser.add_argument("--ppo-epochs", type=int, default=4)
     parser.add_argument("--minibatch-size", type=int, default=256)
+    parser.add_argument(
+        "--rollout-temperature",
+        type=float,
+        default=1.0,
+        help="Temperature applied to masked policy logits during PPO collection and updates.",
+    )
     parser.add_argument("--normalize-advantages", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -451,6 +476,8 @@ def main() -> int:
     args = parse_args()
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    if args.rollout_temperature <= 0:
+        raise ValueError("--rollout-temperature must be positive")
 
     checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
     policy = ActorCritic(
