@@ -65,12 +65,14 @@ def shaped_rewards(
     next_observations: np.ndarray,
     rewards: list[float],
 ) -> list[float]:
-    if args.progress_reward_coef == 0.0:
-        return rewards
-
     shaped = np.asarray(rewards, dtype=np.float32).copy()
-    progress = observations[:, DISTANCE_FEATURE_INDEX] - next_observations[:, DISTANCE_FEATURE_INDEX]
-    shaped += args.progress_reward_coef * progress
+    if args.progress_reward_coef != 0.0:
+        progress = observations[:, DISTANCE_FEATURE_INDEX] - next_observations[:, DISTANCE_FEATURE_INDEX]
+        shaped += args.progress_reward_coef * progress
+    if args.reward_scale != 1.0:
+        shaped *= args.reward_scale
+    if args.reward_clip > 0.0:
+        shaped = np.clip(shaped, -args.reward_clip, args.reward_clip)
     return shaped.astype(np.float32).tolist()
 
 
@@ -267,6 +269,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Optional dense reward for reducing observation[30], the normalized waypoint distance.",
+    )
+    parser.add_argument(
+        "--reward-scale",
+        type=float,
+        default=1.0,
+        help="Multiply environment and progress rewards before PPO return estimation.",
+    )
+    parser.add_argument(
+        "--reward-clip",
+        type=float,
+        default=0.0,
+        help="Clip scaled rewards to [-reward_clip, reward_clip]. Disabled when 0.",
     )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
