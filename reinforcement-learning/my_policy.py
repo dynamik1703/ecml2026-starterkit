@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import Any, Tuple, List, Dict
+from torch.distributions import Categorical
 
 from flatland.envs.rail_env_action import RailEnvActions
 
@@ -45,12 +46,13 @@ class ActorCritic(nn.Module):
         features = self.trunk(obs)
         return self.policy_head(features), self.value_head(features).squeeze(-1)
 
-    def masked_logits(
+    def _features_and_valid_actions(
         self,
         observations: Any,
         action_masks: Any | None = None,
-    ) -> torch.Tensor:
-        obs_t = torch.as_tensor(observations, dtype=torch.float32)
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        device = self.policy_head.weight.device
+        obs_t = torch.as_tensor(observations, dtype=torch.float32, device=device)
         if obs_t.ndim == 1:
             obs_t = obs_t.unsqueeze(0)
 
@@ -75,8 +77,55 @@ class ActorCritic(nn.Module):
             valid_actions = valid_actions.clone()
             valid_actions[no_valid_actions, 0] = True
 
-        logits, _ = self(features)
-        return logits.masked_fill(~valid_actions, float("-inf"))
+        return features, valid_actions
+
+    def masked_forward(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        features, valid_actions = self._features_and_valid_actions(
+            observations,
+            action_masks,
+        )
+        logits, values = self(features)
+        return logits.masked_fill(~valid_actions, float("-inf")), values
+
+    def masked_logits(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> torch.Tensor:
+        logits, _ = self.masked_forward(observations, action_masks)
+        return logits
+
+    def action_distribution(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> Categorical:
+        return Categorical(logits=self.masked_logits(observations, action_masks))
+
+    def sample_actions(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        logits, values = self.masked_forward(observations, action_masks)
+        distribution = Categorical(logits=logits)
+        actions = distribution.sample()
+        return actions, distribution.log_prob(actions), distribution.entropy(), values
+
+    def evaluate_actions(
+        self,
+        observations: Any,
+        actions: Any,
+        action_masks: Any | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        logits, values = self.masked_forward(observations, action_masks)
+        distribution = Categorical(logits=logits)
+        action_t = torch.as_tensor(actions, dtype=torch.long, device=logits.device)
+        return distribution.log_prob(action_t), distribution.entropy(), values
 
     def act_many(
         self, handles: List[int], observations: List[Any], **kwargs
