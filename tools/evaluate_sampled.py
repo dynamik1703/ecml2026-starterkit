@@ -32,6 +32,19 @@ def load_symbol(path: str) -> Any:
     return getattr(module, symbol_name)
 
 
+def instantiate_policy(args: argparse.Namespace) -> Any:
+    policy_cls = load_symbol(args.policy)
+    if args.policy_checkpoint is None:
+        return policy_cls()
+    try:
+        return policy_cls(checkpoint_path=str(args.policy_checkpoint))
+    except TypeError as exc:
+        raise TypeError(
+            f"{args.policy} does not accept --policy-checkpoint. "
+            "Use a policy class with a checkpoint_path constructor argument."
+        ) from exc
+
+
 def load_sampling_env_generator() -> Any:
     path = repo_root() / "reinforcement-learning" / "sampling" / "sampling_env_generator.py"
     spec = importlib.util.spec_from_file_location("ecml_sampling_env_generator", path)
@@ -116,7 +129,7 @@ def failed_agent_details(
 def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = load_symbol(args.rewards)()
-    policy = load_symbol(args.policy)()
+    policy = instantiate_policy(args)
     env, _ = RailEnvPersister.load_new(
         args.base_state_pkl,
         obs_builder=obs_builder,
@@ -174,6 +187,11 @@ def parse_args() -> argparse.Namespace:
         default=repo_root() / DEFAULT_BASE_STATE,
     )
     parser.add_argument("--policy", default=DEFAULT_POLICY)
+    parser.add_argument(
+        "--policy-checkpoint",
+        type=Path,
+        help="Instantiate policies that accept checkpoint_path with this checkpoint.",
+    )
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
     parser.add_argument("--rewards", default=DEFAULT_REWARDS)
     parser.add_argument("--episodes", type=int, default=10)
@@ -203,6 +221,9 @@ def main() -> int:
     total_success = sum(row["success_rate"] for row in rows)
     summary = {
         "policy": args.policy,
+        "policy_checkpoint": (
+            str(args.policy_checkpoint) if args.policy_checkpoint is not None else None
+        ),
         "base_state_pkl": str(args.base_state_pkl),
         "episodes": args.episodes,
         "reward_mean": total_reward / len(rows) if rows else 0.0,
