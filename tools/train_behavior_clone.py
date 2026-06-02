@@ -157,6 +157,18 @@ def train_behavior_clone(
     policy.train()
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.learning_rate)
     num_samples = observations.shape[0]
+    class_weights = None
+    if args.class_balanced_loss:
+        counts = torch.bincount(actions, minlength=args.n_actions).float()
+        safe_counts = torch.clamp(counts, min=1.0)
+        class_weights = counts.sum() / (args.n_actions * safe_counts)
+        class_weights = torch.clamp(class_weights, max=args.max_class_weight)
+        class_weights = class_weights / class_weights.mean()
+        print(
+            "class_weights="
+            f"{[round(float(weight), 6) for weight in class_weights.tolist()]}",
+            flush=True,
+        )
     final_loss = 0.0
     final_accuracy = 0.0
 
@@ -170,7 +182,7 @@ def train_behavior_clone(
             obs_batch = observations[batch_idx]
             action_batch = actions[batch_idx]
             logits = policy.masked_logits(obs_batch)
-            loss = F.cross_entropy(logits, action_batch)
+            loss = F.cross_entropy(logits, action_batch, weight=class_weights)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -226,6 +238,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
+    parser.add_argument(
+        "--class-balanced-loss",
+        action="store_true",
+        help="Use inverse-frequency action weights for behavior cloning.",
+    )
+    parser.add_argument("--max-class-weight", type=float, default=10.0)
     return parser.parse_args()
 
 
