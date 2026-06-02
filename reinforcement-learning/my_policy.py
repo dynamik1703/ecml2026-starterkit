@@ -45,21 +45,57 @@ class ActorCritic(nn.Module):
         features = self.trunk(obs)
         return self.policy_head(features), self.value_head(features).squeeze(-1)
 
+    def masked_logits(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> torch.Tensor:
+        obs_t = torch.as_tensor(observations, dtype=torch.float32)
+        if obs_t.ndim == 1:
+            obs_t = obs_t.unsqueeze(0)
+
+        features = obs_t[:, : self.obs_size]
+        if action_masks is None:
+            if obs_t.shape[1] >= self.obs_size + self.n_actions:
+                mask = obs_t[:, self.obs_size : self.obs_size + self.n_actions]
+            else:
+                mask = torch.ones(
+                    (obs_t.shape[0], self.n_actions),
+                    dtype=torch.float32,
+                    device=obs_t.device,
+                )
+        else:
+            mask = torch.as_tensor(action_masks, dtype=torch.float32, device=obs_t.device)
+            if mask.ndim == 1:
+                mask = mask.unsqueeze(0)
+
+        valid_actions = mask >= 0.5
+        no_valid_actions = ~valid_actions.any(dim=1)
+        if no_valid_actions.any():
+            valid_actions = valid_actions.clone()
+            valid_actions[no_valid_actions, 0] = True
+
+        logits, _ = self(features)
+        return logits.masked_fill(~valid_actions, float("-inf"))
+
     def act_many(
         self, handles: List[int], observations: List[Any], **kwargs
     ) -> Dict[int, RailEnvActions]:
+        if not handles:
+            return {}
+
+        with torch.no_grad():
+            logits = self.masked_logits(np.asarray(observations, dtype=np.float32))
+            actions = logits.argmax(dim=-1).cpu().numpy()
         return {
-            handle: self.act(obs, **kwargs)
-            for handle, obs in zip(handles, observations)
+            handle: int(action)
+            for handle, action in zip(handles, actions)
         }
 
     def act(self, observation: Any, **kwargs) -> RailEnvActions:
-        obs_t = torch.from_numpy(observation)
-        features = obs_t[: self.obs_size]
-        mask = obs_t[self.obs_size : self.obs_size + self.n_actions]
-        logits, _ = self(features)
-        logits = logits.masked_fill(mask < 0.5, float("-inf"))
-        return logits.argmax(dim=-1).item()
+        with torch.no_grad():
+            logits = self.masked_logits(observation)
+        return int(logits.argmax(dim=-1).item())
 
 
 MyPolicy = ActorCritic
