@@ -899,6 +899,50 @@ class FastTreeObsBuilder(ObservationBuilder):
             return None, None
         return get_new_position(agent.position, new_direction), new_direction
 
+    def _corridor_edges_for_action(self, handle, action, max_cells=60):
+        if action not in (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT):
+            return []
+
+        agent = self.env.agents[handle]
+        source_position = agent.position
+        target_position, target_direction = self._action_target(handle, action)
+        if (
+            source_position is None
+            or target_position is None
+            or target_direction is None
+        ):
+            return []
+
+        edges = []
+        previous_position = source_position
+        current_position = target_position
+        current_direction = target_direction
+
+        for _ in range(max_cells):
+            if not self._is_in_bounds(current_position):
+                break
+            edges.append((previous_position, current_position))
+
+            agents_on_switch, agents_near_to_switch, _ = self.check_agent_decision(
+                current_position, current_direction
+            )
+            if agents_on_switch or agents_near_to_switch:
+                break
+
+            possible_transitions = self.env.rail.get_transitions(
+                (current_position, current_direction)
+            )
+            if fast_count_nonzero(possible_transitions) != 1:
+                break
+
+            next_direction = fast_argmax(possible_transitions)
+            next_position = get_new_position(current_position, next_direction)
+            previous_position = current_position
+            current_position = next_position
+            current_direction = next_direction
+
+        return edges
+
     def _reserve_current_positions(self):
         reserved_positions = set()
         for agent in self.env.agents:
@@ -922,6 +966,7 @@ class FastTreeObsBuilder(ObservationBuilder):
         coordinated_masks = {}
         reserved_positions = self._reserve_current_positions()
         reserved_edges = set()
+        reserved_corridor_edges = set()
 
         for handle in sorted(handles, key=self._priority_key):
             agent = self.env.agents[handle]
@@ -940,6 +985,12 @@ class FastTreeObsBuilder(ObservationBuilder):
                 edge = (source_position, target_position)
                 reverse_edge = (target_position, source_position)
                 if reverse_edge in reserved_edges:
+                    continue
+                corridor_edges = self._corridor_edges_for_action(handle, action)
+                if any(
+                    (target, source) in reserved_corridor_edges
+                    for source, target in corridor_edges
+                ):
                     continue
                 mask[action] = 1.0
 
@@ -962,6 +1013,9 @@ class FastTreeObsBuilder(ObservationBuilder):
                     continue
                 reserved_positions.add(target_position)
                 reserved_edges.add((agent.position, target_position))
+                reserved_corridor_edges.update(
+                    self._corridor_edges_for_action(handle, action)
+                )
 
             if (
                 mask[self.DO_NOTHING] >= 0.5
