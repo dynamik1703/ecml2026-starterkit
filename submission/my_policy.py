@@ -46,7 +46,7 @@ class ActorCritic(nn.Module):
         self.value_head = nn.Linear(hidden_size, 1)
 
         if ckpt is not None:
-            self.load_state_dict(ckpt["model"])
+            self._load_compatible_state_dict(ckpt["model"])
             self.eval()
         else:
             """Orthogonal init for an ActorCritic-style net with trunk + policy/value heads."""
@@ -58,6 +58,24 @@ class ActorCritic(nn.Module):
             nn.init.zeros_(self.policy_head.bias)
             nn.init.orthogonal_(self.value_head.weight, gain=1.0)
             nn.init.zeros_(self.value_head.bias)
+
+    def _load_compatible_state_dict(self, checkpoint_state: dict[str, torch.Tensor]) -> None:
+        current_state = self.state_dict()
+        merged_state = dict(current_state)
+        for name, checkpoint_tensor in checkpoint_state.items():
+            if name not in current_state:
+                continue
+            current_tensor = current_state[name]
+            if current_tensor.shape == checkpoint_tensor.shape:
+                merged_state[name] = checkpoint_tensor
+                continue
+            if name == "trunk.0.weight" and current_tensor.ndim == checkpoint_tensor.ndim == 2:
+                expanded = current_tensor.clone()
+                rows = min(expanded.shape[0], checkpoint_tensor.shape[0])
+                cols = min(expanded.shape[1], checkpoint_tensor.shape[1])
+                expanded[:rows, :cols] = checkpoint_tensor[:rows, :cols]
+                merged_state[name] = expanded
+        self.load_state_dict(merged_state)
 
     def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         features = self.trunk(obs)
