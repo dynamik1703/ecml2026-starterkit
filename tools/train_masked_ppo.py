@@ -19,6 +19,14 @@ from submission.my_policy import ActorCritic
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
 DISTANCE_FEATURE_INDEX = 30
+MOVE_FORWARD_ACTION = 2
+ROUTE_CONFLICT_DISTANCE_INDEX = 36
+ROUTE_CONFLICT_OPPOSING_INDEX = 37
+ROUTE_CONFLICT_OTHER_TIGHTER_INDEX = 40
+FUTURE_CONFLICT_ETA_RISK_INDEX = 46
+FUTURE_CONFLICT_HEAD_ON_INDEX = 48
+FUTURE_CONFLICT_CROSSING_INDEX = 49
+FUTURE_CONFLICT_OTHER_TIGHTER_INDEX = 50
 
 
 def repo_root() -> Path:
@@ -41,7 +49,7 @@ def load_symbol(path: str) -> Any:
     return getattr(module, symbol_name)
 
 
-def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
+def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any], Any]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = ECML2026Rewards()
     env, _ = RailEnvPersister.load_new(
@@ -52,11 +60,74 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
     env.number_of_agents = args.num_agents
     env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
     observations, _ = env.reset(random_seed=seed)
-    return env, observations
+    return env, observations, obs_builder
 
 
 def observation_batch(observations: dict[int, Any], handles: list[int]) -> np.ndarray:
     return np.asarray([observations[handle] for handle in handles], dtype=np.float32)
+
+
+def slack_values(obs_builder: Any, handles: list[int]) -> np.ndarray:
+    slacks = []
+    for handle in handles:
+        try:
+            distance = obs_builder._current_distance_to_waypoint(handle)
+            slack = obs_builder._deadline_slack(handle, distance)
+        except Exception:
+            slack = np.inf
+        slacks.append(float(slack) if np.isfinite(slack) else np.inf)
+    return np.asarray(slacks, dtype=np.float32)
+
+
+def finite_delta(
+    before: np.ndarray,
+    after: np.ndarray,
+    normalizer: float,
+) -> np.ndarray:
+    valid = np.isfinite(before) & np.isfinite(after)
+    delta = np.zeros_like(before, dtype=np.float32)
+    delta[valid] = (after[valid] - before[valid]) / max(1.0, normalizer)
+    return np.clip(delta, -1.0, 1.0)
+
+
+def negative_slack(slacks: np.ndarray) -> np.ndarray:
+    finite = np.where(np.isfinite(slacks), slacks, 0.0)
+    return np.maximum(-finite, 0.0)
+
+
+def conflict_priority_penalty(
+    args: argparse.Namespace,
+    observations: np.ndarray,
+    actions: np.ndarray,
+) -> np.ndarray:
+    if (
+        args.conflict_priority_penalty_coef == 0.0
+        or args.obs_size <= FUTURE_CONFLICT_OTHER_TIGHTER_INDEX
+    ):
+        return np.zeros(observations.shape[0], dtype=np.float32)
+
+    threshold = max(1e-6, args.conflict_priority_distance_threshold)
+    route_distance = observations[:, ROUTE_CONFLICT_DISTANCE_INDEX]
+    route_closeness = np.clip((threshold - route_distance) / threshold, 0.0, 1.0)
+    route_risk = (
+        route_closeness
+        * observations[:, ROUTE_CONFLICT_OPPOSING_INDEX]
+        * observations[:, ROUTE_CONFLICT_OTHER_TIGHTER_INDEX]
+    )
+
+    future_conflict_type = np.maximum(
+        observations[:, FUTURE_CONFLICT_HEAD_ON_INDEX],
+        observations[:, FUTURE_CONFLICT_CROSSING_INDEX],
+    )
+    future_risk = (
+        observations[:, FUTURE_CONFLICT_ETA_RISK_INDEX]
+        * future_conflict_type
+        * observations[:, FUTURE_CONFLICT_OTHER_TIGHTER_INDEX]
+    )
+
+    risky_forward = (actions == MOVE_FORWARD_ACTION).astype(np.float32)
+    risk = np.maximum(route_risk, future_risk)
+    return -args.conflict_priority_penalty_coef * risky_forward * risk
 
 
 def shaped_rewards(
@@ -64,11 +135,33 @@ def shaped_rewards(
     observations: np.ndarray,
     next_observations: np.ndarray,
     rewards: list[float],
+    actions: np.ndarray,
+    current_slacks: np.ndarray,
+    next_slacks: np.ndarray,
+    max_episode_steps: int,
 ) -> list[float]:
     shaped = np.asarray(rewards, dtype=np.float32).copy()
     if args.progress_reward_coef != 0.0:
         progress = observations[:, DISTANCE_FEATURE_INDEX] - next_observations[:, DISTANCE_FEATURE_INDEX]
         shaped += args.progress_reward_coef * progress
+    if args.slack_progress_reward_coef != 0.0:
+        slack_progress = finite_delta(
+            current_slacks,
+            next_slacks,
+            max_episode_steps,
+        )
+        shaped += args.slack_progress_reward_coef * slack_progress
+    if args.global_slack_reward_coef != 0.0:
+        before_lateness = float(np.sum(negative_slack(current_slacks)))
+        after_lateness = float(np.sum(negative_slack(next_slacks)))
+        team_delta = np.clip(
+            (before_lateness - after_lateness)
+            / max(1.0, max_episode_steps * len(current_slacks)),
+            -1.0,
+            1.0,
+        )
+        shaped += args.global_slack_reward_coef * team_delta
+    shaped += conflict_priority_penalty(args, observations, actions)
     if args.reward_scale != 1.0:
         shaped *= args.reward_scale
     if args.reward_clip > 0.0:
@@ -88,7 +181,7 @@ def collect_rollout(
     policy: ActorCritic,
     start_seed: int,
 ) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
-    env, observations = make_env(args, start_seed)
+    env, observations, obs_builder = make_env(args, start_seed)
     handles = list(env.get_agent_handles())
     num_agents = len(handles)
 
@@ -105,18 +198,30 @@ def collect_rollout(
 
     for step in range(args.steps_per_update):
         obs_np = observation_batch(observations, handles)
+        current_slacks = slack_values(obs_builder, handles)
         obs_t = torch.as_tensor(obs_np, dtype=torch.float32)
         with torch.no_grad():
             actions, log_probs, _, values = policy.sample_actions(obs_t)
 
+        actions_np = actions.cpu().numpy()
         action_dict = {
             handle: int(action)
-            for handle, action in zip(handles, actions.cpu().numpy())
+            for handle, action in zip(handles, actions_np)
         }
         next_observations, rewards_by_agent, dones, _ = env.step(action_dict)
         next_obs_np = observation_batch(next_observations, handles)
+        next_slacks = slack_values(obs_builder, handles)
         rewards = [float(rewards_by_agent.get(handle, 0.0)) for handle in handles]
-        rewards = shaped_rewards(args, obs_np, next_obs_np, rewards)
+        rewards = shaped_rewards(
+            args,
+            obs_np,
+            next_obs_np,
+            rewards,
+            actions_np,
+            current_slacks,
+            next_slacks,
+            env._max_episode_steps,
+        )
         done_flags = [
             float(bool(dones.get(handle, False) or dones.get("__all__", False)))
             for handle in handles
@@ -137,7 +242,10 @@ def collect_rollout(
             )
             episode_rewards.append(sum(episode_reward_values) / max(1, num_agents))
             episode_reward_values = []
-            env, observations = make_env(args, start_seed + completed_episodes)
+            env, observations, obs_builder = make_env(
+                args,
+                start_seed + completed_episodes,
+            )
             handles = list(env.get_agent_handles())
         else:
             observations = next_observations
@@ -269,6 +377,33 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Optional dense reward for reducing observation[30], the normalized waypoint distance.",
+    )
+    parser.add_argument(
+        "--slack-progress-reward-coef",
+        type=float,
+        default=0.0,
+        help="Reward preserving/improving true deadline slack per agent.",
+    )
+    parser.add_argument(
+        "--global-slack-reward-coef",
+        type=float,
+        default=0.0,
+        help="Team reward for reducing total negative deadline slack.",
+    )
+    parser.add_argument(
+        "--conflict-priority-penalty-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Penalty for moving forward into route conflicts where another train "
+            "has tighter slack. Requires the 52-feature route observation."
+        ),
+    )
+    parser.add_argument(
+        "--conflict-priority-distance-threshold",
+        type=float,
+        default=0.35,
+        help="Normalized route distance threshold for the conflict-priority penalty.",
     )
     parser.add_argument(
         "--reward-scale",
