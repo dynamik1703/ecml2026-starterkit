@@ -376,6 +376,7 @@ def ppo_update(
     value_losses = []
     entropies = []
     teacher_losses = []
+    teacher_valid_fractions = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -399,10 +400,20 @@ def ppo_update(
             loss = policy_loss + args.vf_coef * value_loss - args.ent_coef * entropy_loss
             if teacher_actions is not None and args.teacher_ce_coef != 0.0:
                 teacher_logits, _ = policy.masked_forward(observations[batch_idx])
-                teacher_loss = F.cross_entropy(
-                    teacher_logits,
-                    teacher_actions[batch_idx],
-                )
+                teacher_action_batch = teacher_actions[batch_idx]
+                teacher_action_logits = teacher_logits.gather(
+                    1,
+                    teacher_action_batch.unsqueeze(1),
+                ).squeeze(1)
+                valid_teacher = torch.isfinite(teacher_action_logits)
+                teacher_valid_fractions.append(float(valid_teacher.float().mean().item()))
+                if not valid_teacher.any():
+                    teacher_loss = teacher_logits.new_tensor(0.0)
+                else:
+                    teacher_loss = F.cross_entropy(
+                        teacher_logits[valid_teacher],
+                        teacher_action_batch[valid_teacher],
+                    )
                 loss = loss + args.teacher_ce_coef * teacher_loss
                 teacher_losses.append(float(teacher_loss.item()))
 
@@ -421,6 +432,11 @@ def ppo_update(
         "entropy": float(np.mean(entropies)),
         "teacher_loss": (
             float(np.mean(teacher_losses)) if teacher_losses else float("nan")
+        ),
+        "teacher_valid_fraction": (
+            float(np.mean(teacher_valid_fractions))
+            if teacher_valid_fractions
+            else float("nan")
         ),
     }
 
@@ -548,6 +564,7 @@ def main() -> int:
         loss_stats = ppo_update(args, policy, optimizer, rollout)
         teacher_loss_text = (
             f" teacher_loss={loss_stats['teacher_loss']:.6g}"
+            f" teacher_valid={loss_stats['teacher_valid_fraction']:.3g}"
             if not np.isnan(loss_stats["teacher_loss"])
             else ""
         )
