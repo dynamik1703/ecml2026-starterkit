@@ -196,7 +196,14 @@ def collect_rollout(
     episode_rewards: list[float] = []
     episode_reward_values: list[float] = []
 
-    for step in range(args.steps_per_update):
+    step = 0
+    while True:
+        if args.episodes_per_update > 0:
+            if completed_episodes >= args.episodes_per_update and step > 0:
+                break
+        elif step >= args.steps_per_update:
+            break
+
         obs_np = observation_batch(observations, handles)
         current_slacks = slack_values(obs_builder, handles)
         obs_t = torch.as_tensor(obs_np, dtype=torch.float32)
@@ -252,6 +259,10 @@ def collect_rollout(
 
         if step == args.steps_per_update - 1:
             next_values = bootstrap_values(policy, observations, handles).cpu()
+        step += 1
+
+    if args.episodes_per_update > 0:
+        next_values = bootstrap_values(policy, observations, handles).cpu()
 
     rewards_t = torch.as_tensor(np.asarray(reward_steps, dtype=np.float32))
     dones_t = torch.as_tensor(np.asarray(done_steps, dtype=np.float32))
@@ -262,7 +273,7 @@ def collect_rollout(
 
     advantages = torch.zeros_like(rewards_t)
     last_advantage = torch.zeros(num_agents)
-    for index in reversed(range(args.steps_per_update)):
+    for index in reversed(range(len(reward_steps))):
         not_done = 1.0 - dones_t[index]
         delta = rewards_t[index] + args.gamma * next_values_t[index] * not_done - values_t[index]
         last_advantage = delta + args.gamma * args.gae_lambda * not_done * last_advantage
@@ -292,6 +303,7 @@ def collect_rollout(
         "episode_reward_mean": (
             float(np.mean(episode_rewards)) if episode_rewards else float("nan")
         ),
+        "collected_steps": float(len(reward_steps)),
     }
     return rollout, stats
 
@@ -360,6 +372,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--updates", type=int, default=10)
     parser.add_argument("--steps-per-update", type=int, default=128)
+    parser.add_argument(
+        "--episodes-per-update",
+        type=int,
+        default=0,
+        help="Collect complete episodes per PPO update. Disabled when 0.",
+    )
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
@@ -453,6 +471,7 @@ def main() -> int:
             f"reward_mean={rollout_stats['reward_mean']:.6g} "
             f"episode_reward_mean={rollout_stats['episode_reward_mean']:.6g} "
             f"success_rate={rollout_stats['success_rate']:.6g} "
+            f"collected_steps={rollout_stats['collected_steps']:.0f} "
             f"policy_loss={loss_stats['policy_loss']:.6g} "
             f"value_loss={loss_stats['value_loss']:.6g} "
             f"entropy={loss_stats['entropy']:.6g}",
