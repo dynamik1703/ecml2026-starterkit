@@ -11,13 +11,31 @@ from flatland.envs.rail_env_action import RailEnvActions
 class ActorCritic(nn.Module):
     def __init__(
         self,
-        obs_size: int = 36,
-        n_actions: int = 5,
-        hidden_size: int = 128,
-        num_hidden_layers: int = 3,
+        obs_size: int | None = None,
+        n_actions: int | None = None,
+        hidden_size: int | None = None,
+        num_hidden_layers: int | None = None,
         checkpoint_path: str | None = "./submission/checkpoint.pt",
     ):
         super().__init__()
+        ckpt = None
+        ckpt_config = {}
+        if checkpoint_path is not None and os.path.exists(checkpoint_path):
+            ckpt = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
+            ckpt_config = ckpt.get("config", {}) if isinstance(ckpt, dict) else {}
+
+        obs_size = int(obs_size if obs_size is not None else ckpt_config.get("obs_size", 36))
+        n_actions = int(n_actions if n_actions is not None else ckpt_config.get("n_actions", 5))
+        hidden_size = int(
+            hidden_size
+            if hidden_size is not None
+            else ckpt_config.get("hidden_size", 128)
+        )
+        num_hidden_layers = int(
+            num_hidden_layers
+            if num_hidden_layers is not None
+            else ckpt_config.get("num_hidden_layers", 3)
+        )
         self.obs_size = obs_size
         self.n_actions = n_actions
         layers: list[nn.Module] = [nn.Linear(obs_size, hidden_size), nn.Tanh()]
@@ -27,8 +45,7 @@ class ActorCritic(nn.Module):
         self.policy_head = nn.Linear(hidden_size, n_actions)
         self.value_head = nn.Linear(hidden_size, 1)
 
-        if checkpoint_path is not None and os.path.exists(checkpoint_path):
-            ckpt = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
+        if ckpt is not None:
             self.load_state_dict(ckpt["model"])
             self.eval()
         else:
@@ -59,7 +76,7 @@ class ActorCritic(nn.Module):
         features = obs_t[:, : self.obs_size]
         if action_masks is None:
             if obs_t.shape[1] >= self.obs_size + self.n_actions:
-                mask = obs_t[:, self.obs_size : self.obs_size + self.n_actions]
+                mask = obs_t[:, -self.n_actions :]
             else:
                 mask = torch.ones(
                     (obs_t.shape[0], self.n_actions),

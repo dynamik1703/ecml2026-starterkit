@@ -17,7 +17,11 @@ Extended by the Flatland Association team for environments with intermediate way
 class FastTreeObsBuilder(ObservationBuilder):
 
     # Fixed observation length. Indices 0..35 are documented in `get()`.
-    OBSERVATION_DIM = 36
+    BASE_OBSERVATION_DIM = 36
+    ROUTE_CONFLICT_FEATURE_DIM = 8
+    ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
+    SIDE_DETOUR_MARGIN = 4.0
+    OBSERVATION_DIM = BASE_OBSERVATION_DIM
 
     # RailEnvActions: 0 DO_NOTHING, 1 LEFT, 2 FORWARD, 3 RIGHT, 4 STOP.
     # Mask is appended to every observation when with_action_mask=True.
@@ -28,12 +32,23 @@ class FastTreeObsBuilder(ObservationBuilder):
     MOVE_RIGHT = 3
     STOP_MOVING = 4
 
-    def __init__(self, max_depth=3, with_action_mask=True):
+    def __init__(
+        self,
+        max_depth=3,
+        with_action_mask=True,
+        with_route_conflict_features=False,
+    ):
         self.max_depth = max_depth
         # Append an action mask after the feature block. Useful at inference
         # (no env access in the policy); training computes its own mask from
         # the env, so set with_action_mask=False there.
         self.with_action_mask = with_action_mask
+        self.with_route_conflict_features = with_route_conflict_features
+        self.feature_dim = self.BASE_OBSERVATION_DIM + (
+            self.ROUTE_CONFLICT_FEATURE_DIM
+            if with_route_conflict_features
+            else 0
+        )
         # handle -> index into agent.waypoints of last stop visited
         self.waypoint_index = {}
         # handle -> np.ndarray (height, width, 4) BFS distance to next waypoint
@@ -531,6 +546,151 @@ class FastTreeObsBuilder(ObservationBuilder):
             handle,
         )
 
+    def _route_conflict_features(self, handle, position, direction):
+        """Compact route-centric features for the next relevant train on our path.
+
+        Layout:
+          0  distance to first other train on best route, normalised by lookahead
+          1  first train is opposing-direction
+          2  first train is same-direction
+          3  relative slack in [0,1], 0.5 neutral, lower means we are tighter
+          4  other train has tighter slack / should likely have priority
+          5  immediate side detour is currently available
+          6  first train is stopped or malfunctioning
+          7  count of occupied route cells within lookahead, clipped to 3
+        """
+        features = np.zeros(self.ROUTE_CONFLICT_FEATURE_DIM, dtype=np.float32)
+        if position is None or direction is None or not self._is_in_bounds(position):
+            features[0] = 1.0
+            return features
+
+        distance_map = self._get_distance_map(handle)
+        current_dist = distance_map[position[0], position[1], direction]
+        features[5] = float(
+            self._has_immediate_side_detour(
+                handle,
+                position,
+                direction,
+                distance_map,
+                current_dist,
+            )
+        )
+
+        current_position = position
+        current_direction = direction
+        first_conflict_seen = False
+        occupied_count = 0
+        for cells in range(1, self.ROUTE_CONFLICT_LOOKAHEAD_CELLS + 1):
+            transitions = self.env.rail.get_transitions(
+                (current_position, current_direction)
+            )
+            next_direction = self._best_progress_direction(
+                transitions,
+                current_position,
+                distance_map,
+            )
+            if next_direction is None:
+                break
+
+            next_position = get_new_position(current_position, next_direction)
+            if not self._is_in_bounds(next_position):
+                break
+
+            other = self._agent_at(next_position)
+            if other != -1 and other != handle:
+                occupied_count += 1
+                if not first_conflict_seen:
+                    first_conflict_seen = True
+                    other_agent = self.env.agents[other]
+                    other_direction = (
+                        other_agent.direction
+                        if other_agent.direction is not None
+                        else other_agent.initial_direction
+                    )
+                    is_opposing = other_direction != next_direction
+                    _, slack, _, _ = self._priority_key(handle)
+                    _, other_slack, _, _ = self._priority_key(other)
+                    if np.isfinite(slack) and np.isfinite(other_slack):
+                        relative_slack = np.clip(
+                            (slack - other_slack)
+                            / max(1, self.env._max_episode_steps),
+                            -1.0,
+                            1.0,
+                        )
+                        features[3] = 0.5 + 0.5 * relative_slack
+                        features[4] = float(other_slack < slack)
+                    else:
+                        features[3] = 0.5
+
+                    features[0] = cells / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS
+                    features[1] = float(is_opposing)
+                    features[2] = float(not is_opposing)
+                    features[6] = float(
+                        self._state_matches(
+                            other_agent.state,
+                            "STOPPED",
+                            "MALFUNCTION",
+                        )
+                    )
+
+            current_position = next_position
+            current_direction = next_direction
+
+        if not first_conflict_seen:
+            features[0] = 1.0
+            features[3] = 0.5
+        features[7] = min(occupied_count, 3) / 3.0
+        return features
+
+    def _has_immediate_side_detour(
+        self,
+        handle,
+        position,
+        direction,
+        distance_map,
+        current_dist,
+    ):
+        transitions = self.env.rail.get_transitions((position, direction))
+        for action in (self.MOVE_LEFT, self.MOVE_RIGHT):
+            new_direction = self._action_to_direction(action, direction)
+            if new_direction is None or not transitions[new_direction]:
+                continue
+            target = get_new_position(position, new_direction)
+            if not self._is_in_bounds(target):
+                continue
+            if self._occupied_by_other(target, handle):
+                continue
+            new_dist = distance_map[target[0], target[1], new_direction]
+            if not np.isfinite(new_dist):
+                continue
+            if np.isfinite(current_dist) and new_dist > current_dist + self.SIDE_DETOUR_MARGIN:
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _best_progress_direction(possible_transitions, position, distance_map):
+        best_direction = None
+        best_distance = np.inf
+        for direction, is_open in enumerate(possible_transitions):
+            if not is_open:
+                continue
+            next_position = get_new_position(position, direction)
+            if not (
+                0 <= next_position[0] < distance_map.shape[0]
+                and 0 <= next_position[1] < distance_map.shape[1]
+            ):
+                continue
+            distance = distance_map[next_position[0], next_position[1], direction]
+            if np.isfinite(distance) and distance < best_distance:
+                best_distance = distance
+                best_direction = direction
+        if best_direction is not None:
+            return best_direction
+        if any(possible_transitions):
+            return fast_argmax(possible_transitions)
+        return None
+
     def _action_target(self, handle, action):
         agent = self.env.agents[handle]
         if action in (self.DO_NOTHING, self.STOP_MOVING):
@@ -651,8 +811,18 @@ class FastTreeObsBuilder(ObservationBuilder):
         # 33      proximity to next stop (1 at stop, decays with distance)
         # 34      fraction of intermediate waypoints already served
         # 35      time slack: fraction of remaining steps until latest arrival
+        #
+        # Optional route-conflict layout when with_route_conflict_features=True:
+        # 36      distance to first other train on best route
+        # 37      first train is opposing-direction
+        # 38      first train is same-direction
+        # 39      relative slack, 0.5 neutral
+        # 40      other train has tighter slack
+        # 41      immediate side detour is available
+        # 42      first train is stopped or malfunctioning
+        # 43      occupied cells on route within lookahead
 
-        observation = np.zeros(self.OBSERVATION_DIM, dtype=np.float32)
+        observation = np.zeros(self.BASE_OBSERVATION_DIM, dtype=np.float32)
         visited = []
         agent = self.env.agents[handle]
 
@@ -794,6 +964,18 @@ class FastTreeObsBuilder(ObservationBuilder):
 
         self.env.dev_obs_dict.update({handle: visited})
 
+        if self.with_route_conflict_features:
+            observation = np.concatenate(
+                [
+                    observation,
+                    self._route_conflict_features(
+                        handle,
+                        agent_virtual_position,
+                        direction,
+                    ),
+                ]
+            )
+
         if not self.with_action_mask:
             return observation
 
@@ -805,3 +987,20 @@ class FastTreeObsBuilder(ObservationBuilder):
 
 
 MyObservationBuilder = FastTreeObsBuilder
+
+
+class RouteConflictObsBuilder(FastTreeObsBuilder):
+    OBSERVATION_DIM = (
+        FastTreeObsBuilder.BASE_OBSERVATION_DIM
+        + FastTreeObsBuilder.ROUTE_CONFLICT_FEATURE_DIM
+    )
+
+    def __init__(self, max_depth=3, with_action_mask=True):
+        super().__init__(
+            max_depth=max_depth,
+            with_action_mask=with_action_mask,
+            with_route_conflict_features=True,
+        )
+
+
+MyRouteConflictObservationBuilder = RouteConflictObsBuilder
