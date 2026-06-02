@@ -68,10 +68,22 @@ def observation_list(observations: dict[int, Any], handles: list[int]) -> list[A
 
 def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     teacher = load_symbol(args.teacher_policy)()
+    checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
+    reference = ActorCritic(
+        obs_size=args.obs_size,
+        n_actions=args.n_actions,
+        hidden_size=args.hidden_size,
+        num_hidden_layers=args.num_hidden_layers,
+        checkpoint_path=str(checkpoint_path) if checkpoint_path is not None else None,
+    )
+    reference.eval()
     observations_out: list[np.ndarray] = []
     actions_out: list[int] = []
     invalid_teacher_actions = 0
+    teacher_reference_disagreements = 0
+    valid_teacher_samples = 0
     action_counts: Counter[int] = Counter()
+    disagreement_action_counts: Counter[int] = Counter()
     success_rates = []
     normalized_rewards = []
 
@@ -87,8 +99,17 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
                 handle: action_id(action)
                 for handle, action in teacher.act_many(handles, obs_list).items()
             }
+            with torch.no_grad():
+                reference_logits = reference.masked_logits(
+                    np.asarray(obs_list, dtype=np.float32)
+                )
+                reference_actions = reference_logits.argmax(dim=-1).cpu().numpy()
 
-            for handle, observation in zip(handles, obs_list):
+            for reference_action, handle, observation in zip(
+                reference_actions,
+                handles,
+                obs_list,
+            ):
                 action = teacher_actions[handle]
                 obs_array = np.asarray(observation, dtype=np.float32)
                 mask = obs_array[args.obs_size : args.obs_size + args.n_actions]
@@ -97,6 +118,13 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
                     and len(mask) == args.n_actions
                     and mask[action] >= 0.5
                 ):
+                    valid_teacher_samples += 1
+                    disagrees = action != int(reference_action)
+                    if disagrees:
+                        teacher_reference_disagreements += 1
+                        disagreement_action_counts[action] += 1
+                    if args.disagreement_only and not disagrees:
+                        continue
                     observations_out.append(obs_array)
                     actions_out.append(action)
                     action_counts[action] += 1
@@ -129,8 +157,11 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
 
     stats = {
         "samples": len(observations_out),
+        "valid_teacher_samples": valid_teacher_samples,
         "invalid_teacher_actions": invalid_teacher_actions,
+        "teacher_reference_disagreements": teacher_reference_disagreements,
         "action_counts": dict(sorted(action_counts.items())),
+        "disagreement_action_counts": dict(sorted(disagreement_action_counts.items())),
         "teacher_reward_mean": float(np.mean(normalized_rewards)),
         "teacher_success_rate_mean": float(np.mean(success_rates)),
     }
@@ -243,6 +274,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use inverse-frequency action weights for behavior cloning.",
     )
+    parser.add_argument(
+        "--disagreement-only",
+        action="store_true",
+        help="Train only on valid states where the teacher disagrees with the init policy.",
+    )
     parser.add_argument("--max-class-weight", type=float, default=10.0)
     return parser.parse_args()
 
@@ -256,10 +292,13 @@ def main() -> int:
     print(
         "collection "
         f"samples={collection_stats['samples']} "
+        f"valid_teacher_samples={collection_stats['valid_teacher_samples']} "
         f"invalid_teacher_actions={collection_stats['invalid_teacher_actions']} "
+        f"teacher_reference_disagreements={collection_stats['teacher_reference_disagreements']} "
         f"teacher_reward_mean={collection_stats['teacher_reward_mean']:.6g} "
         f"teacher_success_rate_mean={collection_stats['teacher_success_rate_mean']:.6g} "
-        f"action_counts={collection_stats['action_counts']}",
+        f"action_counts={collection_stats['action_counts']} "
+        f"disagreement_action_counts={collection_stats['disagreement_action_counts']}",
         flush=True,
     )
     policy, train_stats = train_behavior_clone(args, observations, actions)
