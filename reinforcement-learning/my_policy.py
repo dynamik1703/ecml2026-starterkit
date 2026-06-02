@@ -73,6 +73,7 @@ class ActorCritic(nn.Module):
                 expanded = current_tensor.clone()
                 rows = min(expanded.shape[0], checkpoint_tensor.shape[0])
                 cols = min(expanded.shape[1], checkpoint_tensor.shape[1])
+                expanded.zero_()
                 expanded[:rows, :cols] = checkpoint_tensor[:rows, :cols]
                 merged_state[name] = expanded
         self.load_state_dict(merged_state)
