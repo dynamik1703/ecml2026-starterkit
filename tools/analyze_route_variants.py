@@ -299,54 +299,73 @@ def first_conflict(metrics: dict[str, Any]) -> dict[str, Any] | None:
     return min(conflicts, key=lambda item: item["time"])
 
 
-def slack_after_delay(env: Any, variant: RouteVariant, delay: int) -> int:
-    agent = env.agents[variant.agent]
-    departure = int(agent.earliest_departure or 0) + delay
-    latest = int(agent.latest_arrival or departure + variant.length)
-    return latest - (departure + variant.length)
+def conflict_count(metrics: dict[str, Any]) -> int:
+    return len(metrics["position_conflicts"]) + len(metrics["edge_conflicts"])
 
 
-def delay_candidate(
+def schedule_search_key(metrics: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        conflict_count(metrics),
+        len(metrics["late_agents"]),
+        sum(metrics["late_agents"].values()),
+        sum(metrics["start_delays"].values()),
+    )
+
+
+def best_delay_move(
     env: Any,
-    combo_by_agent: dict[int, RouteVariant],
+    combo: tuple[RouteVariant, ...],
     agents: list[int],
     start_delays: dict[int, int],
-) -> int:
-    return max(
-        agents,
-        key=lambda handle: (
-            slack_after_delay(
-                env,
-                combo_by_agent[handle],
-                start_delays.get(handle, 0),
-            ),
-            handle,
-        ),
-    )
+    delay_window: int,
+) -> tuple[dict[int, int], dict[str, Any]]:
+    best_delays = None
+    best_metrics = None
+    current_metrics = combo_metrics(env, combo, start_delays)
+    current_key = schedule_search_key(current_metrics)
+    for handle in agents:
+        for delta in range(1, delay_window + 1):
+            candidate_delays = dict(start_delays)
+            candidate_delays[handle] = candidate_delays.get(handle, 0) + delta
+            metrics = combo_metrics(env, combo, candidate_delays)
+            if (
+                best_metrics is None
+                or schedule_search_key(metrics) < schedule_search_key(best_metrics)
+            ):
+                best_delays = candidate_delays
+                best_metrics = metrics
+
+    if best_metrics is None or schedule_search_key(best_metrics) >= current_key:
+        return start_delays, current_metrics
+
+    assert best_delays is not None
+    return best_delays, best_metrics
 
 
 def schedule_combo(
     env: Any,
     combo: tuple[RouteVariant, ...],
     max_iterations: int,
+    delay_window: int,
 ) -> dict[str, Any]:
     start_delays = {variant.agent: 0 for variant in combo}
-    combo_by_agent = {variant.agent: variant for variant in combo}
     metrics = combo_metrics(env, combo, start_delays)
     iterations = 0
     while iterations < max_iterations:
         conflict = first_conflict(metrics)
         if conflict is None:
             break
-        delayed_agent = delay_candidate(
+        previous_key = schedule_search_key(metrics)
+        start_delays, metrics = best_delay_move(
             env,
-            combo_by_agent,
+            combo,
             list(dict.fromkeys(conflict["agents"])),
             start_delays,
+            delay_window,
         )
-        start_delays[delayed_agent] += 1
         iterations += 1
-        metrics = combo_metrics(env, combo, start_delays)
+        if schedule_search_key(metrics) >= previous_key:
+            break
 
     metrics["schedule_iterations"] = iterations
     metrics["schedule_resolved"] = first_conflict(metrics) is None
@@ -358,24 +377,45 @@ def best_combo(
     variants_by_agent: list[list[RouteVariant]],
     max_combos: int,
     schedule_iterations: int,
+    schedule_delay_window: int,
     schedule_combos: bool,
-) -> tuple[tuple[RouteVariant, ...], dict[str, Any], int]:
+    schedule_top_combos: int,
+) -> tuple[tuple[RouteVariant, ...], dict[str, Any], int, int]:
     best = None
     best_metrics = None
     checked = 0
+    raw_candidates = []
     for combo in itertools.product(*variants_by_agent):
         checked += 1
-        if schedule_combos:
-            metrics = schedule_combo(env, combo, schedule_iterations)
-        else:
-            metrics = combo_metrics(env, combo)
+        metrics = combo_metrics(env, combo)
         if best_metrics is None or metrics["score"] < best_metrics["score"]:
             best = combo
             best_metrics = metrics
+        if schedule_combos:
+            raw_candidates.append((metrics["score"], combo))
         if checked >= max_combos:
             break
+
+    scheduled_checked = 0
+    if schedule_combos:
+        best = None
+        best_metrics = None
+        for _, combo in sorted(raw_candidates, key=lambda item: item[0])[
+            : max(1, schedule_top_combos)
+        ]:
+            scheduled_checked += 1
+            metrics = schedule_combo(
+                env,
+                combo,
+                schedule_iterations,
+                schedule_delay_window,
+            )
+            if best_metrics is None or metrics["score"] < best_metrics["score"]:
+                best = combo
+                best_metrics = metrics
+
     assert best is not None and best_metrics is not None
-    return best, best_metrics, checked
+    return best, best_metrics, checked, scheduled_checked
 
 
 def serializable_combo(combo: tuple[RouteVariant, ...], metrics: dict[str, Any]) -> dict[str, Any]:
@@ -412,10 +452,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-route-steps", type=int, default=700)
     parser.add_argument("--max-combos", type=int, default=20000)
     parser.add_argument("--schedule-iterations", type=int, default=300)
+    parser.add_argument("--schedule-delay-window", type=int, default=30)
+    parser.add_argument("--schedule-top-combos", type=int, default=24)
     parser.add_argument(
         "--schedule-combos",
         action="store_true",
-        help="Use the simple delay scheduler while searching variant combinations.",
+        help="Schedule the best raw route combinations after static conflict scoring.",
     )
     parser.add_argument("--output-json", type=Path)
     return parser.parse_args()
@@ -444,13 +486,16 @@ def main() -> int:
         env,
         greedy_combo,
         args.schedule_iterations,
+        args.schedule_delay_window,
     )
-    best, best_metrics, checked = best_combo(
+    best, best_metrics, checked, scheduled_checked = best_combo(
         env,
         variants_by_agent,
         args.max_combos,
         args.schedule_iterations,
+        args.schedule_delay_window,
         args.schedule_combos,
+        args.schedule_top_combos,
     )
 
     print("agent,earliest,latest,variants,best_length,variant_lengths")
@@ -472,7 +517,7 @@ def main() -> int:
             default=str,
         )
     )
-    print(f"\nBest checked_combos={checked}:")
+    print(f"\nBest checked_combos={checked} scheduled_checked={scheduled_checked}:")
     print(json.dumps(serializable_combo(best, best_metrics), indent=2, default=str))
 
     if args.output_json is not None:
@@ -485,6 +530,7 @@ def main() -> int:
                     "line_length": args.line_length,
                     "scene": args.scene or "scene_5",
                     "checked_combos": checked,
+                    "scheduled_checked": scheduled_checked,
                     "variants": [
                         [
                             {
