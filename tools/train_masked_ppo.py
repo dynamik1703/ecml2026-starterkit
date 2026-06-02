@@ -19,6 +19,7 @@ from submission.my_policy import ActorCritic
 
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
+DEFAULT_TEACHER_POLICY = "submission.hybrid_policy.MyPolicy"
 DISTANCE_FEATURE_INDEX = 30
 MOVE_FORWARD_ACTION = 2
 ROUTE_CONFLICT_DISTANCE_INDEX = 36
@@ -66,6 +67,16 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any], 
 
 def observation_batch(observations: dict[int, Any], handles: list[int]) -> np.ndarray:
     return np.asarray([observations[handle] for handle in handles], dtype=np.float32)
+
+
+def observation_list(observations: dict[int, Any], handles: list[int]) -> list[Any]:
+    return [observations[handle] for handle in handles]
+
+
+def action_id(action: Any) -> int:
+    if hasattr(action, "value"):
+        return int(action.value)
+    return int(action)
 
 
 def slack_values(obs_builder: Any, handles: list[int]) -> np.ndarray:
@@ -194,9 +205,15 @@ def collect_rollout(
     env, observations, obs_builder = make_env(args, start_seed)
     handles = list(env.get_agent_handles())
     num_agents = len(handles)
+    teacher_policy = (
+        load_symbol(args.teacher_policy)()
+        if args.teacher_ce_coef != 0.0
+        else None
+    )
 
     obs_steps: list[np.ndarray] = []
     action_steps: list[torch.Tensor] = []
+    teacher_action_steps: list[torch.Tensor] = []
     log_prob_steps: list[torch.Tensor] = []
     value_steps: list[torch.Tensor] = []
     reward_steps: list[list[float]] = []
@@ -231,6 +248,20 @@ def collect_rollout(
             handle: int(action)
             for handle, action in zip(handles, actions_np)
         }
+        if teacher_policy is not None:
+            teacher_actions = teacher_policy.act_many(
+                handles,
+                observation_list(observations, handles),
+            )
+            teacher_action_steps.append(
+                torch.as_tensor(
+                    [
+                        action_id(teacher_actions.get(handle, action_dict[handle]))
+                        for handle in handles
+                    ],
+                    dtype=torch.long,
+                )
+            )
         next_observations, rewards_by_agent, dones, _ = env.step(action_dict)
         next_obs_np = observation_batch(next_observations, handles)
         next_slacks = slack_values(obs_builder, handles)
@@ -310,6 +341,8 @@ def collect_rollout(
         "advantages": flat_advantages,
         "returns": returns.reshape(-1),
     }
+    if teacher_action_steps:
+        rollout["teacher_actions"] = torch.stack(teacher_action_steps).reshape(-1)
     stats = {
         "completed_episodes": float(completed_episodes),
         "success_rate": (
@@ -335,12 +368,14 @@ def ppo_update(
     old_log_probs = rollout["old_log_probs"]
     advantages = rollout["advantages"]
     returns = rollout["returns"]
+    teacher_actions = rollout.get("teacher_actions")
     batch_size = observations.shape[0]
     indices = torch.randperm(batch_size)
 
     policy_losses = []
     value_losses = []
     entropies = []
+    teacher_losses = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -362,6 +397,14 @@ def ppo_update(
             value_loss = F.mse_loss(values, returns[batch_idx])
             entropy_loss = entropy.mean()
             loss = policy_loss + args.vf_coef * value_loss - args.ent_coef * entropy_loss
+            if teacher_actions is not None and args.teacher_ce_coef != 0.0:
+                teacher_logits, _ = policy.masked_forward(observations[batch_idx])
+                teacher_loss = F.cross_entropy(
+                    teacher_logits,
+                    teacher_actions[batch_idx],
+                )
+                loss = loss + args.teacher_ce_coef * teacher_loss
+                teacher_losses.append(float(teacher_loss.item()))
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -376,6 +419,9 @@ def ppo_update(
         "policy_loss": float(np.mean(policy_losses)),
         "value_loss": float(np.mean(value_losses)),
         "entropy": float(np.mean(entropies)),
+        "teacher_loss": (
+            float(np.mean(teacher_losses)) if teacher_losses else float("nan")
+        ),
     }
 
 
@@ -468,6 +514,13 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Temperature applied to masked policy logits during PPO collection and updates.",
     )
+    parser.add_argument("--teacher-policy", default=DEFAULT_TEACHER_POLICY)
+    parser.add_argument(
+        "--teacher-ce-coef",
+        type=float,
+        default=0.0,
+        help="Cross-entropy weight for keeping PPO close to a teacher policy.",
+    )
     parser.add_argument("--normalize-advantages", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -493,6 +546,11 @@ def main() -> int:
     for update in range(args.updates):
         rollout, rollout_stats = collect_rollout(args, policy, args.seed + update * 1000)
         loss_stats = ppo_update(args, policy, optimizer, rollout)
+        teacher_loss_text = (
+            f" teacher_loss={loss_stats['teacher_loss']:.6g}"
+            if not np.isnan(loss_stats["teacher_loss"])
+            else ""
+        )
         print(
             f"update={update + 1}/{args.updates} "
             f"reward_mean={rollout_stats['reward_mean']:.6g} "
@@ -501,7 +559,8 @@ def main() -> int:
             f"collected_steps={rollout_stats['collected_steps']:.0f} "
             f"policy_loss={loss_stats['policy_loss']:.6g} "
             f"value_loss={loss_stats['value_loss']:.6g} "
-            f"entropy={loss_stats['entropy']:.6g}",
+            f"entropy={loss_stats['entropy']:.6g}"
+            f"{teacher_loss_text}",
             flush=True,
         )
 
