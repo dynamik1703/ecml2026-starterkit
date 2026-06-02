@@ -34,6 +34,7 @@ class HybridPolicy:
         if (
             env is None
             or context.obs_builder is None
+            or env.get_num_agents() < 6
             or max(env.height, env.width) < 100
         ):
             return actions
