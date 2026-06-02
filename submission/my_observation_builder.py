@@ -18,7 +18,11 @@ class FastTreeObsBuilder(ObservationBuilder):
 
     # Fixed observation length. Indices 0..35 are documented in `get()`.
     BASE_OBSERVATION_DIM = 36
-    ROUTE_CONFLICT_FEATURE_DIM = 8
+    ROUTE_OCCUPANCY_FEATURE_DIM = 8
+    ROUTE_INTERSECTION_FEATURE_DIM = 8
+    ROUTE_CONFLICT_FEATURE_DIM = (
+        ROUTE_OCCUPANCY_FEATURE_DIM + ROUTE_INTERSECTION_FEATURE_DIM
+    )
     ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
     SIDE_DETOUR_MARGIN = 4.0
     OBSERVATION_DIM = BASE_OBSERVATION_DIM
@@ -56,6 +60,8 @@ class FastTreeObsBuilder(ObservationBuilder):
         self._switches_built = False
         self._coordination_step = None
         self._coordination_masks = {}
+        self._route_prefix_cache_step = None
+        self._route_prefix_cache = {}
 
     # ------------------------------------------------------------------
     # Topology pre-computation: switches and their neighbours.
@@ -146,6 +152,8 @@ class FastTreeObsBuilder(ObservationBuilder):
         self._waypoint_distance_maps = {}
         self._coordination_step = None
         self._coordination_masks = {}
+        self._route_prefix_cache_step = None
+        self._route_prefix_cache = {}
         if self.env is not None and self.env.rail is not None:
             for handle in range(self.env.get_num_agents()):
                 self.waypoint_index[handle] = 0
@@ -559,7 +567,7 @@ class FastTreeObsBuilder(ObservationBuilder):
           6  first train is stopped or malfunctioning
           7  count of occupied route cells within lookahead, clipped to 3
         """
-        features = np.zeros(self.ROUTE_CONFLICT_FEATURE_DIM, dtype=np.float32)
+        features = np.zeros(self.ROUTE_OCCUPANCY_FEATURE_DIM, dtype=np.float32)
         if position is None or direction is None or not self._is_in_bounds(position):
             features[0] = 1.0
             return features
@@ -641,6 +649,190 @@ class FastTreeObsBuilder(ObservationBuilder):
             features[3] = 0.5
         features[7] = min(occupied_count, 3) / 3.0
         return features
+
+    def _route_intersection_features(self, handle):
+        """Features for medium-term intersections between greedy route prefixes.
+
+        Layout:
+          0  our distance to first route intersection, normalised by lookahead
+          1  other train distance to same conflict, normalised by lookahead
+          2  ETA-overlap risk, 1 means both arrive at similar time
+          3  other train reaches the conflict first
+          4  reverse-edge / head-on route conflict
+          5  crossing route conflict
+          6  other train has tighter slack / should likely have priority
+          7  number of other route prefixes intersecting ours, clipped to 3
+        """
+        features = np.zeros(self.ROUTE_INTERSECTION_FEATURE_DIM, dtype=np.float32)
+        features[0] = 1.0
+        features[1] = 1.0
+
+        own_prefix = self._route_prefix(handle)
+        if not own_prefix:
+            return features
+
+        own_positions = {}
+        own_edges = {}
+        for node in own_prefix:
+            own_positions.setdefault(node["position"], node)
+            own_edges.setdefault((node["prev_position"], node["position"]), node)
+
+        best_candidate = None
+        intersecting_agents = 0
+        for other in self.env.get_agent_handles():
+            if other == handle:
+                continue
+            other_prefix = self._route_prefix(other)
+            if not other_prefix:
+                continue
+
+            candidate = self._best_route_intersection_candidate(
+                own_positions,
+                own_edges,
+                other_prefix,
+            )
+            if candidate is None:
+                continue
+            intersecting_agents += 1
+            if best_candidate is None or candidate["sort_key"] < best_candidate["sort_key"]:
+                best_candidate = {
+                    **candidate,
+                    "other": other,
+                }
+
+        if best_candidate is None:
+            return features
+
+        own_step = best_candidate["own"]["step"]
+        other_step = best_candidate["other_node"]["step"]
+        own_eta = own_step / self._speed(self.env.agents[handle])
+        other_eta = other_step / self._speed(self.env.agents[best_candidate["other"]])
+        eta_gap = abs(own_eta - other_eta)
+        _, slack, _, _ = self._priority_key(handle)
+        _, other_slack, _, _ = self._priority_key(best_candidate["other"])
+
+        own_direction = best_candidate["own"]["direction"]
+        other_direction = best_candidate["other_node"]["direction"]
+        reverse_direction = (own_direction + 2) % 4
+        is_head_on = bool(best_candidate["head_on"])
+        is_crossing = (
+            not is_head_on
+            and other_direction != own_direction
+            and other_direction != reverse_direction
+        )
+
+        features[0] = own_step / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS
+        features[1] = other_step / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS
+        features[2] = max(0.0, 1.0 - eta_gap / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS)
+        features[3] = float(other_eta < own_eta)
+        features[4] = float(is_head_on)
+        features[5] = float(is_crossing)
+        if np.isfinite(slack) and np.isfinite(other_slack):
+            features[6] = float(other_slack < slack)
+        features[7] = min(intersecting_agents, 3) / 3.0
+        return features
+
+    @staticmethod
+    def _best_route_intersection_candidate(own_positions, own_edges, other_prefix):
+        best = None
+        for other_node in other_prefix:
+            own_node = own_positions.get(other_node["position"])
+            if own_node is not None:
+                candidate = {
+                    "own": own_node,
+                    "other_node": other_node,
+                    "head_on": False,
+                    "sort_key": (
+                        own_node["step"],
+                        abs(own_node["step"] - other_node["step"]),
+                        other_node["step"],
+                        1,
+                    ),
+                }
+                if best is None or candidate["sort_key"] < best["sort_key"]:
+                    best = candidate
+
+            reverse_edge = (other_node["position"], other_node["prev_position"])
+            own_node = own_edges.get(reverse_edge)
+            if own_node is not None:
+                candidate = {
+                    "own": own_node,
+                    "other_node": other_node,
+                    "head_on": True,
+                    "sort_key": (
+                        own_node["step"],
+                        abs(own_node["step"] - other_node["step"]),
+                        other_node["step"],
+                        0,
+                    ),
+                }
+                if best is None or candidate["sort_key"] < best["sort_key"]:
+                    best = candidate
+        return best
+
+    def _route_prefix(self, handle):
+        step = self.env._elapsed_steps
+        if self._route_prefix_cache_step != step:
+            self._route_prefix_cache_step = step
+            self._route_prefix_cache = {}
+        if handle in self._route_prefix_cache:
+            return self._route_prefix_cache[handle]
+
+        self._check_and_advance_waypoint(handle)
+        position, direction = self._agent_route_start(handle)
+        if position is None or direction is None or not self._is_in_bounds(position):
+            self._route_prefix_cache[handle] = []
+            return []
+
+        distance_map = self._get_distance_map(handle)
+        current_position = position
+        current_direction = direction
+        prefix = []
+        for step_index in range(1, self.ROUTE_CONFLICT_LOOKAHEAD_CELLS + 1):
+            transitions = self.env.rail.get_transitions(
+                (current_position, current_direction)
+            )
+            next_direction = self._best_progress_direction(
+                transitions,
+                current_position,
+                distance_map,
+            )
+            if next_direction is None:
+                break
+            next_position = get_new_position(current_position, next_direction)
+            if not self._is_in_bounds(next_position):
+                break
+            prefix.append(
+                {
+                    "step": step_index,
+                    "prev_position": current_position,
+                    "position": next_position,
+                    "direction": next_direction,
+                }
+            )
+            current_position = next_position
+            current_direction = next_direction
+
+        self._route_prefix_cache[handle] = prefix
+        return prefix
+
+    def _agent_route_start(self, handle):
+        agent = self.env.agents[handle]
+        if self._state_matches(agent.state, "READY_TO_DEPART"):
+            return agent.initial_position, agent.initial_direction
+        if self._state_matches(agent.state, "MOVING", "STOPPED", "MALFUNCTION"):
+            direction = (
+                agent.direction
+                if agent.direction is not None
+                else agent.initial_direction
+            )
+            return agent.position, direction
+        return None, None
+
+    @staticmethod
+    def _speed(agent):
+        speed = float(agent.speed_counter.speed)
+        return speed if speed > 0 else 1.0
 
     def _has_immediate_side_detour(
         self,
@@ -821,6 +1013,14 @@ class FastTreeObsBuilder(ObservationBuilder):
         # 41      immediate side detour is available
         # 42      first train is stopped or malfunctioning
         # 43      occupied cells on route within lookahead
+        # 44      our distance to first future route intersection
+        # 45      other train distance to same future route intersection
+        # 46      ETA-overlap risk at future route intersection
+        # 47      other train reaches future conflict first
+        # 48      reverse-edge / head-on future route conflict
+        # 49      crossing future route conflict
+        # 50      other train has tighter slack at future conflict
+        # 51      count of other route prefixes intersecting ours
 
         observation = np.zeros(self.BASE_OBSERVATION_DIM, dtype=np.float32)
         visited = []
@@ -973,6 +1173,7 @@ class FastTreeObsBuilder(ObservationBuilder):
                         agent_virtual_position,
                         direction,
                     ),
+                    self._route_intersection_features(handle),
                 ]
             )
 
