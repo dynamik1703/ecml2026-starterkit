@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 from pathlib import Path
 from typing import Any
@@ -12,11 +13,11 @@ import torch.nn.functional as F
 from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.rewards import ECML2026Rewards
 
-from submission.my_observation_builder import MyObservationBuilder
 from submission.my_policy import ActorCritic
 
 
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
+DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
 DISTANCE_FEATURE_INDEX = 30
 
 
@@ -34,8 +35,14 @@ def load_sampling_env_generator() -> Any:
     return module.sampling_env_generator
 
 
+def load_symbol(path: str) -> Any:
+    module_name, symbol_name = path.rsplit(".", maxsplit=1)
+    module = importlib.import_module(module_name)
+    return getattr(module, symbol_name)
+
+
 def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
-    obs_builder = MyObservationBuilder()
+    obs_builder = load_symbol(args.obs_builder)()
     rewards = ECML2026Rewards()
     env, _ = RailEnvPersister.load_new(
         args.base_state_pkl,
@@ -245,6 +252,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--steps-per-update", type=int, default=128)
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
+    parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
     parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
