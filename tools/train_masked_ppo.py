@@ -17,6 +17,7 @@ from submission.my_policy import ActorCritic
 
 
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
+DISTANCE_FEATURE_INDEX = 30
 
 
 def repo_root() -> Path:
@@ -49,6 +50,21 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
 
 def observation_batch(observations: dict[int, Any], handles: list[int]) -> np.ndarray:
     return np.asarray([observations[handle] for handle in handles], dtype=np.float32)
+
+
+def shaped_rewards(
+    args: argparse.Namespace,
+    observations: np.ndarray,
+    next_observations: np.ndarray,
+    rewards: list[float],
+) -> list[float]:
+    if args.progress_reward_coef == 0.0:
+        return rewards
+
+    shaped = np.asarray(rewards, dtype=np.float32).copy()
+    progress = observations[:, DISTANCE_FEATURE_INDEX] - next_observations[:, DISTANCE_FEATURE_INDEX]
+    shaped += args.progress_reward_coef * progress
+    return shaped.astype(np.float32).tolist()
 
 
 def bootstrap_values(policy: ActorCritic, observations: dict[int, Any], handles: list[int]) -> torch.Tensor:
@@ -89,7 +105,9 @@ def collect_rollout(
             for handle, action in zip(handles, actions.cpu().numpy())
         }
         next_observations, rewards_by_agent, dones, _ = env.step(action_dict)
+        next_obs_np = observation_batch(next_observations, handles)
         rewards = [float(rewards_by_agent.get(handle, 0.0)) for handle in handles]
+        rewards = shaped_rewards(args, obs_np, next_obs_np, rewards)
         done_flags = [
             float(bool(dones.get(handle, False) or dones.get("__all__", False)))
             for handle in handles
@@ -236,6 +254,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--num-hidden-layers", type=int, default=3)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument(
+        "--progress-reward-coef",
+        type=float,
+        default=0.0,
+        help="Optional dense reward for reducing observation[30], the normalized waypoint distance.",
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
