@@ -15,10 +15,15 @@ from submission.reservation_policy import ReservationPolicy
 class HybridPolicy:
     SIDE_DETOUR_MARGIN = 4.0
     LONG_LOOKAHEAD_CELLS = 45
+    TEMPORAL_CORRIDOR_MIN_EDGES = 4
+    TEMPORAL_CORRIDOR_MAX_AGE = 90
 
     def __init__(self):
         self.rl_policy = ActorCritic()
         self.reservation_policy = ReservationPolicy()
+        self._corridor_locks = {}
+        self._corridor_lock_env_id = None
+        self._corridor_lock_step = -1
 
     def act(self, observation: Any, **kwargs) -> RailEnvActions:
         return self.rl_policy.act(observation, **kwargs)
@@ -38,7 +43,129 @@ class HybridPolicy:
             or max(env.height, env.width) < 100
         ):
             return actions
-        return self._detour_around_long_opposing(actions, context.obs_builder)
+        adjusted = self._detour_around_long_opposing(actions, context.obs_builder)
+        return self._apply_temporal_corridor_locks(
+            handles,
+            observations,
+            adjusted,
+            context.obs_builder,
+        )
+
+    def _apply_temporal_corridor_locks(
+        self,
+        handles: List[int],
+        observations: List[Any],
+        actions: Dict[int, RailEnvActions],
+        obs_builder: Any,
+    ) -> Dict[int, RailEnvActions]:
+        self._sync_corridor_locks(obs_builder)
+        observations_by_handle = dict(zip(handles, observations))
+        adjusted = dict(actions)
+        planned_locks = []
+
+        for handle in sorted(handles, key=lambda h: self._priority_key(obs_builder, h)):
+            action = adjusted.get(handle, RailEnvActions.DO_NOTHING)
+            action_id = int(action.value) if hasattr(action, "value") else int(action)
+            edges = self._corridor_edges_for_action(obs_builder, handle, action_id)
+            if len(edges) < self.TEMPORAL_CORRIDOR_MIN_EDGES:
+                continue
+
+            if self._conflicts_with_corridor_locks(handle, edges, planned_locks):
+                fallback = self._corridor_lock_fallback(
+                    observations_by_handle.get(handle)
+                )
+                if fallback is not None:
+                    adjusted[handle] = RailEnvActions(fallback)
+                continue
+
+            lock = self._make_corridor_lock(obs_builder, handle, edges)
+            self._corridor_locks[handle] = lock
+            planned_locks.append(lock)
+
+        return adjusted
+
+    def _sync_corridor_locks(self, obs_builder: Any) -> None:
+        env = obs_builder.env
+        step = int(env._elapsed_steps)
+        env_id = id(env)
+        if env_id != self._corridor_lock_env_id or step < self._corridor_lock_step:
+            self._corridor_locks = {}
+            self._corridor_lock_env_id = env_id
+
+        active_locks = {}
+        for handle, lock in self._corridor_locks.items():
+            if handle >= len(env.agents):
+                continue
+            agent = env.agents[handle]
+            state_name = getattr(agent.state, "name", str(agent.state))
+            if state_name in {"DONE", "DONE_REMOVED"}:
+                continue
+            if agent.position is None:
+                continue
+            if step - lock["step"] > self.TEMPORAL_CORRIDOR_MAX_AGE:
+                continue
+            if agent.position not in lock["cells"]:
+                continue
+            active_locks[handle] = lock
+
+        self._corridor_locks = active_locks
+        self._corridor_lock_step = step
+
+    def _corridor_edges_for_action(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+    ) -> tuple[tuple[tuple[int, int], tuple[int, int]], ...]:
+        if action not in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            return ()
+        try:
+            return tuple(obs_builder._corridor_edges_for_action(handle, action))
+        except Exception:
+            return ()
+
+    def _make_corridor_lock(
+        self,
+        obs_builder: Any,
+        handle: int,
+        edges: tuple[tuple[tuple[int, int], tuple[int, int]], ...],
+    ) -> dict[str, Any]:
+        cells = set()
+        for source, target in edges:
+            cells.add(source)
+            cells.add(target)
+        return {
+            "owner": handle,
+            "step": int(obs_builder.env._elapsed_steps),
+            "edges": frozenset(edges),
+            "cells": cells,
+        }
+
+    def _conflicts_with_corridor_locks(
+        self,
+        handle: int,
+        edges: tuple[tuple[tuple[int, int], tuple[int, int]], ...],
+        planned_locks: list[dict[str, Any]],
+    ) -> bool:
+        for lock in list(self._corridor_locks.values()) + planned_locks:
+            if lock["owner"] == handle:
+                continue
+            lock_edges = lock["edges"]
+            if any((target, source) in lock_edges for source, target in edges):
+                return True
+        return False
+
+    def _corridor_lock_fallback(self, observation: Any) -> int | None:
+        mask = self._mask_from_observation(observation)
+        if mask[ReservationPolicy.STOP_MOVING] >= 0.5:
+            return ReservationPolicy.STOP_MOVING
+        if mask[ReservationPolicy.DO_NOTHING] >= 0.5:
+            return ReservationPolicy.DO_NOTHING
+        return None
 
     def _detour_around_long_opposing(
         self,
@@ -178,6 +305,15 @@ class HybridPolicy:
             return slack, distance, handle
         except Exception:
             return 1e9, 1e9, handle
+
+    @staticmethod
+    def _mask_from_observation(observation: Any) -> np.ndarray:
+        if observation is None:
+            return np.zeros(5, dtype=np.float32)
+        values = np.asarray(observation, dtype=np.float32)
+        if values.shape[0] < 5:
+            return np.zeros(5, dtype=np.float32)
+        return values[-5:]
 
 
 MyPolicy = HybridPolicy
