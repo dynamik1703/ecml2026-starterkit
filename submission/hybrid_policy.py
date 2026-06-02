@@ -17,11 +17,13 @@ class HybridPolicy:
     LONG_LOOKAHEAD_CELLS = 45
     TEMPORAL_CORRIDOR_MIN_EDGES = 4
     TEMPORAL_CORRIDOR_MAX_AGE = 90
+    TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT = 3
 
     def __init__(self):
         self.rl_policy = ActorCritic()
         self.reservation_policy = ReservationPolicy()
         self._corridor_locks = {}
+        self._corridor_lock_block_counts = {}
         self._corridor_lock_env_id = None
         self._corridor_lock_step = -1
 
@@ -70,7 +72,15 @@ class HybridPolicy:
             if len(edges) < self.TEMPORAL_CORRIDOR_MIN_EDGES:
                 continue
 
-            if self._conflicts_with_corridor_locks(handle, edges, planned_locks):
+            conflict_lock = self._conflicting_corridor_lock(
+                handle,
+                edges,
+                planned_locks,
+            )
+            if conflict_lock is not None and self._should_wait_for_corridor_lock(
+                conflict_lock,
+                handle,
+            ):
                 fallback = self._corridor_lock_fallback(
                     observations_by_handle.get(handle)
                 )
@@ -90,9 +100,11 @@ class HybridPolicy:
         env_id = id(env)
         if env_id != self._corridor_lock_env_id or step < self._corridor_lock_step:
             self._corridor_locks = {}
+            self._corridor_lock_block_counts = {}
             self._corridor_lock_env_id = env_id
 
         active_locks = {}
+        active_owners = set()
         for handle, lock in self._corridor_locks.items():
             if handle >= len(env.agents):
                 continue
@@ -107,8 +119,14 @@ class HybridPolicy:
             if agent.position not in lock["cells"]:
                 continue
             active_locks[handle] = lock
+            active_owners.add(handle)
 
         self._corridor_locks = active_locks
+        self._corridor_lock_block_counts = {
+            key: count
+            for key, count in self._corridor_lock_block_counts.items()
+            if key[0] in active_owners
+        }
         self._corridor_lock_step = step
 
     def _corridor_edges_for_action(
@@ -145,19 +163,31 @@ class HybridPolicy:
             "cells": cells,
         }
 
-    def _conflicts_with_corridor_locks(
+    def _conflicting_corridor_lock(
         self,
         handle: int,
         edges: tuple[tuple[tuple[int, int], tuple[int, int]], ...],
         planned_locks: list[dict[str, Any]],
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         for lock in list(self._corridor_locks.values()) + planned_locks:
             if lock["owner"] == handle:
                 continue
             lock_edges = lock["edges"]
             if any((target, source) in lock_edges for source, target in edges):
-                return True
-        return False
+                return lock
+        return None
+
+    def _should_wait_for_corridor_lock(
+        self,
+        lock: dict[str, Any],
+        handle: int,
+    ) -> bool:
+        key = (lock["owner"], handle)
+        count = self._corridor_lock_block_counts.get(key, 0)
+        if count >= self.TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT:
+            return False
+        self._corridor_lock_block_counts[key] = count + 1
+        return True
 
     def _corridor_lock_fallback(self, observation: Any) -> int | None:
         mask = self._mask_from_observation(observation)
