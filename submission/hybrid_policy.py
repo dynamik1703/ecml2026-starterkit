@@ -14,7 +14,7 @@ from submission.reservation_policy import ReservationPolicy
 
 class HybridPolicy:
     SIDE_DETOUR_MARGIN = 4.0
-    LONG_LOOKAHEAD_CELLS = 35
+    LONG_LOOKAHEAD_CELLS = 45
 
     def __init__(self):
         self.rl_policy = ActorCritic()
