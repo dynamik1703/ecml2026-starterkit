@@ -12,6 +12,40 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-checkpoint checkpoints/masked_ppo.pt
 ```
 
+The default teacher for behavior cloning and PPO teacher regularization is the
+current guarded rerank policy, `submission.rerank_policy.MyPolicy`. Override
+`--teacher-policy` to compare against older teachers.
+
+Behavior-clone the current teacher into a torch checkpoint:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_behavior_clone.py \
+  --episodes 20 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --epochs 3 \
+  --output-checkpoint /private/tmp/ecml_bc_rerank_20.pt
+```
+
+Current behavior-cloning findings:
+- `seed=10`, `episodes=20`, `epochs=3` collected 50,408 valid samples and only
+  28 teacher/reference disagreements. Pure `ActorCritic` evaluation on seeds
+  10-59 was weak: `0.857456 / 0.920000`.
+- The same checkpoint inside `HybridPolicy` scored `0.915853 / 0.946667` on
+  seeds 10-59.
+- The same checkpoint inside `RerankPolicy` scored `0.917465 / 0.946667` on
+  seeds 10-59, versus current guarded rerank `0.914406 / 0.946667`.
+- On seeds 10-209, that BC+Rerank checkpoint scored `0.917233 / 0.941667`
+  versus current guarded rerank `0.914246 / 0.938333`: reward delta
+  `+0.002987`, success delta `+0.003333`, reward wins/losses `7/1`, success
+  wins/losses `4/0`.
+- A disjoint BC run trained on seeds 1000-1049 was also net-positive on
+  seeds 10-209 (`0.916828 / 0.940833`) but had more downside: reward
+  wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a
+  promising candidate, not yet as the submission checkpoint.
+
 For route-conflict features and the conflict-priority reward, use the 52-feature
 observation builder. The flag keeps `obs_builder` and `obs_size` in sync:
 

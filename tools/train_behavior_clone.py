@@ -17,7 +17,7 @@ from submission.my_policy import ActorCritic
 
 
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
-DEFAULT_TEACHER_POLICY = "submission.hybrid_policy.MyPolicy"
+DEFAULT_TEACHER_POLICY = "submission.rerank_policy.MyPolicy"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
 DEFAULT_REWARDS = "flatland.envs.rewards.ECML2026Rewards"
 

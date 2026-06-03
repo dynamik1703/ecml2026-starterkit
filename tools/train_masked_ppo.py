@@ -22,7 +22,7 @@ DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
 DEFAULT_ROUTE_CONFLICT_OBS_BUILDER = (
     "submission.my_observation_builder.MyRouteConflictObservationBuilder"
 )
-DEFAULT_TEACHER_POLICY = "submission.hybrid_policy.MyPolicy"
+DEFAULT_TEACHER_POLICY = "submission.rerank_policy.MyPolicy"
 BASE_OBS_SIZE = 36
 ROUTE_CONFLICT_OBS_SIZE = 52
 DISTANCE_FEATURE_INDEX = 30
