@@ -90,6 +90,24 @@ Current behavior-cloning findings:
     success, with reward wins on seeds 55, 325 and 653 and no observed losses.
     This is promising as an ensemble/gating component, but still too narrow to
     replace the Docker default before hidden-distribution validation.
+  - OOD canaries on seeds 800-849 found one pre-guard regression on `scene_1`
+    seed 836: a `STOP_MOVING -> MOVE_LEFT` accept had an infinite candidate
+    distance to the current waypoint. The gate now rejects BC actions whose
+    post-action waypoint distance is not finite. After this guard:
+    - `scene_1`, 6 agents, line length 2: `0.863753 / 0.840000` versus
+      `0.863739 / 0.840000`; reward wins/losses `1/0`, success wins/losses
+      `0/0`.
+    - `scene_3`, 6 agents, line length 2: unchanged `0.863514 / 0.900000`;
+      reward wins/losses `0/0`, success wins/losses `0/0`.
+    - `scene_5`, 4 agents, line length 2: unchanged `0.900808 / 0.945000`;
+      reward wins/losses `0/0`, success wins/losses `0/0`.
+    - `scene_5`, 8 agents, line length 2: unchanged `0.896894 / 0.917500`;
+      reward wins/losses `0/0`, success wins/losses `0/0`.
+    - `scene_5`, 6 agents, line length 3: unchanged `0.896815 / 0.916667`;
+      reward wins/losses `0/0`, success wins/losses `0/0`.
+    - `scene_5`, 6 agents, line length 1 failed during environment reset with
+      Flatland `line_generators.py` `UnboundLocalError: cur_agent_target`,
+      before policy evaluation.
 - A disjoint BC run trained on seeds 1000-1049 was also net-positive on
   seeds 10-209 (`0.916828 / 0.940833`) but had more downside: reward
   wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a

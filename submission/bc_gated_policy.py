@@ -85,6 +85,13 @@ class BCGatedPolicy(RerankPolicy):
             baseline_action,
             candidate_action,
         )
+        candidate_target_distance = self._candidate_target_distance(
+            obs_builder,
+            handle,
+            candidate_action,
+        )
+        if not np.isfinite(candidate_target_distance):
+            return False
 
         if (
             baseline_action == ReservationPolicy.MOVE_RIGHT
@@ -148,6 +155,21 @@ class BCGatedPolicy(RerankPolicy):
             return distance, slack
         except Exception:
             return float("inf"), float("-inf")
+
+    @staticmethod
+    def _candidate_target_distance(
+        obs_builder: Any,
+        handle: int,
+        action: int,
+    ) -> float:
+        try:
+            target, target_direction = obs_builder._action_target(handle, action)
+            if target is None or target_direction is None:
+                return float("inf")
+            distance_map = obs_builder._get_distance_map(handle)
+            return float(distance_map[target[0], target[1], target_direction])
+        except Exception:
+            return float("inf")
 
     @staticmethod
     def _candidate_target_occupied(
