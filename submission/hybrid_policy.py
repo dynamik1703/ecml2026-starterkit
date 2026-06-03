@@ -434,10 +434,16 @@ class HybridPolicy:
                 for other_handle, target in planned_targets.items()
                 if other_handle != handle
             }
+            planned_target_owners = {
+                target: other_handle
+                for other_handle, target in planned_targets.items()
+                if other_handle != handle
+            }
             detour = self._best_side_detour(
                 handle,
                 reserved_targets | other_planned_targets,
                 obs_builder,
+                planned_target_owners,
             )
             if detour is not None:
                 adjusted[handle] = RailEnvActions(detour)
@@ -457,6 +463,7 @@ class HybridPolicy:
         handle: int,
         reserved_targets: set[tuple[int, int]],
         obs_builder: Any,
+        planned_target_owners: dict[tuple[int, int], int] | None = None,
     ) -> int | None:
         env = obs_builder.env
         agent = env.agents[handle]
@@ -482,6 +489,7 @@ class HybridPolicy:
                 reserved_targets,
                 distance_map,
                 obs_builder,
+                planned_target_owners,
             ):
                 continue
             new_dist = distance_map[target[0], target[1], new_direction]
@@ -501,6 +509,7 @@ class HybridPolicy:
         reserved_targets: set[tuple[int, int]],
         distance_map: Any,
         obs_builder: Any,
+        planned_target_owners: dict[tuple[int, int], int] | None = None,
     ) -> bool:
         if not reserved_targets:
             return False
@@ -517,6 +526,16 @@ class HybridPolicy:
         next_position = get_new_position(target, next_direction)
         for reserved in reserved_targets:
             if self._manhattan(next_position, reserved) <= 1:
+                owner = (
+                    planned_target_owners.get(reserved)
+                    if planned_target_owners is not None
+                    else None
+                )
+                if owner is not None and self._agent_direction(
+                    obs_builder,
+                    owner,
+                ) == next_direction:
+                    continue
                 return True
         return False
 
@@ -584,6 +603,13 @@ class HybridPolicy:
     @staticmethod
     def _manhattan(left: tuple[int, int], right: tuple[int, int]) -> int:
         return abs(left[0] - right[0]) + abs(left[1] - right[1])
+
+    @staticmethod
+    def _agent_direction(obs_builder: Any, handle: int) -> int | None:
+        if handle >= len(obs_builder.env.agents):
+            return None
+        agent = obs_builder.env.agents[handle]
+        return agent.direction if agent.direction is not None else agent.initial_direction
 
     @staticmethod
     def _priority_key(obs_builder: Any, handle: int) -> tuple[float, float, int]:
