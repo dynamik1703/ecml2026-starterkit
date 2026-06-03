@@ -58,6 +58,20 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --line-length 2
 ```
 
+Trace long-corridor decisions where a move candidate points toward an opposing
+train and label those decisions with the final episode outcome:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/analyze_long_corridor_decisions.py \
+  --policy submission.hybrid_policy.MyPolicy \
+  --episodes 200 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-csv /private/tmp/ecml_long_corridor_events.csv
+```
+
 Current submission policy is `submission.hybrid_policy.MyPolicy`, which wraps the
 torch actor with deterministic safety heuristics. A route-conflict checkpoint
 needs the route-conflict observation builder at inference time; do not drop a
