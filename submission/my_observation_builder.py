@@ -25,6 +25,8 @@ class FastTreeObsBuilder(ObservationBuilder):
     )
     ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
     SIDE_DETOUR_MARGIN = 4.0
+    NEAR_TARGET_PRIORITY_DISTANCE = 20.0
+    NEAR_TARGET_PRIORITY_BONUS = 200.0
     OBSERVATION_DIM = BASE_OBSERVATION_DIM
 
     # RailEnvActions: 0 DO_NOTHING, 1 LEFT, 2 FORWARD, 3 RIGHT, 4 STOP.
@@ -547,9 +549,13 @@ class FastTreeObsBuilder(ObservationBuilder):
         else:
             state_priority = 3
 
+        priority_slack = slack
+        if np.isfinite(distance) and distance <= self.NEAR_TARGET_PRIORITY_DISTANCE:
+            priority_slack -= self.NEAR_TARGET_PRIORITY_BONUS
+
         return (
             state_priority,
-            slack if np.isfinite(slack) else 1e9,
+            priority_slack if np.isfinite(priority_slack) else 1e9,
             distance if np.isfinite(distance) else 1e9,
             handle,
         )
