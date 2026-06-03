@@ -49,6 +49,7 @@ class HybridPolicy:
             return actions
         adjusted = self._detour_around_long_opposing(actions, context.obs_builder)
         adjusted = self._break_adjacent_deadlocks(adjusted, context.obs_builder)
+        adjusted = self._avoid_implicit_forward_deadlocks(adjusted, context.obs_builder)
         return self._apply_temporal_corridor_locks(
             handles,
             observations,
@@ -394,6 +395,142 @@ class HybridPolicy:
                 return True
         return False
 
+    def _avoid_implicit_forward_deadlocks(
+        self,
+        actions: Dict[int, RailEnvActions],
+        obs_builder: Any,
+    ) -> Dict[int, RailEnvActions]:
+        adjusted = dict(actions)
+        plans = {
+            handle: self._next_plan(handle, action, obs_builder)
+            for handle, action in adjusted.items()
+        }
+
+        for handle in sorted(actions, key=lambda h: self._priority_key(obs_builder, h)):
+            action = adjusted[handle]
+            action_id = int(action.value) if hasattr(action, "value") else int(action)
+            if action_id != ReservationPolicy.DO_NOTHING:
+                continue
+            plan = plans.get(handle)
+            if plan is None or not plan["implicit_move"]:
+                continue
+            if not self._implicit_plan_creates_mutual_block(
+                handle,
+                plan,
+                plans,
+                obs_builder,
+            ):
+                continue
+            adjusted[handle] = RailEnvActions(ReservationPolicy.STOP_MOVING)
+            plans[handle] = self._next_plan(handle, adjusted[handle], obs_builder)
+        return adjusted
+
+    def _next_plan(
+        self,
+        handle: int,
+        action: RailEnvActions,
+        obs_builder: Any,
+    ) -> dict[str, Any] | None:
+        if handle >= len(obs_builder.env.agents):
+            return None
+        agent = obs_builder.env.agents[handle]
+        if agent.position is None:
+            return None
+        direction = agent.direction if agent.direction is not None else agent.initial_direction
+        if direction is None:
+            return None
+
+        action_id = int(action.value) if hasattr(action, "value") else int(action)
+        implicit_move = False
+        if action_id == ReservationPolicy.DO_NOTHING and self._agent_is_moving(agent):
+            target, target_direction = self._implicit_moving_target(
+                agent.position,
+                direction,
+                obs_builder,
+            )
+            implicit_move = target is not None
+        elif action_id in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            target, target_direction = obs_builder._action_target(handle, action_id)
+        else:
+            target = agent.position
+            target_direction = direction
+
+        if target is None or target_direction is None:
+            return None
+        return {
+            "position": agent.position,
+            "direction": direction,
+            "target": target,
+            "target_direction": target_direction,
+            "implicit_move": implicit_move,
+        }
+
+    def _implicit_plan_creates_mutual_block(
+        self,
+        handle: int,
+        plan: dict[str, Any],
+        plans: dict[int, dict[str, Any] | None],
+        obs_builder: Any,
+    ) -> bool:
+        target = plan["target"]
+        target_direction = plan["target_direction"]
+        for other, other_plan in plans.items():
+            if other == handle or other_plan is None:
+                continue
+            other_target = other_plan["target"]
+            other_direction = other_plan["target_direction"]
+            if self._manhattan(target, other_target) != 1:
+                continue
+            if self._can_target_position(
+                target,
+                target_direction,
+                other_target,
+                obs_builder,
+            ) and self._can_target_position(
+                other_target,
+                other_direction,
+                target,
+                obs_builder,
+            ):
+                return True
+        return False
+
+    def _implicit_moving_target(
+        self,
+        position: tuple[int, int],
+        direction: int,
+        obs_builder: Any,
+    ) -> tuple[tuple[int, int] | None, int | None]:
+        transitions = obs_builder.env.rail.get_transitions((position, direction))
+        if not any(transitions):
+            return None, None
+        target_direction = direction if transitions[direction] else fast_argmax(transitions)
+        return get_new_position(position, target_direction), target_direction
+
+    def _can_target_position(
+        self,
+        position: tuple[int, int],
+        direction: int,
+        target: tuple[int, int],
+        obs_builder: Any,
+    ) -> bool:
+        transitions = obs_builder.env.rail.get_transitions((position, direction))
+        for action in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            next_direction = obs_builder._action_to_direction(action, direction)
+            if next_direction is None or not transitions[next_direction]:
+                continue
+            if get_new_position(position, next_direction) == target:
+                return True
+        return False
+
     def _detour_around_long_opposing(
         self,
         actions: Dict[int, RailEnvActions],
@@ -597,6 +734,10 @@ class HybridPolicy:
     @staticmethod
     def _manhattan(left: tuple[int, int], right: tuple[int, int]) -> int:
         return abs(left[0] - right[0]) + abs(left[1] - right[1])
+
+    @staticmethod
+    def _agent_is_moving(agent: Any) -> bool:
+        return getattr(agent.state, "name", str(agent.state)) == "MOVING"
 
     @staticmethod
     def _agent_direction(obs_builder: Any, handle: int) -> int | None:
