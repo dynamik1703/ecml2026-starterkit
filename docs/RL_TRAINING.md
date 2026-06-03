@@ -72,6 +72,20 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_long_corridor_events.csv
 ```
 
+Trace medium-term route intersections where a candidate route prefix crosses or
+opposes another train's planned prefix with a small ETA gap:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/analyze_route_intersection_decisions.py \
+  --policy submission.hybrid_policy.MyPolicy \
+  --episodes 200 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-csv /private/tmp/ecml_route_intersection_events.csv
+```
+
 Current submission policy is `submission.hybrid_policy.MyPolicy`, which wraps the
 torch actor with deterministic safety heuristics. A route-conflict checkpoint
 needs the route-conflict observation builder at inference time; do not drop a
