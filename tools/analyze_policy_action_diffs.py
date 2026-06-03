@@ -179,6 +179,90 @@ def mask_values(observation: Any) -> dict[str, float]:
     }
 
 
+def observation_scalar_features(observation: Any) -> dict[str, float]:
+    values = np.asarray(observation, dtype=np.float32)
+    if values.shape[0] < 36:
+        return {}
+    return {
+        "obs_ready_to_depart": float(values[4]),
+        "obs_active": float(values[5]),
+        "obs_done": float(values[6]),
+        "obs_on_switch": float(values[7]),
+        "obs_before_switch": float(values[8]),
+        "obs_near_switch": float(values[9]),
+        "obs_current_distance": float(values[30]),
+        "obs_elapsed_fraction": float(values[31]),
+        "obs_active_fraction": float(values[32]),
+        "obs_stop_proximity": float(values[33]),
+        "obs_waypoint_progress": float(values[34]),
+        "obs_time_slack": float(values[35]),
+    }
+
+
+def direction_features(
+    observation: Any,
+    prefix: str,
+    direction: int | None,
+) -> dict[str, float]:
+    values = np.asarray(observation, dtype=np.float32)
+    if direction is None or direction < 0 or direction > 3 or values.shape[0] < 30:
+        return {
+            f"{prefix}_leads_closer": float("nan"),
+            f"{prefix}_transition_exists": float("nan"),
+            f"{prefix}_opposing_ahead": float("nan"),
+            f"{prefix}_same_direction_ahead": float("nan"),
+            f"{prefix}_switch_ahead": float("nan"),
+            f"{prefix}_normalized_distance": float("nan"),
+        }
+    return {
+        f"{prefix}_leads_closer": float(values[direction]),
+        f"{prefix}_transition_exists": float(values[10 + direction]),
+        f"{prefix}_opposing_ahead": float(values[14 + direction]),
+        f"{prefix}_same_direction_ahead": float(values[18 + direction]),
+        f"{prefix}_switch_ahead": float(values[22 + direction]),
+        f"{prefix}_normalized_distance": float(values[26 + direction]),
+    }
+
+
+def raw_logits(policy: Any, observation: Any) -> list[float]:
+    raw_policy = getattr(policy, "rl_policy", None)
+    if raw_policy is None or not hasattr(raw_policy, "masked_logits"):
+        return []
+    try:
+        logits = raw_policy.masked_logits(np.asarray([observation], dtype=np.float32))
+        return [float(value) for value in logits[0].detach().cpu().tolist()]
+    except Exception:
+        return []
+
+
+def logit_features(
+    prefix: str,
+    logits: list[float],
+    baseline_action: int,
+    candidate_action: int,
+) -> dict[str, float]:
+    if not logits:
+        return {
+            f"{prefix}_baseline_logit": float("nan"),
+            f"{prefix}_candidate_logit": float("nan"),
+            f"{prefix}_candidate_minus_baseline_logit": float("nan"),
+            f"{prefix}_top_logit_margin": float("nan"),
+        }
+    finite_logits = [value for value in logits if np.isfinite(value)]
+    top_margin = float("nan")
+    if len(finite_logits) >= 2:
+        top_two = sorted(finite_logits, reverse=True)[:2]
+        top_margin = top_two[0] - top_two[1]
+    baseline_logit = logits[baseline_action] if baseline_action < len(logits) else float("nan")
+    candidate_logit = logits[candidate_action] if candidate_action < len(logits) else float("nan")
+    return {
+        f"{prefix}_baseline_logit": baseline_logit,
+        f"{prefix}_candidate_logit": candidate_logit,
+        f"{prefix}_candidate_minus_baseline_logit": candidate_logit - baseline_logit,
+        f"{prefix}_top_logit_margin": top_margin,
+    }
+
+
 def diff_row(
     args: argparse.Namespace,
     seed: int,
@@ -200,6 +284,8 @@ def diff_row(
     baseline_target = target_metrics(obs_builder, handle, baseline_action)
     candidate_target = target_metrics(obs_builder, handle, candidate_action)
     prefixes = planned_prefixes(baseline_policy, obs_builder, baseline_actions)
+    baseline_logits = raw_logits(baseline_policy, observation)
+    candidate_logits = raw_logits(candidate_policy, observation)
     return {
         "seed": seed,
         "env_time": int(env._elapsed_steps),
@@ -211,6 +297,7 @@ def diff_row(
         "speed": safe_float(agent.speed_counter.speed),
         "distance": distance,
         "slack": slack,
+        **observation_scalar_features(observation),
         **mask_values(observation),
         "baseline_raw_action": baseline_raw_actions.get(handle),
         "baseline_raw_action_name": action_name(baseline_raw_actions.get(handle)),
@@ -224,12 +311,34 @@ def diff_row(
         "baseline_target_direction": baseline_target["target_direction"],
         "baseline_target_distance": baseline_target["target_distance"],
         "baseline_target_occupied_by_other": baseline_target["target_occupied_by_other"],
+        **direction_features(
+            observation,
+            "baseline_direction",
+            baseline_target["target_direction"],
+        ),
         "candidate_target": candidate_target["target"],
         "candidate_target_direction": candidate_target["target_direction"],
         "candidate_target_distance": candidate_target["target_distance"],
         "candidate_target_occupied_by_other": candidate_target["target_occupied_by_other"],
+        **direction_features(
+            observation,
+            "candidate_direction",
+            candidate_target["target_direction"],
+        ),
         "candidate_distance_delta": (
             candidate_target["target_distance"] - baseline_target["target_distance"]
+        ),
+        **logit_features(
+            "baseline_raw",
+            baseline_logits,
+            baseline_action,
+            candidate_action,
+        ),
+        **logit_features(
+            "candidate_raw",
+            candidate_logits,
+            baseline_action,
+            candidate_action,
         ),
         "baseline_corridor_len": corridor_len(obs_builder, handle, baseline_action),
         "candidate_corridor_len": corridor_len(obs_builder, handle, candidate_action),

@@ -168,6 +168,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rewards", default=DEFAULT_REWARDS)
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--seed", type=int, default=10)
+    parser.add_argument(
+        "--seeds",
+        help="Comma-separated exact seed list. Overrides --seed/--episodes when set.",
+    )
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument(
@@ -183,8 +187,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     rows = []
-    for index in range(args.episodes):
-        seed = args.seed + index
+    seeds = (
+        [int(item) for item in args.seeds.split(",") if item.strip()]
+        if args.seeds
+        else [args.seed + index for index in range(args.episodes)]
+    )
+    for seed in seeds:
         row = compare_seed(args, seed)
         rows.append(row)
         print(

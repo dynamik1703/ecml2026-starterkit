@@ -74,6 +74,22 @@ Current behavior-cloning findings:
   `MOVE_FORWARD -> MOVE_LEFT` changes, e.g. seeds 519, 548, 626, 497 and 603.
   A useful learned-action gate must distinguish these contexts before accepting
   BC actions online.
+- Experimental `submission.bc_gated_policy.MyPolicy` keeps guarded rerank as
+  the default action source and accepts only narrow BC checkpoint deviations.
+  With `/private/tmp/ecml_bc_rerank_20.pt`, broad validation versus guarded
+  rerank found no regressions over seeds 10-709:
+  - Seeds 10-209: `0.916097 / 0.940000` versus `0.915676 / 0.940000`;
+    reward wins/losses `1/0`, success wins/losses `0/0`.
+  - Seeds 210-309: unchanged `0.928594 / 0.948333`; reward wins/losses `0/0`,
+    success wins/losses `0/0`.
+  - Seeds 310-509: `0.912683 / 0.935000` versus `0.912328 / 0.934167`;
+    reward wins/losses `1/0`, success wins/losses `1/0`.
+  - Seeds 510-709: `0.925526 / 0.944167` versus `0.925131 / 0.944167`;
+    reward wins/losses `1/0`, success wins/losses `0/0`.
+  - Aggregate seeds 10-709: approximately `+0.000335` reward and `+0.000238`
+    success, with reward wins on seeds 55, 325 and 653 and no observed losses.
+    This is promising as an ensemble/gating component, but still too narrow to
+    replace the Docker default before hidden-distribution validation.
 - A disjoint BC run trained on seeds 1000-1049 was also net-positive on
   seeds 10-209 (`0.916828 / 0.940833`) but had more downside: reward
   wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a
