@@ -43,6 +43,21 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --line-length 2
 ```
 
+To evaluate the same checkpoint with the deterministic hybrid safety layer,
+switch the policy class:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/evaluate_sampled.py \
+  --policy submission.hybrid_policy.MyPolicy \
+  --policy-checkpoint checkpoints/masked_ppo_route.pt \
+  --obs-builder submission.my_observation_builder.MyRouteConflictObservationBuilder \
+  --episodes 50 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2
+```
+
 Current submission policy is `submission.hybrid_policy.MyPolicy`, which wraps the
 torch actor with deterministic safety heuristics. A route-conflict checkpoint
 needs the route-conflict observation builder at inference time; do not drop a

@@ -21,8 +21,8 @@ class HybridPolicy:
     TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT = 15
     TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE = 25
 
-    def __init__(self):
-        self.rl_policy = ActorCritic()
+    def __init__(self, checkpoint_path: str | None = "./submission/checkpoint.pt"):
+        self.rl_policy = ActorCritic(checkpoint_path=checkpoint_path)
         self.reservation_policy = ReservationPolicy()
         self._corridor_locks = {}
         self._corridor_lock_block_counts = {}
