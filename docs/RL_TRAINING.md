@@ -46,6 +46,16 @@ Current behavior-cloning findings:
   wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a
   promising candidate, not yet as the submission checkpoint.
 
+Rejected PPO smoke after BC:
+- Init checkpoint `/private/tmp/ecml_bc_rerank_20.pt`, 3 PPO updates,
+  512 steps/update, `learning_rate=0.00005`, `teacher_ce_coef=0.02`,
+  `ent_coef=0.005`.
+- `RerankPolicy` evaluation on seeds 10-59 dropped to `0.907533 / 0.930000`
+  versus guarded rerank `0.914406 / 0.946667`.
+- The run had reward wins/losses `2/7` and success wins/losses `0/4`.
+  PPO needs a more conservative setup before it is useful: complete-episode
+  rollouts, reward/value normalization, and stronger KL/teacher anchoring.
+
 For route-conflict features and the conflict-priority reward, use the 52-feature
 observation builder. The flag keeps `obs_builder` and `obs_size` in sync:
 
