@@ -23,6 +23,9 @@ See [STEP-BY-STEP_GUIDE](STEP-BY-STEP_GUIDE.md) contributed by <a href="https://
 * Add `pip` dependencies to `submission/requirements.txt`.
 * All resources under `submission/` are added to the Docker image (add checkpoints here and load from your policy).
 
+This fork currently sets the Docker submission entrypoint to
+`submission.rerank_policy.MyPolicy` in `Dockerfile`.
+
 ### Train your model using reinforcement learning
 
 If you use reinforcement learning to train your policy, update the files in the submission folder to load your model either by setting *MyPolicy* using *policy_from_checkpoint.py* or a custom implementation.

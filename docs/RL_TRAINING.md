@@ -86,11 +86,12 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_route_intersection_events.csv
 ```
 
-Current submission policy is `submission.hybrid_policy.MyPolicy`, which wraps the
-torch actor with deterministic safety heuristics. A route-conflict checkpoint
-needs the route-conflict observation builder at inference time; do not drop a
-52-feature checkpoint into the current 36-feature submission path without also
-switching the observation builder.
+Current Docker submission policy is `submission.rerank_policy.MyPolicy`, which
+wraps the torch actor with deterministic safety heuristics and a conservative
+side-detour reranker. A route-conflict checkpoint needs the route-conflict
+observation builder at inference time; do not drop a 52-feature checkpoint into
+the current 36-feature submission path without also switching the observation
+builder.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
@@ -99,11 +100,11 @@ looked promising on some failures but degraded the 50-seed benchmark from
 `reward_mean=0.699032, success_rate_mean=0.94`. Treat future intersections as
 features or training labels first, not as broad hard masking.
 
-Candidate policy: `submission.rerank_policy.MyPolicy` keeps the hybrid safety
-pipeline but tries a conservative side-detour rerank when a `MOVE_FORWARD`
-candidate creates a near future reverse-edge conflict with a higher-priority
-train. It never reranks an existing left/right decision and does not introduce
-extra stop/yield actions.
+Current candidate/default policy: `submission.rerank_policy.MyPolicy` keeps the
+hybrid safety pipeline but tries a conservative side-detour rerank when a
+`MOVE_FORWARD` candidate creates a near future reverse-edge conflict with a
+higher-priority train. It never reranks an existing left/right decision and does
+not introduce extra stop/yield actions.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
@@ -119,3 +120,7 @@ Current local measurements:
 - Seeds 10-59: hybrid `0.912794 / 0.946667`, rerank `0.912459 / 0.946667`.
 - Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.914221 / 0.939167`.
 - Seeds 210-309: hybrid `0.924562 / 0.946667`, rerank `0.928594 / 0.948333`.
+- Seeds 310-509: hybrid `0.911885 / 0.935000`, rerank `0.913035 / 0.934167`.
+- Seeds 510-709: hybrid `0.920141 / 0.937500`, rerank `0.924645 / 0.942500`.
+- Aggregate seeds 10-709 over the non-overlapping windows above:
+  hybrid `0.916614 / 0.938333`, rerank `0.918914 / 0.940000`.
