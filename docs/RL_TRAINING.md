@@ -104,6 +104,18 @@ Expanded movement-only sample across seed windows 50-69, 100-111, 200-211,
   good/neutral/bad `1/4/0`; at threshold 0.95 it accepted `1/2/0`.
   This is directionally useful as a very conservative gate, but recall is still
   too low to justify changing the submission default.
+- Cross-split validation over split seeds 1, 3, 5, 7, 11, 13, 17 and 19 showed
+  the unweighted positive-vs-rest MLP was not robust enough: at threshold 0.95
+  it still accepted aggregate good/neutral/bad `8/22/2`.
+- The trainer now uses category-specific sample weights, defaulting to
+  good/neutral/bad `8.0/0.25/8.0`, so bad counterfactual overrides are not
+  drowned out by the many neutral negatives. With the same 8 split seeds:
+  - threshold 0.90 accepted `11/48/7`;
+  - threshold 0.95 accepted `9/17/0`;
+  - threshold 0.97 accepted `6/3/0`.
+  This satisfies the first safety criterion for analysis (`accepted_bad=0` at
+  high threshold), but recall remains low. Keep this as an experimental learned
+  gate signal, not the Docker default.
 
 Train a first gate classifier from one or more counterfactual CSVs:
 
@@ -113,7 +125,7 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   /private/tmp/ecml_counterfactual_move_50_20.csv \
   --epochs 500 \
   --hidden-size 32 \
-  --thresholds 0.5 0.75 0.9 \
+  --thresholds 0.75 0.9 0.95 0.97 \
   --output-checkpoint /private/tmp/ecml_counterfactual_gate_move.pt
 ```
 

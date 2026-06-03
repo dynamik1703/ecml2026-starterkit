@@ -199,6 +199,14 @@ def metrics(
     }
 
 
+def category_weight(category: str, args: argparse.Namespace) -> float:
+    if category == "good":
+        return args.positive_weight
+    if category == "bad":
+        return args.bad_negative_weight
+    return args.neutral_negative_weight
+
+
 def train(args: argparse.Namespace) -> dict[str, Any]:
     rows = read_rows(args.csv)
     if not rows:
@@ -222,19 +230,23 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     train_y = torch.as_tensor(y[train_mask], dtype=torch.float32)
     val_x = torch.as_tensor(x[val_mask], dtype=torch.float32)
     val_y = y[val_mask]
+    train_categories = [category for category, is_train in zip(categories, train_mask) if is_train]
+    val_categories = [category for category, is_val in zip(categories, val_mask) if is_val]
+    train_weights = torch.as_tensor(
+        [category_weight(category, args) for category in train_categories],
+        dtype=torch.float32,
+    )
 
     torch.manual_seed(args.torch_seed)
     model = GateMLP(input_dim=train_x.shape[1], hidden_size=args.hidden_size)
-    positives = float(train_y.sum().item())
-    negatives = float(len(train_y) - positives)
-    pos_weight = torch.tensor([negatives / max(1.0, positives)], dtype=torch.float32)
-    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    loss_fn = nn.BCEWithLogitsLoss(reduction="none")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     for _ in range(args.epochs):
         model.train()
         optimizer.zero_grad()
-        loss = loss_fn(model(train_x), train_y)
+        raw_loss = loss_fn(model(train_x), train_y)
+        loss = (raw_loss * train_weights).sum() / train_weights.sum().clamp_min(1.0)
         loss.backward()
         optimizer.step()
 
@@ -243,8 +255,6 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         train_prob = torch.sigmoid(model(train_x)).cpu().numpy()
         val_prob = torch.sigmoid(model(val_x)).cpu().numpy() if len(val_x) else np.array([])
 
-    train_categories = [category for category, is_train in zip(categories, train_mask) if is_train]
-    val_categories = [category for category, is_val in zip(categories, val_mask) if is_val]
     train_metrics = [
         metrics(train_prob, y[train_mask], train_categories, threshold)
         for threshold in args.thresholds
@@ -267,6 +277,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "feature_columns": feature_columns,
         "thresholds": list(args.thresholds),
+        "weights": {
+            "good": args.positive_weight,
+            "neutral": args.neutral_negative_weight,
+            "bad": args.bad_negative_weight,
+        },
         "train_metrics": train_metrics,
         "val_metrics": val_metrics,
     }
@@ -313,12 +328,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.0001)
+    parser.add_argument(
+        "--positive-weight",
+        type=float,
+        default=8.0,
+        help="Per-sample loss weight for good counterfactual actions.",
+    )
+    parser.add_argument(
+        "--neutral-negative-weight",
+        type=float,
+        default=0.25,
+        help="Per-sample loss weight for neutral counterfactual actions.",
+    )
+    parser.add_argument(
+        "--bad-negative-weight",
+        type=float,
+        default=8.0,
+        help="Per-sample loss weight for bad counterfactual actions.",
+    )
     parser.add_argument("--torch-seed", type=int, default=7)
     parser.add_argument(
         "--thresholds",
         type=float,
         nargs="+",
-        default=[0.5, 0.75, 0.9],
+        default=[0.75, 0.9, 0.95, 0.97],
     )
     parser.add_argument("--output-checkpoint", type=Path)
     parser.add_argument("--output-json", type=Path)
