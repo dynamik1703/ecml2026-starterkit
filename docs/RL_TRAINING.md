@@ -124,3 +124,20 @@ Current local measurements:
 - Seeds 510-709: hybrid `0.920141 / 0.937500`, rerank `0.924645 / 0.942500`.
 - Aggregate seeds 10-709 over the non-overlapping windows above:
   hybrid `0.916614 / 0.938333`, rerank `0.918914 / 0.940000`.
+
+Use the seedwise comparison tool to find reranker gains and regressions:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/compare_policies.py \
+  --episodes 50 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-csv /private/tmp/ecml_compare_10_50.csv
+```
+
+For seeds 10-59, the reranker changes only two seeds: seed 12 improves
+`+0.080593` reward with unchanged success, while seed 54 regresses `-0.097352`
+reward with unchanged success. This makes seed 54 the next target for a
+conservative reranker guard.
