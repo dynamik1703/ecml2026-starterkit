@@ -98,3 +98,24 @@ looked promising on some failures but degraded the 50-seed benchmark from
 `reward_mean=0.912794, success_rate_mean=0.946667` to
 `reward_mean=0.699032, success_rate_mean=0.94`. Treat future intersections as
 features or training labels first, not as broad hard masking.
+
+Candidate policy: `submission.rerank_policy.MyPolicy` keeps the hybrid safety
+pipeline but tries a conservative side-detour rerank when a `MOVE_FORWARD`
+candidate creates a near future reverse-edge conflict with a higher-priority
+train. It never reranks an existing left/right decision and does not introduce
+extra stop/yield actions.
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/evaluate_sampled.py \
+  --policy submission.rerank_policy.MyPolicy \
+  --episodes 200 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2
+```
+
+Current local measurements:
+- Seeds 10-59: hybrid `0.912794 / 0.946667`, rerank `0.912459 / 0.946667`.
+- Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.914221 / 0.939167`.
+- Seeds 210-309: hybrid `0.924562 / 0.946667`, rerank `0.928594 / 0.948333`.
