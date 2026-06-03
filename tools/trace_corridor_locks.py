@@ -171,6 +171,25 @@ def apply_locks_with_trace(
             continue
 
         lock = policy._conflicting_corridor_lock(handle, edges, planned_locks)
+        if lock is not None and policy._can_progress_through_corridor_lock(
+            obs_builder,
+            handle,
+            action_int,
+            lock,
+        ):
+            events.append(
+                {
+                    "kind": "allowed_progress_conflict",
+                    "agent_id": int(handle),
+                    "action_before": action_name(action_int),
+                    "action_before_id": action_int,
+                    "action_after": action_name(action_int),
+                    "action_after_id": action_int,
+                    **lock_summary(lock, elapsed, obs_builder),
+                }
+            )
+            continue
+
         if lock is not None and policy._should_wait_for_corridor_lock(lock, handle):
             fallback = policy._corridor_lock_fallback(
                 observations_by_handle.get(handle)
@@ -418,12 +437,16 @@ def main() -> int:
         "allowed_after_max_wait_events": sum(
             1 for row in rows if row["kind"] == "allowed_after_max_wait"
         ),
+        "allowed_progress_conflict_events": sum(
+            1 for row in rows if row["kind"] == "allowed_progress_conflict"
+        ),
     }
 
     print(
         "seed={seed} reward={normalized_reward:.6f} success={success_rate:.6f} "
         "events={events} blocked={blocked_events} created={created_events} "
-        "allowed_after_max_wait={allowed_after_max_wait_events}".format(
+        "allowed_after_max_wait={allowed_after_max_wait_events} "
+        "allowed_progress_conflict={allowed_progress_conflict_events}".format(
             **summary
         )
     )

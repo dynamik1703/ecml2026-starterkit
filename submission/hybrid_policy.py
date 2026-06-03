@@ -18,6 +18,7 @@ class HybridPolicy:
     TEMPORAL_CORRIDOR_MIN_EDGES = 4
     TEMPORAL_CORRIDOR_MAX_AGE = 90
     TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT = 3
+    TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE = 8
 
     def __init__(self):
         self.rl_policy = ActorCritic()
@@ -77,6 +78,14 @@ class HybridPolicy:
                 edges,
                 planned_locks,
             )
+            if conflict_lock is not None and self._can_progress_through_corridor_lock(
+                obs_builder,
+                handle,
+                action_id,
+                conflict_lock,
+            ):
+                continue
+
             if conflict_lock is not None and self._should_wait_for_corridor_lock(
                 conflict_lock,
                 handle,
@@ -188,6 +197,64 @@ class HybridPolicy:
             return False
         self._corridor_lock_block_counts[key] = count + 1
         return True
+
+    def _can_progress_through_corridor_lock(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        lock: dict[str, Any],
+    ) -> bool:
+        if action not in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            return False
+
+        agent = obs_builder.env.agents[handle]
+        if agent.position is None:
+            return False
+
+        target_position, target_direction = obs_builder._action_target(handle, action)
+        if target_position is None or target_direction is None:
+            return False
+
+        owner = lock["owner"]
+        if owner >= len(obs_builder.env.agents):
+            return False
+
+        current_direction = (
+            agent.direction if agent.direction is not None else agent.initial_direction
+        )
+        distance_map = obs_builder._get_distance_map(handle)
+        current_distance = distance_map[
+            agent.position[0],
+            agent.position[1],
+            current_direction,
+        ]
+        new_distance = distance_map[
+            target_position[0],
+            target_position[1],
+            target_direction,
+        ]
+        if not (
+            np.isfinite(current_distance)
+            and np.isfinite(new_distance)
+            and new_distance < current_distance
+        ):
+            return False
+
+        lock_age = int(obs_builder.env._elapsed_steps) - int(lock["step"])
+        if lock_age >= self.TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE:
+            return True
+
+        own_slack = obs_builder._deadline_slack(handle, current_distance)
+        owner_distance = obs_builder._current_distance_to_waypoint(owner)
+        owner_slack = obs_builder._deadline_slack(owner, owner_distance)
+        if not (np.isfinite(own_slack) and np.isfinite(owner_slack)):
+            return False
+        return own_slack <= owner_slack
 
     def _corridor_lock_fallback(self, observation: Any) -> int | None:
         mask = self._mask_from_observation(observation)
