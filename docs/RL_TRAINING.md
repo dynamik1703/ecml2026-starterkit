@@ -29,6 +29,19 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-checkpoint /private/tmp/ecml_bc_rerank_20.pt
 ```
 
+Inspect first synchronized action differences between guarded rerank and a BC
+checkpoint:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/analyze_policy_action_diffs.py \
+  --candidate-checkpoint /private/tmp/ecml_bc_rerank_20.pt \
+  --seeds 55,56,207,305,519,548,626 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-csv /private/tmp/ecml_bc_action_diffs_known.csv
+```
+
 Current behavior-cloning findings:
 - `seed=10`, `episodes=20`, `epochs=3` collected 50,408 valid samples and only
   28 teacher/reference disagreements. Pure `ActorCritic` evaluation on seeds
@@ -38,9 +51,9 @@ Current behavior-cloning findings:
 - The same checkpoint inside `RerankPolicy` scored `0.917465 / 0.946667` on
   seeds 10-59, versus current guarded rerank `0.914406 / 0.946667`.
 - On seeds 10-209, that BC+Rerank checkpoint scored `0.917233 / 0.941667`
-  versus current guarded rerank `0.914246 / 0.938333`: reward delta
-  `+0.002987`, success delta `+0.003333`, reward wins/losses `7/1`, success
-  wins/losses `4/0`.
+  versus current guarded rerank `0.915676 / 0.940000`: reward delta
+  `+0.001556`, success delta `+0.001667`, reward wins/losses `3/1`, success
+  wins/losses `2/0`.
 - Broader BC+Rerank validation of `/private/tmp/ecml_bc_rerank_20.pt` did not
   justify direct submission replacement:
   - Seeds 210-309: `0.925978 / 0.946667` versus guarded rerank
@@ -52,9 +65,15 @@ Current behavior-cloning findings:
   - Seeds 510-709: `0.923788 / 0.941667` versus guarded rerank
     `0.925131 / 0.944167`; reward wins/losses `4/6`, success wins/losses
     `1/4`.
-  - Aggregate seeds 10-709: approximately `+0.000061` reward and `+0.000238`
+  - Aggregate seeds 10-709: approximately `-0.000347` reward and `-0.000238`
     success versus guarded rerank, with several hard success regressions. Keep
     this as a training signal, not as the current submission checkpoint.
+- First-difference action diagnostics show that many true BC changes are
+  `MOVE_RIGHT -> MOVE_FORWARD`; this creates wins such as seeds 55, 56 and 207,
+  but also hard losses such as seed 305. Several broad-window losses are
+  `MOVE_FORWARD -> MOVE_LEFT` changes, e.g. seeds 519, 548, 626, 497 and 603.
+  A useful learned-action gate must distinguish these contexts before accepting
+  BC actions online.
 - A disjoint BC run trained on seeds 1000-1049 was also net-positive on
   seeds 10-209 (`0.916828 / 0.940833`) but had more downside: reward
   wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a
