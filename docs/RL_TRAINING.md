@@ -91,3 +91,10 @@ torch actor with deterministic safety heuristics. A route-conflict checkpoint
 needs the route-conflict observation builder at inference time; do not drop a
 52-feature checkpoint into the current 36-feature submission path without also
 switching the observation builder.
+
+Rejected shortcut: a hard future-head-on yield rule that stopped the lower
+priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
+looked promising on some failures but degraded the 50-seed benchmark from
+`reward_mean=0.912794, success_rate_mean=0.946667` to
+`reward_mean=0.699032, success_rate_mean=0.94`. Treat future intersections as
+features or training labels first, not as broad hard masking.
