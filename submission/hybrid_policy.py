@@ -14,6 +14,7 @@ from submission.reservation_policy import ReservationPolicy
 
 class HybridPolicy:
     SIDE_DETOUR_MARGIN = 4.0
+    ADJACENT_ESCAPE_MARGIN = 400.0
     LONG_LOOKAHEAD_CELLS = 45
     TEMPORAL_CORRIDOR_MIN_EDGES = 4
     TEMPORAL_CORRIDOR_MAX_AGE = 90
@@ -47,6 +48,7 @@ class HybridPolicy:
         ):
             return actions
         adjusted = self._detour_around_long_opposing(actions, context.obs_builder)
+        adjusted = self._break_adjacent_deadlocks(adjusted, context.obs_builder)
         return self._apply_temporal_corridor_locks(
             handles,
             observations,
@@ -263,6 +265,140 @@ class HybridPolicy:
         if mask[ReservationPolicy.DO_NOTHING] >= 0.5:
             return ReservationPolicy.DO_NOTHING
         return None
+
+    def _break_adjacent_deadlocks(
+        self,
+        actions: Dict[int, RailEnvActions],
+        obs_builder: Any,
+    ) -> Dict[int, RailEnvActions]:
+        adjusted = dict(actions)
+        reserved_targets = set()
+        for handle in sorted(actions, key=lambda h: self._priority_key(obs_builder, h)):
+            action = adjusted[handle]
+            action_id = int(action.value) if hasattr(action, "value") else int(action)
+            escape = self._adjacent_deadlock_escape(
+                handle,
+                action_id,
+                reserved_targets,
+                obs_builder,
+            )
+            if escape is not None:
+                adjusted[handle] = RailEnvActions(escape)
+                action_id = escape
+
+            target, _ = obs_builder._action_target(handle, action_id)
+            if target is not None:
+                reserved_targets.add(target)
+        return adjusted
+
+    def _adjacent_deadlock_escape(
+        self,
+        handle: int,
+        action: int,
+        reserved_targets: set[tuple[int, int]],
+        obs_builder: Any,
+    ) -> int | None:
+        agent = obs_builder.env.agents[handle]
+        if agent.position is None:
+            return None
+
+        blocked_by = self._adjacent_mutual_blocker(handle, action, obs_builder)
+        if blocked_by is None:
+            return None
+
+        mask = obs_builder._coordination_masks.get(
+            handle,
+            obs_builder._build_local_action_mask(handle),
+        )
+        direction = agent.direction if agent.direction is not None else agent.initial_direction
+        distance_map = obs_builder._get_distance_map(handle)
+        current_distance = distance_map[agent.position[0], agent.position[1], direction]
+
+        best_action = None
+        best_distance = np.inf
+        for candidate in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_RIGHT,
+            ReservationPolicy.MOVE_FORWARD,
+        ):
+            if candidate == action or mask[candidate] < 0.5:
+                continue
+            target, target_direction = obs_builder._action_target(handle, candidate)
+            if target is None or target_direction is None:
+                continue
+            if target in reserved_targets or obs_builder._occupied_by_other(target, handle):
+                continue
+
+            candidate_distance = distance_map[target[0], target[1], target_direction]
+            if not np.isfinite(candidate_distance):
+                continue
+            if (
+                np.isfinite(current_distance)
+                and candidate_distance > current_distance + self.ADJACENT_ESCAPE_MARGIN
+            ):
+                continue
+            if candidate_distance < best_distance:
+                best_distance = candidate_distance
+                best_action = candidate
+
+        return best_action
+
+    def _adjacent_mutual_blocker(
+        self,
+        handle: int,
+        action: int,
+        obs_builder: Any,
+    ) -> int | None:
+        if action in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            target, _ = obs_builder._action_target(handle, action)
+            if target is not None:
+                blocker = obs_builder._agent_at(target)
+                if blocker != -1 and blocker != handle:
+                    return (
+                        int(blocker)
+                        if self._targets_agent_position(blocker, handle, obs_builder)
+                        else None
+                    )
+
+        for candidate in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            target, _ = obs_builder._action_target(handle, candidate)
+            if target is None:
+                continue
+            blocker = obs_builder._agent_at(target)
+            if blocker == -1 or blocker == handle:
+                continue
+            if self._targets_agent_position(blocker, handle, obs_builder):
+                return int(blocker)
+        return None
+
+    def _targets_agent_position(
+        self,
+        handle: int,
+        target_handle: int,
+        obs_builder: Any,
+    ) -> bool:
+        if handle >= len(obs_builder.env.agents):
+            return False
+        target_agent = obs_builder.env.agents[target_handle]
+        if target_agent.position is None:
+            return False
+        for action in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            target, _ = obs_builder._action_target(handle, action)
+            if target == target_agent.position:
+                return True
+        return False
 
     def _detour_around_long_opposing(
         self,
