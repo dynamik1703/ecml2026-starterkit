@@ -41,6 +41,20 @@ Current behavior-cloning findings:
   versus current guarded rerank `0.914246 / 0.938333`: reward delta
   `+0.002987`, success delta `+0.003333`, reward wins/losses `7/1`, success
   wins/losses `4/0`.
+- Broader BC+Rerank validation of `/private/tmp/ecml_bc_rerank_20.pt` did not
+  justify direct submission replacement:
+  - Seeds 210-309: `0.925978 / 0.946667` versus guarded rerank
+    `0.928594 / 0.948333`; reward wins/losses `1/3`, success wins/losses
+    `0/1`.
+  - Seeds 310-509: `0.912208 / 0.935000` versus guarded rerank
+    `0.912328 / 0.934167`; reward wins/losses `3/4`, success wins/losses
+    `1/0`.
+  - Seeds 510-709: `0.923788 / 0.941667` versus guarded rerank
+    `0.925131 / 0.944167`; reward wins/losses `4/6`, success wins/losses
+    `1/4`.
+  - Aggregate seeds 10-709: approximately `+0.000061` reward and `+0.000238`
+    success versus guarded rerank, with several hard success regressions. Keep
+    this as a training signal, not as the current submission checkpoint.
 - A disjoint BC run trained on seeds 1000-1049 was also net-positive on
   seeds 10-209 (`0.916828 / 0.940833`) but had more downside: reward
   wins/losses `8/3`, success wins/losses `4/1`. Treat the BC checkpoint as a
