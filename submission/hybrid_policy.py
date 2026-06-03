@@ -18,8 +18,8 @@ class HybridPolicy:
     LONG_LOOKAHEAD_CELLS = 45
     TEMPORAL_CORRIDOR_MIN_EDGES = 4
     TEMPORAL_CORRIDOR_MAX_AGE = 90
-    TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT = 3
-    TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE = 8
+    TEMPORAL_CORRIDOR_MAX_CONFLICT_WAIT = 15
+    TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE = 25
 
     def __init__(self):
         self.rl_policy = ActorCritic()
@@ -250,13 +250,7 @@ class HybridPolicy:
         lock_age = int(obs_builder.env._elapsed_steps) - int(lock["step"])
         if lock_age >= self.TEMPORAL_CORRIDOR_STALE_PROGRESS_AGE:
             return True
-
-        own_slack = obs_builder._deadline_slack(handle, current_distance)
-        owner_distance = obs_builder._current_distance_to_waypoint(owner)
-        owner_slack = obs_builder._deadline_slack(owner, owner_distance)
-        if not (np.isfinite(own_slack) and np.isfinite(owner_slack)):
-            return False
-        return own_slack <= owner_slack
+        return False
 
     def _corridor_lock_fallback(self, observation: Any) -> int | None:
         mask = self._mask_from_observation(observation)
