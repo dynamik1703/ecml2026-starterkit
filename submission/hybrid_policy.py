@@ -81,6 +81,15 @@ class HybridPolicy:
                 edges,
                 planned_locks,
             )
+            if (
+                conflict_lock is not None
+                and self._can_override_corridor_lock_for_adjacent_escape(
+                    obs_builder,
+                    handle,
+                    action_id,
+                )
+            ):
+                continue
             if conflict_lock is not None and self._can_progress_through_corridor_lock(
                 obs_builder,
                 handle,
@@ -105,6 +114,27 @@ class HybridPolicy:
             planned_locks.append(lock)
 
         return adjusted
+
+    def _can_override_corridor_lock_for_adjacent_escape(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+    ) -> bool:
+        blocked_by = self._adjacent_mutual_blocker(
+            handle,
+            ReservationPolicy.STOP_MOVING,
+            obs_builder,
+        )
+        if blocked_by is None:
+            return False
+        return self._can_override_adjacent_escape_mask(
+            handle,
+            ReservationPolicy.STOP_MOVING,
+            action,
+            blocked_by,
+            obs_builder,
+        )
 
     def _sync_corridor_locks(self, obs_builder: Any) -> None:
         env = obs_builder.env
@@ -305,7 +335,9 @@ class HybridPolicy:
             handle,
             obs_builder._build_local_action_mask(handle),
         )
-        direction = agent.direction if agent.direction is not None else agent.initial_direction
+        direction = (
+            agent.direction if agent.direction is not None else agent.initial_direction
+        )
         distance_map = obs_builder._get_distance_map(handle)
         current_distance = distance_map[agent.position[0], agent.position[1], direction]
 
@@ -316,7 +348,15 @@ class HybridPolicy:
             ReservationPolicy.MOVE_RIGHT,
             ReservationPolicy.MOVE_FORWARD,
         ):
-            if candidate == action or mask[candidate] < 0.5:
+            if candidate == action:
+                continue
+            if mask[candidate] < 0.5 and not self._can_override_adjacent_escape_mask(
+                handle,
+                action,
+                candidate,
+                blocked_by,
+                obs_builder,
+            ):
                 continue
             target, target_direction = obs_builder._action_target(handle, candidate)
             if target is None or target_direction is None:
@@ -337,6 +377,61 @@ class HybridPolicy:
                 best_action = candidate
 
         return best_action
+
+    def _can_override_adjacent_escape_mask(
+        self,
+        handle: int,
+        current_action: int,
+        candidate: int,
+        blocked_by: int,
+        obs_builder: Any,
+    ) -> bool:
+        if current_action not in (
+            ReservationPolicy.DO_NOTHING,
+            ReservationPolicy.STOP_MOVING,
+        ):
+            return False
+        if candidate not in (ReservationPolicy.MOVE_LEFT, ReservationPolicy.MOVE_RIGHT):
+            return False
+
+        agent = obs_builder.env.agents[handle]
+        if not self._agent_is_moving(agent):
+            return False
+        if blocked_by >= len(obs_builder.env.agents):
+            return False
+        blocker = obs_builder.env.agents[blocked_by]
+        if blocker.position is None:
+            return False
+
+        direction = agent.direction if agent.direction is not None else agent.initial_direction
+        if agent.position is None or direction is None:
+            return False
+        transitions = obs_builder.env.rail.get_transitions((agent.position, direction))
+        target_direction = obs_builder._action_to_direction(candidate, direction)
+        if target_direction is None or not transitions[target_direction]:
+            return False
+
+        target = get_new_position(agent.position, target_direction)
+        if obs_builder._occupied_by_other(target, handle):
+            return False
+        if self._can_target_position(
+            target,
+            target_direction,
+            blocker.position,
+            obs_builder,
+        ):
+            return False
+
+        distance_map = obs_builder._get_distance_map(handle)
+        current_distance = distance_map[agent.position[0], agent.position[1], direction]
+        candidate_distance = distance_map[target[0], target[1], target_direction]
+        return bool(
+            np.isfinite(candidate_distance)
+            and (
+                not np.isfinite(current_distance)
+                or candidate_distance < current_distance
+            )
+        )
 
     def _adjacent_mutual_blocker(
         self,
