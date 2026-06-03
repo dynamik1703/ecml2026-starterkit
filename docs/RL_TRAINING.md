@@ -58,6 +58,21 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_counterfactual_decisions.csv
 ```
 
+For movement-only gate labels, restrict alternatives to route-changing actions:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --episodes 20 \
+  --seed 50 \
+  --num-agents 6 \
+  --line-length 2 \
+  --forced-actions LEFT,FORWARD,RIGHT \
+  --max-decisions-per-seed 6 \
+  --max-alternatives-per-decision 2 \
+  --output-csv /private/tmp/ecml_counterfactual_move_50_20.csv
+```
+
 Each row is a candidate training example for a learned gate/reranker:
 `reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
 forced action improved the baseline. Feature columns include observation
@@ -69,6 +84,27 @@ Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 The positive label was the known useful seed-55 `MOVE_RIGHT -> MOVE_FORWARD`
 override with reward delta `+0.084175`; most negative labels were unnecessary
 one-step `STOP_MOVING` overrides.
+
+Initial movement-only sample on seeds 50-69 produced 240 labels:
+reward wins/losses/ties `26/11/203`, success wins/losses/ties `7/7/226`.
+Using a conservative gate label (`success_delta > 0` or positive reward without
+success loss) yielded 25 positives. A first tiny MLP gate fit this small sample
+too easily: train precision/recall at threshold 0.90 was `1.000/0.667`, but
+validation precision/recall was `0.000/0.000` because the validation split had
+only one positive label. Conclusion: tooling works, but we need more
+positive-rich movement counterfactual data before deploying a learned gate.
+
+Train a first gate classifier from one or more counterfactual CSVs:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_counterfactual_gate.py \
+  /private/tmp/ecml_counterfactual_move_50_20.csv \
+  --epochs 500 \
+  --hidden-size 32 \
+  --thresholds 0.5 0.75 0.9 \
+  --output-checkpoint /private/tmp/ecml_counterfactual_gate_move.pt
+```
 
 Current behavior-cloning findings:
 - `seed=10`, `episodes=20`, `epochs=3` collected 50,408 valid samples and only

@@ -87,10 +87,14 @@ def valid_actions_from_mask(
     observation: Any,
     baseline_action: int,
     include_do_nothing: bool,
+    forced_actions: tuple[int, ...] | None,
 ) -> list[int]:
     values = np.asarray(observation, dtype=np.float32)
     mask = values[-5:] if values.shape[0] >= 5 else np.ones(5, dtype=np.float32)
-    action_pool = (0, *DEFAULT_ACTIONS) if include_do_nothing else DEFAULT_ACTIONS
+    if forced_actions is not None:
+        action_pool = forced_actions
+    else:
+        action_pool = (0, *DEFAULT_ACTIONS) if include_do_nothing else DEFAULT_ACTIONS
     return [
         action
         for action in action_pool
@@ -271,6 +275,7 @@ def collect_decisions(
                 observation,
                 baseline_action,
                 args.include_do_nothing,
+                args.forced_action_ids,
             )
             baseline_risk = future_risk(
                 policy,
@@ -459,9 +464,54 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-corridor-len", type=int, default=4)
     parser.add_argument("--critical-only", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-do-nothing", action="store_true")
+    parser.add_argument(
+        "--forced-actions",
+        help=(
+            "Comma-separated action IDs or names to consider as alternatives, "
+            "for example 1,2,3 or LEFT,FORWARD,RIGHT."
+        ),
+    )
     parser.add_argument("--output-csv", type=Path)
     parser.add_argument("--output-json", type=Path)
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.forced_action_ids = parse_forced_actions(args.forced_actions)
+    return args
+
+
+def parse_forced_actions(value: str | None) -> tuple[int, ...] | None:
+    if not value:
+        return None
+    mapping = {
+        "N": 0,
+        "DO_NOTHING": 0,
+        "LEFT": 1,
+        "MOVE_LEFT": 1,
+        "L": 1,
+        "FORWARD": 2,
+        "MOVE_FORWARD": 2,
+        "F": 2,
+        "RIGHT": 3,
+        "MOVE_RIGHT": 3,
+        "R": 3,
+        "STOP": 4,
+        "STOP_MOVING": 4,
+        "S": 4,
+    }
+    actions = []
+    for item in value.split(","):
+        token = item.strip().upper()
+        if not token:
+            continue
+        if token.isdigit():
+            action = int(token)
+        else:
+            if token not in mapping:
+                raise argparse.ArgumentTypeError(f"Unknown action token: {item}")
+            action = mapping[token]
+        if action < 0 or action > 4:
+            raise argparse.ArgumentTypeError(f"Action out of range 0..4: {item}")
+        actions.append(action)
+    return tuple(dict.fromkeys(actions))
 
 
 def main() -> int:
