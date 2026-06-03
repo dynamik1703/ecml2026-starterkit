@@ -89,10 +89,21 @@ Initial movement-only sample on seeds 50-69 produced 240 labels:
 reward wins/losses/ties `26/11/203`, success wins/losses/ties `7/7/226`.
 Using a conservative gate label (`success_delta > 0` or positive reward without
 success loss) yielded 25 positives. A first tiny MLP gate fit this small sample
-too easily: train precision/recall at threshold 0.90 was `1.000/0.667`, but
-validation precision/recall was `0.000/0.000` because the validation split had
-only one positive label. Conclusion: tooling works, but we need more
-positive-rich movement counterfactual data before deploying a learned gate.
+too easily, so we expanded the data and switched the trainer to seed-grouped
+shuffle validation.
+
+Expanded movement-only sample across seed windows 50-69, 100-111, 200-211,
+320-331 and 648-659 produced 814 labels from 68 seeds:
+- Conservative labels: 67 good, 24 bad, 723 neutral.
+- By transition: `MOVE_FORWARD->MOVE_LEFT` 16/9/237, `MOVE_FORWARD->MOVE_RIGHT`
+  24/8/316, `MOVE_LEFT->MOVE_FORWARD` 14/2/88, `MOVE_RIGHT->MOVE_FORWARD`
+  12/5/82, `STOP_MOVING->MOVE_FORWARD` 1/0/0 (good/bad/neutral).
+- Linear gate at threshold 0.90 on validation accepted good/neutral/bad
+  `1/1/1`; too risky because it accepted a bad override.
+- 32-hidden-unit MLP at threshold 0.90 on validation accepted
+  good/neutral/bad `1/4/0`; at threshold 0.95 it accepted `1/2/0`.
+  This is directionally useful as a very conservative gate, but recall is still
+  too low to justify changing the submission default.
 
 Train a first gate classifier from one or more counterfactual CSVs:
 

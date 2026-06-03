@@ -93,6 +93,17 @@ def label_row(row: dict[str, str], reward_epsilon: float) -> int:
     return int(reward_delta > reward_epsilon)
 
 
+def outcome_category(row: dict[str, str], reward_epsilon: float) -> str:
+    reward_delta = safe_float(row.get("reward_delta"))
+    success_delta = safe_float(row.get("success_delta"))
+    failed_delta = safe_float(row.get("failed_agents_delta"))
+    if success_delta < -1e-9 or failed_delta > 0 or reward_delta < -reward_epsilon:
+        return "bad"
+    if success_delta > 1e-9 or reward_delta > reward_epsilon:
+        return "good"
+    return "neutral"
+
+
 def choose_feature_columns(rows: list[dict[str, str]]) -> list[str]:
     columns = sorted({key for row in rows for key in row})
     feature_columns = []
@@ -119,10 +130,21 @@ def feature_matrix(
     return matrix
 
 
-def seed_split(rows: list[dict[str, str]], val_fraction: float) -> tuple[np.ndarray, np.ndarray]:
+def seed_split(
+    rows: list[dict[str, str]],
+    val_fraction: float,
+    split_seed: int,
+    ordered: bool,
+) -> tuple[np.ndarray, np.ndarray]:
     seeds = sorted({int(float(row["seed"])) for row in rows})
     val_count = max(1, int(round(len(seeds) * val_fraction))) if len(seeds) > 1 else 0
-    val_seeds = set(seeds[-val_count:]) if val_count else set()
+    if ordered:
+        split_seeds = seeds
+    else:
+        rng = np.random.default_rng(split_seed)
+        split_seeds = list(seeds)
+        rng.shuffle(split_seeds)
+    val_seeds = set(split_seeds[-val_count:]) if val_count else set()
     train_mask = np.array([int(float(row["seed"])) not in val_seeds for row in rows])
     val_mask = ~train_mask
     if not train_mask.any():
@@ -144,6 +166,7 @@ def standardize(
 def metrics(
     probabilities: np.ndarray,
     labels: np.ndarray,
+    categories: list[str],
     threshold: float,
 ) -> dict[str, float]:
     predictions = probabilities >= threshold
@@ -155,6 +178,11 @@ def metrics(
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     accuracy = (tp + tn) / len(labels) if len(labels) else 0.0
+    accepted_categories = [
+        category
+        for category, prediction in zip(categories, predictions)
+        if prediction
+    ]
     return {
         "threshold": threshold,
         "tp": tp,
@@ -164,6 +192,10 @@ def metrics(
         "precision": precision,
         "recall": recall,
         "accuracy": accuracy,
+        "accepted": len(accepted_categories),
+        "accepted_good": accepted_categories.count("good"),
+        "accepted_neutral": accepted_categories.count("neutral"),
+        "accepted_bad": accepted_categories.count("bad"),
     }
 
 
@@ -177,7 +209,13 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
 
     x_raw = feature_matrix(rows, feature_columns)
     y = np.asarray([label_row(row, args.reward_epsilon) for row in rows], dtype=np.float32)
-    train_mask, val_mask = seed_split(rows, args.val_fraction)
+    categories = [outcome_category(row, args.reward_epsilon) for row in rows]
+    train_mask, val_mask = seed_split(
+        rows,
+        args.val_fraction,
+        args.split_seed,
+        args.ordered_seed_split,
+    )
     x, mean, std = standardize(x_raw[train_mask], x_raw)
 
     train_x = torch.as_tensor(x[train_mask], dtype=torch.float32)
@@ -205,8 +243,16 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         train_prob = torch.sigmoid(model(train_x)).cpu().numpy()
         val_prob = torch.sigmoid(model(val_x)).cpu().numpy() if len(val_x) else np.array([])
 
-    train_metrics = [metrics(train_prob, y[train_mask], threshold) for threshold in args.thresholds]
-    val_metrics = [metrics(val_prob, val_y, threshold) for threshold in args.thresholds] if len(val_y) else []
+    train_categories = [category for category, is_train in zip(categories, train_mask) if is_train]
+    val_categories = [category for category, is_val in zip(categories, val_mask) if is_val]
+    train_metrics = [
+        metrics(train_prob, y[train_mask], train_categories, threshold)
+        for threshold in args.thresholds
+    ]
+    val_metrics = [
+        metrics(val_prob, val_y, val_categories, threshold)
+        for threshold in args.thresholds
+    ] if len(val_y) else []
     summary = {
         "rows": len(rows),
         "features": len(feature_columns),
@@ -216,6 +262,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "negative_rows": int(len(y) - y.sum()),
         "train_positive_rows": int(y[train_mask].sum()),
         "val_positive_rows": int(y[val_mask].sum()) if val_mask.any() else 0,
+        "val_seeds": sorted(
+            {int(float(row["seed"])) for row, is_val in zip(rows, val_mask) if is_val}
+        ),
         "feature_columns": feature_columns,
         "thresholds": list(args.thresholds),
         "train_metrics": train_metrics,
@@ -254,6 +303,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("csv", nargs="+", type=Path)
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--val-fraction", type=float, default=0.25)
+    parser.add_argument("--split-seed", type=int, default=13)
+    parser.add_argument(
+        "--ordered-seed-split",
+        action="store_true",
+        help="Use the highest seeds as validation instead of shuffling seed groups.",
+    )
     parser.add_argument("--hidden-size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.001)
@@ -283,7 +338,9 @@ def main() -> int:
         print(
             "  threshold={threshold:.2f} precision={precision:.3f} "
             "recall={recall:.3f} accuracy={accuracy:.3f} "
-            "tp/fp/fn/tn={tp}/{fp}/{fn}/{tn}".format(**metric)
+            "tp/fp/fn/tn={tp}/{fp}/{fn}/{tn} "
+            "accepted(g/n/b)={accepted_good}/{accepted_neutral}/"
+            "{accepted_bad}".format(**metric)
         )
     if summary["val_metrics"]:
         print("Validation metrics:")
@@ -291,7 +348,9 @@ def main() -> int:
             print(
                 "  threshold={threshold:.2f} precision={precision:.3f} "
                 "recall={recall:.3f} accuracy={accuracy:.3f} "
-                "tp/fp/fn/tn={tp}/{fp}/{fn}/{tn}".format(**metric)
+                "tp/fp/fn/tn={tp}/{fp}/{fn}/{tn} "
+                "accepted(g/n/b)={accepted_good}/{accepted_neutral}/"
+                "{accepted_bad}".format(**metric)
             )
     return 0
 
