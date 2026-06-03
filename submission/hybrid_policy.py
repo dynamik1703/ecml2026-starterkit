@@ -407,6 +407,13 @@ class HybridPolicy:
     ) -> Dict[int, RailEnvActions]:
         adjusted = dict(actions)
         reserved_targets = set()
+        planned_targets = {}
+        for handle, action in actions.items():
+            action_id = int(action.value) if hasattr(action, "value") else int(action)
+            target, _ = obs_builder._action_target(handle, action_id)
+            if target is not None:
+                planned_targets[handle] = target
+
         for handle in sorted(actions, key=lambda h: self._priority_key(obs_builder, h)):
             action = adjusted[handle]
             action_id = int(action.value) if hasattr(action, "value") else int(action)
@@ -422,7 +429,16 @@ class HybridPolicy:
                     reserved_targets.add(target)
                 continue
 
-            detour = self._best_side_detour(handle, reserved_targets, obs_builder)
+            other_planned_targets = {
+                target
+                for other_handle, target in planned_targets.items()
+                if other_handle != handle
+            }
+            detour = self._best_side_detour(
+                handle,
+                reserved_targets | other_planned_targets,
+                obs_builder,
+            )
             if detour is not None:
                 adjusted[handle] = RailEnvActions(detour)
 
@@ -460,6 +476,14 @@ class HybridPolicy:
             target = get_new_position(agent.position, new_direction)
             if target in reserved_targets or obs_builder._occupied_by_other(target, handle):
                 continue
+            if self._side_detour_creates_adjacent_trap(
+                target,
+                new_direction,
+                reserved_targets,
+                distance_map,
+                obs_builder,
+            ):
+                continue
             new_dist = distance_map[target[0], target[1], new_direction]
             if not np.isfinite(new_dist):
                 continue
@@ -469,6 +493,32 @@ class HybridPolicy:
                 best_dist = new_dist
                 best_action = action
         return best_action
+
+    def _side_detour_creates_adjacent_trap(
+        self,
+        target: tuple[int, int],
+        direction: int,
+        reserved_targets: set[tuple[int, int]],
+        distance_map: Any,
+        obs_builder: Any,
+    ) -> bool:
+        if not reserved_targets:
+            return False
+
+        transitions = obs_builder.env.rail.get_transitions((target, direction))
+        next_direction = self._best_progress_direction(
+            transitions,
+            target,
+            distance_map,
+        )
+        if next_direction is None:
+            return False
+
+        next_position = get_new_position(target, next_direction)
+        for reserved in reserved_targets:
+            if self._manhattan(next_position, reserved) <= 1:
+                return True
+        return False
 
     def _has_long_opposing_ahead(
         self,
@@ -530,6 +580,10 @@ class HybridPolicy:
         if any(transitions):
             return fast_argmax(transitions)
         return None
+
+    @staticmethod
+    def _manhattan(left: tuple[int, int], right: tuple[int, int]) -> int:
+        return abs(left[0] - right[0]) + abs(left[1] - right[1])
 
     @staticmethod
     def _priority_key(obs_builder: Any, handle: int) -> tuple[float, float, int]:
