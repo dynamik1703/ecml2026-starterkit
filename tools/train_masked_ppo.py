@@ -19,7 +19,12 @@ from submission.my_policy import ActorCritic
 
 DEFAULT_BASE_STATE = "reinforcement-learning/sampling/level_0_scenario_1.pkl"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
+DEFAULT_ROUTE_CONFLICT_OBS_BUILDER = (
+    "submission.my_observation_builder.MyRouteConflictObservationBuilder"
+)
 DEFAULT_TEACHER_POLICY = "submission.hybrid_policy.MyPolicy"
+BASE_OBS_SIZE = 36
+ROUTE_CONFLICT_OBS_SIZE = 52
 DISTANCE_FEATURE_INDEX = 30
 MOVE_FORWARD_ACTION = 2
 ROUTE_CONFLICT_DISTANCE_INDEX = 36
@@ -463,10 +468,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
     parser.add_argument(
+        "--use-route-conflict-obs",
+        action="store_true",
+        help=(
+            "Use MyRouteConflictObservationBuilder and obs_size=52. "
+            "Required for the route/future conflict reward terms."
+        ),
+    )
+    parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
-    parser.add_argument("--obs-size", type=int, default=36)
+    parser.add_argument("--obs-size", type=int)
     parser.add_argument("--n-actions", type=int, default=5)
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--num-hidden-layers", type=int, default=3)
@@ -541,12 +554,51 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
+    if args.use_route_conflict_obs:
+        if args.obs_builder == DEFAULT_OBS_BUILDER:
+            args.obs_builder = DEFAULT_ROUTE_CONFLICT_OBS_BUILDER
+        if args.obs_size is None:
+            args.obs_size = ROUTE_CONFLICT_OBS_SIZE
+    elif args.obs_size is None:
+        args.obs_size = BASE_OBS_SIZE
+
+    if (
+        args.conflict_priority_penalty_coef != 0.0
+        and args.obs_size <= FUTURE_CONFLICT_OTHER_TIGHTER_INDEX
+    ):
+        raise ValueError(
+            "--conflict-priority-penalty-coef requires route-conflict features. "
+            "Pass --use-route-conflict-obs, or set --obs-builder "
+            f"{DEFAULT_ROUTE_CONFLICT_OBS_BUILDER} --obs-size {ROUTE_CONFLICT_OBS_SIZE}."
+        )
+
+    if args.use_route_conflict_obs and args.obs_size != ROUTE_CONFLICT_OBS_SIZE:
+        raise ValueError(
+            "--use-route-conflict-obs expects --obs-size "
+            f"{ROUTE_CONFLICT_OBS_SIZE}, got {args.obs_size}."
+        )
+    return args
+
+
 def main() -> int:
-    args = parse_args()
+    args = finalize_args(parse_args())
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if args.rollout_temperature <= 0:
         raise ValueError("--rollout-temperature must be positive")
+
+    print(
+        "training_config "
+        f"obs_builder={args.obs_builder} "
+        f"obs_size={args.obs_size} "
+        f"num_agents={args.num_agents} "
+        f"line_length={args.line_length} "
+        f"updates={args.updates} "
+        f"steps_per_update={args.steps_per_update} "
+        f"episodes_per_update={args.episodes_per_update}",
+        flush=True,
+    )
 
     checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
     policy = ActorCritic(

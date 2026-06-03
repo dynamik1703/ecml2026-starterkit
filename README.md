@@ -27,6 +27,9 @@ See [STEP-BY-STEP_GUIDE](STEP-BY-STEP_GUIDE.md) contributed by <a href="https://
 
 If you use reinforcement learning to train your policy, update the files in the submission folder to load your model either by setting *MyPolicy* using *policy_from_checkpoint.py* or a custom implementation.
 
+For local masked PPO experiments with the torch policy and action masks, see
+[RL_TRAINING.md](docs/RL_TRAINING.md).
+
 There is an example for a trained checkpoint with a custom observation and policy. To use the pretrained checkpoint, add the following files from the */reinforcement-learning* folder to the */submission* folder:
 * my_observation_builder.py
 * my_policy.py
