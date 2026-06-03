@@ -116,6 +116,21 @@ Expanded movement-only sample across seed windows 50-69, 100-111, 200-211,
   This satisfies the first safety criterion for analysis (`accepted_bad=0` at
   high threshold), but recall remains low. Keep this as an experimental learned
   gate signal, not the Docker default.
+- A later movement-only batch on seeds 720-739 added 240 labels with reward
+  wins/losses/ties `17/21/202` and success wins/losses/ties `10/3/227`.
+  The combined 1054-row set has 80 good, 82 bad and 892 neutral labels.
+  Re-running the weighted binary gate on this broader set showed that the
+  earlier zero-bad result was not robust:
+  - threshold 0.90 accepted `20/55/4`;
+  - threshold 0.95 accepted `13/12/3`;
+  - threshold 0.97 accepted `7/2/1`.
+  Stronger bad weights and higher thresholds did not remove all bad accepts
+  without collapsing useful recall.
+- The trainer also supports `--objective multiclass`, learning separate
+  neutral/good/bad logits and accepting only actions with high `P(good)` and
+  low `P(bad)`. On the 1054-row set this still left isolated bad accepts even
+  with `--max-bad-probability 0.001`, so the current feature set is not yet
+  separable enough for an online learned gate deployment.
 
 Train a first gate classifier from one or more counterfactual CSVs:
 
@@ -127,6 +142,19 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --hidden-size 32 \
   --thresholds 0.75 0.9 0.95 0.97 \
   --output-checkpoint /private/tmp/ecml_counterfactual_gate_move.pt
+```
+
+For the three-class diagnostic variant:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_counterfactual_gate.py \
+  /private/tmp/ecml_counterfactual_move_50_20.csv \
+  /private/tmp/ecml_counterfactual_move_720_20.csv \
+  --objective multiclass \
+  --max-bad-probability 0.01 \
+  --epochs 500 \
+  --hidden-size 32
 ```
 
 Current behavior-cloning findings:

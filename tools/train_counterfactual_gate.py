@@ -49,19 +49,20 @@ IDENTITY_COLUMNS = {
 
 
 class GateMLP(nn.Module):
-    def __init__(self, input_dim: int, hidden_size: int):
+    def __init__(self, input_dim: int, hidden_size: int, output_dim: int = 1):
         super().__init__()
         if hidden_size <= 0:
-            self.net = nn.Linear(input_dim, 1)
+            self.net = nn.Linear(input_dim, output_dim)
         else:
             self.net = nn.Sequential(
                 nn.Linear(input_dim, hidden_size),
                 nn.ReLU(),
-                nn.Linear(hidden_size, 1),
+                nn.Linear(hidden_size, output_dim),
             )
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.net(features).squeeze(-1)
+        output = self.net(features)
+        return output.squeeze(-1) if output.shape[-1] == 1 else output
 
 
 def read_rows(paths: list[Path]) -> list[dict[str, str]]:
@@ -168,8 +169,15 @@ def metrics(
     labels: np.ndarray,
     categories: list[str],
     threshold: float,
+    bad_probabilities: np.ndarray | None = None,
+    max_bad_probability: float | None = None,
 ) -> dict[str, float]:
     predictions = probabilities >= threshold
+    if bad_probabilities is not None and max_bad_probability is not None:
+        predictions = np.logical_and(
+            predictions,
+            bad_probabilities <= max_bad_probability,
+        )
     positives = labels == 1
     tp = int(np.logical_and(predictions, positives).sum())
     fp = int(np.logical_and(predictions, ~positives).sum())
@@ -185,6 +193,7 @@ def metrics(
     ]
     return {
         "threshold": threshold,
+        "max_bad_probability": max_bad_probability,
         "tp": tp,
         "fp": fp,
         "fn": fn,
@@ -205,6 +214,14 @@ def category_weight(category: str, args: argparse.Namespace) -> float:
     if category == "bad":
         return args.bad_negative_weight
     return args.neutral_negative_weight
+
+
+def category_index(category: str) -> int:
+    if category == "good":
+        return 1
+    if category == "bad":
+        return 2
+    return 0
 
 
 def train(args: argparse.Namespace) -> dict[str, Any]:
@@ -238,29 +255,80 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     torch.manual_seed(args.torch_seed)
-    model = GateMLP(input_dim=train_x.shape[1], hidden_size=args.hidden_size)
-    loss_fn = nn.BCEWithLogitsLoss(reduction="none")
+    output_dim = 3 if args.objective == "multiclass" else 1
+    model = GateMLP(
+        input_dim=train_x.shape[1],
+        hidden_size=args.hidden_size,
+        output_dim=output_dim,
+    )
+    if args.objective == "multiclass":
+        train_y_class = torch.as_tensor(
+            [category_index(category) for category in train_categories],
+            dtype=torch.long,
+        )
+        class_weights = torch.as_tensor(
+            [
+                args.neutral_negative_weight,
+                args.positive_weight,
+                args.bad_negative_weight,
+            ],
+            dtype=torch.float32,
+        )
+        loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    else:
+        train_y_class = None
+        loss_fn = nn.BCEWithLogitsLoss(reduction="none")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     for _ in range(args.epochs):
         model.train()
         optimizer.zero_grad()
-        raw_loss = loss_fn(model(train_x), train_y)
-        loss = (raw_loss * train_weights).sum() / train_weights.sum().clamp_min(1.0)
+        logits = model(train_x)
+        if args.objective == "multiclass":
+            loss = loss_fn(logits, train_y_class)
+        else:
+            raw_loss = loss_fn(logits, train_y)
+            loss = (raw_loss * train_weights).sum() / train_weights.sum().clamp_min(1.0)
         loss.backward()
         optimizer.step()
 
     model.eval()
     with torch.no_grad():
-        train_prob = torch.sigmoid(model(train_x)).cpu().numpy()
-        val_prob = torch.sigmoid(model(val_x)).cpu().numpy() if len(val_x) else np.array([])
+        train_logits = model(train_x)
+        val_logits = model(val_x) if len(val_x) else None
+        if args.objective == "multiclass":
+            train_probs = torch.softmax(train_logits, dim=-1).cpu().numpy()
+            val_probs = torch.softmax(val_logits, dim=-1).cpu().numpy() if val_logits is not None else np.empty((0, 3))
+            train_prob = train_probs[:, 1]
+            train_bad_prob = train_probs[:, 2]
+            val_prob = val_probs[:, 1]
+            val_bad_prob = val_probs[:, 2]
+        else:
+            train_prob = torch.sigmoid(train_logits).cpu().numpy()
+            val_prob = torch.sigmoid(val_logits).cpu().numpy() if val_logits is not None else np.array([])
+            train_bad_prob = None
+            val_bad_prob = None
 
     train_metrics = [
-        metrics(train_prob, y[train_mask], train_categories, threshold)
+        metrics(
+            train_prob,
+            y[train_mask],
+            train_categories,
+            threshold,
+            train_bad_prob,
+            args.max_bad_probability if args.objective == "multiclass" else None,
+        )
         for threshold in args.thresholds
     ]
     val_metrics = [
-        metrics(val_prob, val_y, val_categories, threshold)
+        metrics(
+            val_prob,
+            val_y,
+            val_categories,
+            threshold,
+            val_bad_prob,
+            args.max_bad_probability if args.objective == "multiclass" else None,
+        )
         for threshold in args.thresholds
     ] if len(val_y) else []
     summary = {
@@ -277,6 +345,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "feature_columns": feature_columns,
         "thresholds": list(args.thresholds),
+        "objective": args.objective,
+        "max_bad_probability": args.max_bad_probability,
         "weights": {
             "good": args.positive_weight,
             "neutral": args.neutral_negative_weight,
@@ -294,7 +364,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 "config": {
                     "input_dim": train_x.shape[1],
                     "hidden_size": args.hidden_size,
+                    "output_dim": output_dim,
+                    "objective": args.objective,
                     "reward_epsilon": args.reward_epsilon,
+                    "max_bad_probability": args.max_bad_probability,
                     "feature_columns": feature_columns,
                     "mean": mean.astype(np.float32),
                     "std": std.astype(np.float32),
@@ -328,6 +401,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--weight-decay", type=float, default=0.0001)
+    parser.add_argument(
+        "--objective",
+        choices=["binary", "multiclass"],
+        default="binary",
+        help=(
+            "Use binary good-vs-rest training or three-class "
+            "neutral/good/bad training."
+        ),
+    )
+    parser.add_argument(
+        "--max-bad-probability",
+        type=float,
+        default=0.05,
+        help=(
+            "For multiclass training, accept an action only if its predicted "
+            "bad probability stays below this value."
+        ),
+    )
     parser.add_argument(
         "--positive-weight",
         type=float,
