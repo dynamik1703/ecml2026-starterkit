@@ -16,6 +16,7 @@ class RerankPolicy(HybridPolicy):
     FUTURE_RERANK_MAX_STEP = 24
     FUTURE_RERANK_MAX_ETA_GAP = 2.0
     FUTURE_RERANK_MIN_RISK_IMPROVEMENT = 20.0
+    FUTURE_RERANK_LEFT_MAX_SLACK = 115.0
 
     def act_many(
         self, handles: List[int], observations: List[Any], **kwargs
@@ -132,6 +133,7 @@ class RerankPolicy(HybridPolicy):
         )
         distance_map = obs_builder._get_distance_map(handle)
         current_distance = distance_map[agent.position[0], agent.position[1], direction]
+        current_slack = obs_builder._deadline_slack(handle, current_distance)
         mask = obs_builder._coordination_masks.get(
             handle,
             obs_builder._build_local_action_mask(handle),
@@ -145,6 +147,14 @@ class RerankPolicy(HybridPolicy):
             ReservationPolicy.MOVE_FORWARD,
         ):
             if candidate == baseline_action or mask[candidate] < 0.5:
+                continue
+            if (
+                candidate == ReservationPolicy.MOVE_LEFT
+                and (
+                    not np.isfinite(current_slack)
+                    or current_slack > self.FUTURE_RERANK_LEFT_MAX_SLACK
+                )
+            ):
                 continue
             target, target_direction = obs_builder._action_target(handle, candidate)
             if target is None or target_direction is None:

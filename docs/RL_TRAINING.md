@@ -116,13 +116,16 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --line-length 2
 ```
 
-Current local measurements:
-- Seeds 10-59: hybrid `0.912794 / 0.946667`, rerank `0.912459 / 0.946667`.
+Current guarded rerank local measurements:
+- Seeds 10-59: hybrid `0.912794 / 0.946667`, rerank `0.914406 / 0.946667`.
+- Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.915676 / 0.940000`.
+
+Historical unguarded rerank measurements before the left-detour slack guard:
 - Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.914221 / 0.939167`.
 - Seeds 210-309: hybrid `0.924562 / 0.946667`, rerank `0.928594 / 0.948333`.
 - Seeds 310-509: hybrid `0.911885 / 0.935000`, rerank `0.913035 / 0.934167`.
 - Seeds 510-709: hybrid `0.920141 / 0.937500`, rerank `0.924645 / 0.942500`.
-- Aggregate seeds 10-709 over the non-overlapping windows above:
+- Historical aggregate seeds 10-709 over the non-overlapping windows above:
   hybrid `0.916614 / 0.938333`, rerank `0.918914 / 0.940000`.
 
 Use the seedwise comparison tool to find reranker gains and regressions:
@@ -137,7 +140,12 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_compare_10_50.csv
 ```
 
-For seeds 10-59, the reranker changes only two seeds: seed 12 improves
-`+0.080593` reward with unchanged success, while seed 54 regresses `-0.097352`
-reward with unchanged success. This makes seed 54 the next target for a
-conservative reranker guard.
+Before the guard, seeds 10-59 changed only two seeds: seed 12 improved
+`+0.080593` reward with unchanged success, while seed 54 regressed `-0.097352`
+reward with unchanged success. The current guard keeps seed 12 and blocks seed
+54.
+
+For seeds 10-209, the current guarded reranker changes five seeds, all positive:
+seed 12 `+0.080593`, seed 79 `+0.093583`, seed 131 `+0.071347`, seed 138
+`+0.091575`, and seed 181 `+0.029551`. It blocks the previous regressions on
+seed 54 and seed 118.
