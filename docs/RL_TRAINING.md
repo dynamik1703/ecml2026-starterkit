@@ -42,6 +42,34 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_bc_action_diffs_known.csv
 ```
 
+Collect one-step counterfactual labels at critical guarded-rerank decisions.
+The tool first runs the baseline episode, records critical decisions, then
+reruns the same seed while forcing one valid alternative for exactly one step:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --episodes 5 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --max-decisions-per-seed 8 \
+  --max-alternatives-per-decision 2 \
+  --output-csv /private/tmp/ecml_counterfactual_decisions.csv
+```
+
+Each row is a candidate training example for a learned gate/reranker:
+`reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
+forced action improved the baseline. Feature columns include observation
+scalars, action masks, per-action target distances, corridor lengths,
+future-head-on risk, and policy logit deltas.
+
+Initial smoke test on seeds 10 and 55 with three decisions per seed produced
+13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
+The positive label was the known useful seed-55 `MOVE_RIGHT -> MOVE_FORWARD`
+override with reward delta `+0.084175`; most negative labels were unnecessary
+one-step `STOP_MOVING` overrides.
+
 Current behavior-cloning findings:
 - `seed=10`, `episodes=20`, `epochs=3` collected 50,408 valid samples and only
   28 teacher/reference disagreements. Pure `ActorCritic` evaluation on seeds
