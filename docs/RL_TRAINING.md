@@ -1006,21 +1006,29 @@ Initial 64-feature PPO anchor experiments:
   distance-neutral, and the candidate prefix has no cell or edge interaction
   with the current planned prefixes. The current guard also rejects detours for
   already-late agents, and requires `MOVE_LEFT` candidates to improve the
-  observation's direction-to-target signal over `MOVE_FORWARD`. This removed
-  the only observed `100-249` reward-only regression, seed 211, while keeping
-  the success gains on seeds 207 and 215. With
+  observation's direction-to-target signal over `MOVE_FORWARD`. `MOVE_RIGHT`
+  candidates must either improve that direction signal or reduce planned
+  prefix interactions. This removed the only observed `100-249` reward-only
+  regression, seed 211, and the `line_length=3` OOD success regression seed
+  839, while keeping the success gains on seeds 207 and 215. With
   `/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt` and
   `MyTrajectoryConflictObservationBuilder`:
   - Critical seeds `205,206,215`: baseline `0.834180 / 0.833333`,
     sequence-gated PPO `0.873129 / 0.888889`, reward `1/0/2`, success `1/0/2`.
   - Seeds `100-249`: baseline `0.920969 / 0.940000`, sequence-gated PPO
-    `0.923729 / 0.942222`, reward `3/0/147`, success `2/0/148`.
+    `0.923129 / 0.942222`, reward `2/0/148`, success `2/0/148`.
   - Mined 96-seed failure-deadline + success-hard-negative stress set:
-    baseline `0.878832 / 0.920139`, sequence-gated PPO
-    `0.879828 / 0.920139`, reward `1/0/95`, success `0/0/96`.
+    exact tie at `0.878832 / 0.920139`, reward and success `0/0/96`.
+  - OOD canaries on seeds `800-849`:
+    `scene_1`, 6 agents, line length 2 tied exactly at
+    `0.863739 / 0.840000`; `scene_5`, 8 agents, line length 2 tied exactly at
+    `0.898640 / 0.917500`; `scene_5`, 6 agents, line length 3 initially
+    regressed seed 839 via `MOVE_FORWARD -> MOVE_RIGHT`, but after the
+    prefix-interaction guard tied exactly at `0.896815 / 0.916667`.
   This is not the Docker default yet, but it is the first PPO-derived wrapper
   that passes the local zero-success-regression gate on known critical cases,
-  a 150-seed contiguous validation range, and the mined stress set.
+  a 150-seed contiguous validation range, the mined stress set, and the main
+  OOD canaries.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

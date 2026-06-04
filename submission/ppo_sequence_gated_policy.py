@@ -141,6 +141,26 @@ class PPOSequenceGatedPolicy(RerankPolicy):
             )
         ):
             return False
+        if (
+            candidate_action == ReservationPolicy.MOVE_RIGHT
+            and not (
+                self._candidate_improves_direction(
+                    obs_builder,
+                    handle,
+                    observation,
+                    baseline_action,
+                    candidate_action,
+                )
+                or self._candidate_reduces_prefix_interaction(
+                    obs_builder,
+                    handle,
+                    baseline_action,
+                    candidate_action,
+                    planned_prefixes,
+                )
+            )
+        ):
+            return False
 
         baseline_distance = self._target_distance(obs_builder, handle, baseline_action)
         candidate_distance = self._target_distance(obs_builder, handle, candidate_action)
@@ -227,6 +247,68 @@ class PPOSequenceGatedPolicy(RerankPolicy):
         if baseline_direction >= 4 or candidate_direction >= 4:
             return False
         return bool(values[candidate_direction] > values[baseline_direction])
+
+    def _candidate_reduces_prefix_interaction(
+        self,
+        obs_builder: Any,
+        handle: int,
+        baseline_action: int,
+        candidate_action: int,
+        planned_prefixes: dict[int, list[dict[str, Any]]],
+    ) -> bool:
+        baseline_prefix = self._route_prefix_for_action(
+            obs_builder,
+            handle,
+            baseline_action,
+            self.FUTURE_RERANK_LOOKAHEAD_CELLS,
+        )
+        candidate_prefix = self._route_prefix_for_action(
+            obs_builder,
+            handle,
+            candidate_action,
+            self.FUTURE_RERANK_LOOKAHEAD_CELLS,
+        )
+        baseline_count = self._prefix_interaction_count(
+            baseline_prefix,
+            handle,
+            planned_prefixes,
+        )
+        candidate_count = self._prefix_interaction_count(
+            candidate_prefix,
+            handle,
+            planned_prefixes,
+        )
+        return candidate_count < baseline_count
+
+    def _prefix_interaction_count(
+        self,
+        own_prefix: list[dict[str, Any]],
+        handle: int,
+        planned_prefixes: dict[int, list[dict[str, Any]]],
+    ) -> int:
+        if not own_prefix:
+            return 1_000_000
+
+        own_positions = {
+            node["position"] for node in own_prefix if node.get("position") is not None
+        }
+        own_edges = self._prefix_edges(own_prefix)
+        interactions = 0
+        for other, other_prefix in planned_prefixes.items():
+            if other == handle or not other_prefix:
+                continue
+            for node in other_prefix:
+                if node.get("position") in own_positions:
+                    interactions += 1
+
+            other_edges = self._prefix_edges(other_prefix)
+            for source, target in own_edges:
+                if (source, target) in other_edges:
+                    interactions += 1
+                if (target, source) in other_edges:
+                    interactions += 1
+
+        return interactions
 
     def _has_prefix_interaction(
         self,
