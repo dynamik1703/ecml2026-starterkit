@@ -190,6 +190,36 @@ def shaped_rewards(
     return shaped.astype(np.float32).tolist()
 
 
+def agent_succeeded(agent: Any) -> bool:
+    return bool(agent.state == 6 or getattr(agent.state, "name", "") == "DONE")
+
+
+def terminal_outcome_rewards(
+    args: argparse.Namespace,
+    env: Any,
+    handles: list[int],
+    episode_done: bool,
+) -> list[float]:
+    bonuses = np.zeros(len(handles), dtype=np.float32)
+    if not episode_done:
+        return bonuses.tolist()
+
+    successes = np.asarray(
+        [float(agent_succeeded(env.agents[handle])) for handle in handles],
+        dtype=np.float32,
+    )
+    failures = 1.0 - successes
+    if args.terminal_success_bonus != 0.0:
+        bonuses += args.terminal_success_bonus * successes
+    if args.terminal_failure_penalty != 0.0:
+        bonuses -= args.terminal_failure_penalty * failures
+    if args.terminal_team_success_bonus != 0.0:
+        bonuses += args.terminal_team_success_bonus * float(successes.mean())
+    if args.terminal_team_failure_penalty != 0.0:
+        bonuses -= args.terminal_team_failure_penalty * float(failures.mean())
+    return bonuses.tolist()
+
+
 def bootstrap_values(policy: ActorCritic, observations: dict[int, Any], handles: list[int]) -> torch.Tensor:
     obs = torch.as_tensor(observation_batch(observations, handles), dtype=torch.float32)
     with torch.no_grad():
@@ -305,6 +335,26 @@ def collect_rollout(
             next_slacks,
             env._max_episode_steps,
         )
+        episode_done = (
+            bool(dones.get("__all__", False))
+            or env._elapsed_steps >= env._max_episode_steps
+        )
+        terminal_rewards = terminal_outcome_rewards(
+            args,
+            env,
+            handles,
+            episode_done,
+        )
+        rewards = [
+            reward + terminal_reward
+            for reward, terminal_reward in zip(rewards, terminal_rewards)
+        ]
+        if args.reward_clip > 0.0:
+            rewards = np.clip(
+                np.asarray(rewards, dtype=np.float32),
+                -args.reward_clip,
+                args.reward_clip,
+            ).astype(np.float32).tolist()
         done_flags = [
             float(bool(dones.get(handle, False) or dones.get("__all__", False)))
             for handle in handles
@@ -318,10 +368,11 @@ def collect_rollout(
         done_steps.append(done_flags)
         episode_reward_values.extend(rewards)
 
-        if bool(dones.get("__all__", False)) or env._elapsed_steps >= env._max_episode_steps:
+        if episode_done:
             completed_episodes += 1
             completed_success += (
-                sum(int(agent.state == 6) for agent in env.agents) / env.get_num_agents()
+                sum(int(agent_succeeded(agent)) for agent in env.agents)
+                / env.get_num_agents()
             )
             episode_rewards.append(sum(episode_reward_values) / max(1, num_agents))
             episode_reward_values = []
@@ -575,6 +626,30 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Clip scaled rewards to [-reward_clip, reward_clip]. Disabled when 0.",
+    )
+    parser.add_argument(
+        "--terminal-success-bonus",
+        type=float,
+        default=0.0,
+        help="Per-agent bonus added at episode end for agents that reached DONE.",
+    )
+    parser.add_argument(
+        "--terminal-failure-penalty",
+        type=float,
+        default=0.0,
+        help="Per-agent penalty added at episode end for agents that did not reach DONE.",
+    )
+    parser.add_argument(
+        "--terminal-team-success-bonus",
+        type=float,
+        default=0.0,
+        help="Team bonus added to every agent at episode end, scaled by success rate.",
+    )
+    parser.add_argument(
+        "--terminal-team-failure-penalty",
+        type=float,
+        default=0.0,
+        help="Team penalty added to every agent at episode end, scaled by failure rate.",
     )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)

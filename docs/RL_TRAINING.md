@@ -910,6 +910,10 @@ initial checkpoint policy. This is useful for 64-feature PPO because the stable
 36-feature actor is expanded with zero weights for the new features; the KL term
 lets PPO learn small feature-dependent deviations without drifting far from the
 known-safe actor.
+`--terminal-success-bonus`, `--terminal-failure-penalty`,
+`--terminal-team-success-bonus` and `--terminal-team-failure-penalty` add
+optional episode-end shaping. Defaults are zero, so older runs are unchanged.
+Use these only with `--reward-clip` to keep value targets bounded.
 
 Initial 64-feature PPO anchor experiments:
 - Strict run `/private/tmp/ecml_ppo_trajectory_anchor_u3.pt`: 3 updates, 2
@@ -934,6 +938,16 @@ Initial 64-feature PPO anchor experiments:
   rescues, but the current rollout objective is not yet safe enough. Do not
   scale this checkpoint; the next RL iteration needs a success-regression
   penalty or hard validation-aware selection before longer training.
+- Terminal-failure shaping was added and smoke-tested. A short run
+  `/private/tmp/ecml_ppo_trajectory_terminal_anchor2_u3.pt` reused the loose
+  anchor setup plus `terminal_failure_penalty=0.3` and
+  `terminal_team_failure_penalty=0.2`. It matched the previous checkpoint on
+  seeds 100-129 (`1/2/27` reward and `1/0/29` success) but still failed the
+  critical validation seeds: 205 and 206 remained one-train success
+  regressions, while 215 remained a one-train success gain. Terminal shaping in
+  this mild form is not enough; next try either stronger outcome shaping with
+  validation after every update, or checkpoint selection that only keeps
+  zero-success-regression candidates.
 
 Evaluate a 64-feature checkpoint with the matching observation builder:
 
