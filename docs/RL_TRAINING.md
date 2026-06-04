@@ -791,6 +791,66 @@ observation builder at inference time; do not drop a 52-feature checkpoint into
 the current 36-feature submission path without also switching the observation
 builder.
 
+Route-conflict RL training path:
+- `submission.my_observation_builder.MyRouteConflictObservationBuilder` exposes
+  the 36 base features plus 16 route-conflict features (`obs_size=52`). These
+  include near route occupancy, future route intersections, ETA overlap,
+  head-on/crossing flags and whether another train has tighter slack.
+- `tools/train_behavior_clone.py --use-route-conflict-obs` now mirrors
+  `tools/train_masked_ppo.py --use-route-conflict-obs`, automatically selecting
+  the 52-feature builder and `obs_size=52`.
+- Smoke validation on one BC episode and one PPO update showed the full path is
+  executable: BC collected 1360 valid samples on seed 10 and wrote
+  `/private/tmp/ecml_bc_route_conflict_smoke.pt`; PPO then wrote
+  `/private/tmp/ecml_ppo_route_conflict_smoke.pt`; `tools/evaluate_sampled.py`
+  evaluated that checkpoint with the route-conflict builder over seeds 30-31.
+
+Minimal BC warm-start:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_behavior_clone.py \
+  --use-route-conflict-obs \
+  --teacher-policy submission.rerank_policy.MyPolicy \
+  --episodes 40 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --epochs 4 \
+  --class-balanced-loss \
+  --output-checkpoint /private/tmp/ecml_bc_route_conflict.pt
+```
+
+PPO fine-tuning on the route-conflict observation:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_masked_ppo.py \
+  --use-route-conflict-obs \
+  --init-checkpoint /private/tmp/ecml_bc_route_conflict.pt \
+  --updates 20 \
+  --episodes-per-update 4 \
+  --num-agents 6 \
+  --line-length 2 \
+  --teacher-ce-coef 0.1 \
+  --conflict-priority-penalty-coef 0.05 \
+  --output-checkpoint /private/tmp/ecml_ppo_route_conflict.pt
+```
+
+Evaluate a 52-feature checkpoint with the matching observation builder:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/evaluate_sampled.py \
+  --policy submission.my_policy.MyPolicy \
+  --policy-checkpoint /private/tmp/ecml_ppo_route_conflict.pt \
+  --obs-builder submission.my_observation_builder.MyRouteConflictObservationBuilder \
+  --episodes 50 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2
+```
+
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
 looked promising on some failures but degraded the 50-seed benchmark from
