@@ -495,6 +495,47 @@ First fresh prefix-feature batches:
   for deployment. The next step is to regenerate at least one more independent
   failure window and one more full-success low-reward window with the new
   columns before considering a learned/rule gate integration.
+- The full deadline-aware regeneration now covers all six current windows:
+  720-759 failure-deadline `67` rows (`20/2/45` reward wins/losses/ties,
+  `4/0/63` success wins/losses/ties), 760-839 failure-deadline `121` rows
+  (`21/6/94`, `7/2/112`), 840-919 failure-deadline `144` rows (`37/4/103`,
+  `15/0/129`), 920-999 success-hard-negative `237` rows (`19/18/200`,
+  `0/7/230`), 1000-1079 success-hard-negative `369` rows (`23/40/306`,
+  `0/19/350`), and 1080-1159 success-hard-negative `255` rows (`23/16/216`,
+  `0/5/250`). Combined, this gives `1193` rows: `135` good, `964` neutral,
+  and `94` bad labels.
+- Full-set deadline feature contrast confirms the same bad-vs-rest signal at
+  larger scale: `forced_prefix_min_pair_deadline_slack` has bad median `149.5`
+  versus rest median `999` with effect size about `-0.94`;
+  `forced_prefix_min_other_deadline_slack` has bad median `168.5` versus `999`
+  with effect size about `-0.93`; `forced_prefix_min_own_deadline_slack` has
+  bad median `190` versus `999` with effect size about `-0.93`.
+- Random splits over all `1193` rows remain unsafe even with deadline-aware
+  features. At threshold `0.99`, multiclass all-features accepted `13/14/3`,
+  multiclass without-prefix accepted `2/5/1`, and multiclass only-prefix
+  accepted `9/9/3` good/neutral/bad. Binary variants also leaked bad actions
+  unless they accepted no actions.
+- Strict window holdouts with prefix/risk features are still not deployable:
+  - Train all except 760-839, validate 760-839: threshold `0.95+` accepted
+    `0/0/0`; threshold `0.90` accepted `0/1/0`.
+  - Train all except 1080-1159, validate 1080-1159: thresholds
+    `0.90/0.95/0.97/0.99` accepted `2/10/3`, `1/4/1`, `0/1/1`, and `0/0/0`.
+  - Train failure windows 720-919, validate success-hard-negative windows
+    920-1159: thresholds `0.90/0.95/0.97/0.99` accepted `37/153/40`,
+    `34/120/35`, `27/95/22`, and `11/40/14`.
+  - Train success-hard-negative windows 920-1159, validate failure windows
+    720-919: thresholds `0.90/0.95/0.97/0.99` accepted `5/7/0`, `5/6/0`,
+    `3/5/0`, and `3/5/0`.
+  Adding `--max-bad-probability 0.01` did not fix the unsafe
+  success-hard-negative holdouts; bad actions still leaked at useful
+  thresholds.
+- Conclusion from the full deadline-aware sweep: deadline pressure is a strong
+  explanatory feature and should be integrated into richer observations or
+  candidate ranking diagnostics, but the current one-step learned gate is still
+  offline-only. It is zero-bad only on some failure-window holdouts or when it
+  accepts too few/no useful actions; it does not yet generalize to
+  success-hard-negative windows where a single alternative can destroy a
+  successful schedule.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
