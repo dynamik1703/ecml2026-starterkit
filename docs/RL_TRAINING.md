@@ -899,11 +899,26 @@ Initial route-conflict checkpoint results:
   and feature ablations accepted zero validation good rows at thresholds
   `0.75,0.90,0.95,0.99`, while still accepting some neutral or bad rows. Do not
   deploy a learned 52-feature gate from this dataset alone.
-- Next data step: mine a broader route-conflict counterfactual dataset across
-  non-overlapping seed windows and include more successful hard-negative seeds.
-  The gate target should be strict high-precision acceptance of side detours;
-  deployment should happen only after leave-window-out validation accepts good
-  rows with zero bad rows.
+- Broader route-conflict counterfactual mining added three non-overlapping
+  seed windows using the same 52-feature builder and forced `LEFT,RIGHT`
+  alternatives with four decisions per seed: seeds 130-149 produced 159 rows
+  with good/neutral/bad `2/154/3`; seeds 230-249 produced 155 rows with
+  `5/144/6`; seeds 430-449 produced 147 rows with `4/132/11`.
+  Together with the focused BC win/loss dataset, this gives 665 rows with
+  good/neutral/bad `26/607/32`.
+- Leave-window-out gate validation across the four datasets is still not
+  deployable. Binary MLP gates over all 126 numeric features overfit training
+  folds but, on held-out windows, accepted at most one good row and leaked bad
+  rows when they did. Multiclass gates with `max_bad_probability=0.05` found
+  one held-out good row in three windows only at low thresholds, but always
+  alongside neutral and/or bad rows; high thresholds again accepted no useful
+  good rows.
+- The monotone rescue-rule grid over the combined 665 rows found no non-empty
+  zero-bad rule: every zero-bad rule accepted zero good and zero neutral rows.
+  A learned or rule-based route-conflict side-detour gate should therefore not
+  be deployed yet. The next useful data step is targeted hard-case mining
+  around known helpful side-detours and known success-regression side-detours,
+  then leave-window-out validation that accepts good rows with zero bad rows.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
