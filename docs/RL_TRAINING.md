@@ -990,6 +990,14 @@ Initial 64-feature PPO anchor experiments:
   This gives us a better next training target: learn or regularize against
   harmful diff-prefixes, especially repeated stop overrides after an initially
   neutral route deviation.
+- Adding seed 120 to the same prefix run separates reward improvements from
+  success improvements. The candidate improved reward from `0.832620` to
+  `0.964311`, but success stayed at `0.833333`; the adaptive prefix needed
+  three diffs:
+  `1@34:a0:MOVE_FORWARD->MOVE_RIGHT;2@178:a0:MOVE_FORWARD->MOVE_LEFT;3@249:a1:MOVE_FORWARD->MOVE_LEFT`.
+  Over seeds `120,205,206,215`, prefix `k=1` had success wins/losses/ties
+  `1/1/2`; `k>=3` had `1/2/1`. This reinforces that the next objective should
+  prioritize zero success regressions over positive mean reward deltas.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
