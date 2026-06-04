@@ -851,6 +851,32 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --line-length 2
 ```
 
+Initial route-conflict checkpoint results:
+- Balanced 12-episode BC
+  (`/private/tmp/ecml_bc_route_conflict_12.pt`) collected 30035 valid samples
+  from the guarded rerank teacher with `0.929119 / 0.944444` teacher
+  reward/success. Pure checkpoint evaluation versus guarded rerank on seeds
+  100-129 regressed: guarded rerank `0.936044 / 0.950000`, pure BC
+  `0.906905 / 0.933333`; reward wins/losses/ties `5/12/13`, success
+  wins/losses/ties `2/4/24`.
+- Unbalanced 12-episode BC
+  (`/private/tmp/ecml_bc_route_conflict_12_unbalanced.pt`) copied the teacher
+  more closely but was still not safe as a pure policy on seeds 100-129:
+  `0.902228 / 0.927778`; reward wins/losses/ties `2/15/13`, success
+  wins/losses/ties `2/5/23`.
+- The existing `submission.bc_gated_policy.MyPolicy` neutralised both
+  route-conflict BC checkpoints on seeds 100-129: reward and success
+  wins/losses/ties `0/0/30`. This protects the default policy but also shows
+  the current gate does not exploit the new route-conflict features.
+- A short PPO fine-tune from the balanced BC checkpoint with teacher CE `0.2`,
+  conflict-priority penalty `0.05`, slack-progress reward `0.02`, and global
+  slack reward `0.02` collapsed badly on seeds 100-129:
+  guarded rerank `0.936044 / 0.950000`, PPO checkpoint
+  `0.177446 / 0.033333`; reward and success wins/losses/ties `0/30/0`.
+  Do not continue with these PPO shaping coefficients. The next RL step should
+  either stabilise PPO with much stronger teacher anchoring/smaller updates, or
+  learn a new route-conflict-aware gate/reranker from first-difference labels.
+
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
 looked promising on some failures but degraded the 50-seed benchmark from
