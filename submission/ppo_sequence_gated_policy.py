@@ -128,6 +128,20 @@ class PPOSequenceGatedPolicy(RerankPolicy):
         if not self._mask_allows(observation, candidate_action):
             return False
 
+        if self._current_slack(obs_builder, handle) < 0.0:
+            return False
+        if (
+            candidate_action == ReservationPolicy.MOVE_LEFT
+            and not self._candidate_improves_direction(
+                obs_builder,
+                handle,
+                observation,
+                baseline_action,
+                candidate_action,
+            )
+        ):
+            return False
+
         baseline_distance = self._target_distance(obs_builder, handle, baseline_action)
         candidate_distance = self._target_distance(obs_builder, handle, candidate_action)
         if not np.isfinite(candidate_distance):
@@ -179,6 +193,40 @@ class PPOSequenceGatedPolicy(RerankPolicy):
             return float(distance_map[target[0], target[1], target_direction])
         except Exception:
             return float("inf")
+
+    @staticmethod
+    def _current_slack(obs_builder: Any, handle: int) -> float:
+        try:
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            return float(obs_builder._deadline_slack(handle, distance))
+        except Exception:
+            return float("-inf")
+
+    @staticmethod
+    def _candidate_improves_direction(
+        obs_builder: Any,
+        handle: int,
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+    ) -> bool:
+        if observation is None:
+            return False
+        values = np.asarray(observation, dtype=np.float32)
+        if values.shape[0] < 4:
+            return False
+        try:
+            _, baseline_direction = obs_builder._action_target(handle, baseline_action)
+            _, candidate_direction = obs_builder._action_target(handle, candidate_action)
+        except Exception:
+            return False
+        if baseline_direction is None or candidate_direction is None:
+            return False
+        if baseline_direction < 0 or candidate_direction < 0:
+            return False
+        if baseline_direction >= 4 or candidate_direction >= 4:
+            return False
+        return bool(values[candidate_direction] > values[baseline_direction])
 
     def _has_prefix_interaction(
         self,

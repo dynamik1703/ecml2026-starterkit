@@ -1004,17 +1004,23 @@ Initial 64-feature PPO anchor experiments:
   (including the harmful repeated `STOP_MOVING` pattern), and accepts only
   `MOVE_FORWARD -> MOVE_LEFT/RIGHT` when the target is finite/free,
   distance-neutral, and the candidate prefix has no cell or edge interaction
-  with the current planned prefixes. With
+  with the current planned prefixes. The current guard also rejects detours for
+  already-late agents, and requires `MOVE_LEFT` candidates to improve the
+  observation's direction-to-target signal over `MOVE_FORWARD`. This removed
+  the only observed `100-249` reward-only regression, seed 211, while keeping
+  the success gains on seeds 207 and 215. With
   `/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt` and
   `MyTrajectoryConflictObservationBuilder`:
   - Critical seeds `205,206,215`: baseline `0.834180 / 0.833333`,
     sequence-gated PPO `0.873129 / 0.888889`, reward `1/0/2`, success `1/0/2`.
-  - Seeds `100-129`: baseline `0.936044 / 0.950000`, sequence-gated PPO
-    `0.939042 / 0.950000`, reward `1/0/29`, success `0/0/30`.
-  - Seeds `130-159`: exact tie, reward and success `0/0/30`.
+  - Seeds `100-249`: baseline `0.920969 / 0.940000`, sequence-gated PPO
+    `0.923729 / 0.942222`, reward `3/0/147`, success `2/0/148`.
+  - Mined 96-seed failure-deadline + success-hard-negative stress set:
+    baseline `0.878832 / 0.920139`, sequence-gated PPO
+    `0.879828 / 0.920139`, reward `1/0/95`, success `0/0/96`.
   This is not the Docker default yet, but it is the first PPO-derived wrapper
-  that passes the local zero-success-regression gate on both known critical
-  cases and the first two 30-seed validation blocks.
+  that passes the local zero-success-regression gate on known critical cases,
+  a 150-seed contiguous validation range, and the mined stress set.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
