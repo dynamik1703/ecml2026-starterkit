@@ -819,6 +819,18 @@ Current guarded rerank local measurements:
 - Seeds 10-209 after the residual head-on deadline-slack guard: hybrid
   `0.913843 / 0.938333`, rerank `0.916138 / 0.940000`; reward
   wins/losses/ties `6/0/194`, success wins/losses/ties `2/0/198`.
+- Seeds 210-309: hybrid `0.924562 / 0.946667`, rerank
+  `0.928594 / 0.948333`; reward wins/losses/ties `5/0/95`, success
+  wins/losses/ties `1/0/99`.
+- Seeds 310-509: hybrid `0.911885 / 0.935000`, rerank
+  `0.913340 / 0.935000`; reward wins/losses/ties `4/0/196`, success
+  wins/losses/ties `0/0/200`.
+- Seeds 510-709: hybrid `0.920141 / 0.937500`, rerank
+  `0.925158 / 0.942500`; reward wins/losses/ties `8/0/192`, success
+  wins/losses/ties `4/0/196`.
+- Aggregate seeds 10-709 after the residual head-on deadline-slack guard:
+  hybrid `0.916614 / 0.938333`, rerank `0.919695 / 0.940476`;
+  reward wins/losses/ties `23/0/677`, success wins/losses/ties `7/0/693`.
 - Mined failure-deadline + success-hard-negative stress seeds
   (`96` exact seeds from the counterfactual windows): hybrid
   `0.878231 / 0.918403`, rerank `0.878832 / 0.920139`; reward
