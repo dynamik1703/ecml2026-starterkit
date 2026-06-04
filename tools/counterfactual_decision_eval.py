@@ -24,7 +24,9 @@ from tools.analyze_policy_action_diffs import (
     observation_scalar_features,
     planned_prefixes,
     policy_actions,
+    prefix_conflict_features,
     raw_logits,
+    route_prefix_for_action,
     state_name,
     target_metrics,
 )
@@ -197,6 +199,50 @@ def decision_row(
         forced_action,
         baseline_prefixes,
     )
+    baseline_prefix = route_prefix_for_action(
+        policy,
+        obs_builder,
+        handle,
+        baseline_action,
+    )
+    forced_prefix = route_prefix_for_action(
+        policy,
+        obs_builder,
+        handle,
+        forced_action,
+    )
+    baseline_prefix_features = prefix_conflict_features(
+        "baseline",
+        baseline_prefix,
+        baseline_prefixes,
+        handle,
+        env,
+    )
+    forced_prefix_features = prefix_conflict_features(
+        "forced",
+        forced_prefix,
+        baseline_prefixes,
+        handle,
+        env,
+    )
+    prefix_delta_features = {}
+    for suffix in (
+        "prefix_len",
+        "prefix_conflict_agents",
+        "prefix_cell_intersections",
+        "prefix_first_intersection_step",
+        "prefix_min_intersection_eta_gap",
+        "prefix_same_direction_intersections",
+        "prefix_opposing_direction_intersections",
+        "prefix_crossing_direction_intersections",
+        "prefix_same_edge_conflicts",
+        "prefix_head_on_edge_conflicts",
+        "prefix_min_head_on_eta_gap",
+    ):
+        prefix_delta_features[f"forced_{suffix}_delta"] = (
+            forced_prefix_features[f"forced_{suffix}"]
+            - baseline_prefix_features[f"baseline_{suffix}"]
+        )
     return {
         "seed": seed,
         "decision_index": decision_index,
@@ -241,6 +287,9 @@ def decision_row(
         "baseline_future_head_on_risk": baseline_risk,
         "forced_future_head_on_risk": forced_risk,
         "future_head_on_risk_delta": forced_risk - baseline_risk,
+        **baseline_prefix_features,
+        **forced_prefix_features,
+        **prefix_delta_features,
     }
 
 

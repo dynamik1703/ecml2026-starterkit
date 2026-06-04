@@ -77,7 +77,11 @@ Each row is a candidate training example for a learned gate/reranker:
 `reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
 forced action improved the baseline. Feature columns include observation
 scalars, action masks, per-action target distances, corridor lengths,
-future-head-on risk, and policy logit deltas.
+future-head-on risk, policy logit deltas, and route-prefix conflict features.
+The prefix features compare baseline versus forced lookahead routes against
+other agents' planned prefixes: shared cells, same/opposing/crossing direction
+intersections, same-edge conflicts, head-on edge conflicts, first intersection
+step, and ETA gaps.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.

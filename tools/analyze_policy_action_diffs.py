@@ -146,13 +146,166 @@ def corridor_len(obs_builder: Any, handle: int, action: int) -> int:
         return 0
 
 
+def route_prefix_for_action(
+    policy: Any,
+    obs_builder: Any,
+    handle: int,
+    action: int,
+    lookahead: int | None = None,
+) -> list[dict[str, Any]]:
+    if not hasattr(policy, "_route_prefix_for_action"):
+        return []
+    if lookahead is None:
+        lookahead = int(getattr(policy, "FUTURE_RERANK_LOOKAHEAD_CELLS", 45))
+    try:
+        return policy._route_prefix_for_action(obs_builder, handle, action, lookahead)
+    except Exception:
+        return []
+
+
 def planned_prefixes(policy: Any, obs_builder: Any, actions: dict[int, int]) -> dict[int, Any]:
     if not hasattr(policy, "_route_prefix_for_action"):
         return {}
     lookahead = int(getattr(policy, "FUTURE_RERANK_LOOKAHEAD_CELLS", 45))
     return {
-        handle: policy._route_prefix_for_action(obs_builder, handle, action, lookahead)
+        handle: route_prefix_for_action(policy, obs_builder, handle, action, lookahead)
         for handle, action in actions.items()
+    }
+
+
+def prefix_edges(
+    prefix: list[dict[str, Any]],
+) -> dict[tuple[tuple[int, int], tuple[int, int]], dict[str, Any]]:
+    edges = {}
+    for node in prefix:
+        previous = node.get("prev_position")
+        position = node.get("position")
+        if previous is None or position is None or previous == position:
+            continue
+        edges[(previous, position)] = node
+    return edges
+
+
+def _agent_eta(env: Any, handle: int, step: int) -> float:
+    try:
+        speed = float(env.agents[handle].speed_counter.speed)
+    except Exception:
+        speed = 1.0
+    if speed <= 0.0:
+        speed = 1.0
+    return float(step) / speed
+
+
+def _direction_relation(own_direction: Any, other_direction: Any) -> str:
+    if own_direction is None or other_direction is None:
+        return "crossing"
+    try:
+        own = int(own_direction)
+        other = int(other_direction)
+    except Exception:
+        return "crossing"
+    if own == other:
+        return "same"
+    if (own + 2) % 4 == other:
+        return "opposing"
+    return "crossing"
+
+
+def prefix_conflict_features(
+    prefix_name: str,
+    prefix: list[dict[str, Any]],
+    prefixes: dict[int, list[dict[str, Any]]],
+    handle: int,
+    env: Any,
+) -> dict[str, float]:
+    own_positions: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for node in prefix:
+        position = node.get("position")
+        if position is None:
+            continue
+        own_positions.setdefault(position, []).append(node)
+
+    own_edges = prefix_edges(prefix)
+    conflict_agents: set[int] = set()
+    cell_intersections = 0
+    same_direction_intersections = 0
+    opposing_direction_intersections = 0
+    crossing_direction_intersections = 0
+    same_edge_conflicts = 0
+    head_on_edge_conflicts = 0
+    first_intersection_step = 0
+    min_intersection_eta_gap = float("inf")
+    min_head_on_eta_gap = float("inf")
+
+    for other, other_prefix in prefixes.items():
+        if other == handle or not other_prefix:
+            continue
+        other_positions: dict[tuple[int, int], list[dict[str, Any]]] = {}
+        for other_node in other_prefix:
+            position = other_node.get("position")
+            if position is None:
+                continue
+            other_positions.setdefault(position, []).append(other_node)
+
+        for position, own_nodes in own_positions.items():
+            for other_node in other_positions.get(position, []):
+                for own_node in own_nodes:
+                    conflict_agents.add(other)
+                    cell_intersections += 1
+                    own_step = int(own_node.get("step", 0))
+                    other_step = int(other_node.get("step", 0))
+                    if first_intersection_step == 0 or own_step < first_intersection_step:
+                        first_intersection_step = own_step
+                    eta_gap = abs(
+                        _agent_eta(env, handle, own_step)
+                        - _agent_eta(env, other, other_step)
+                    )
+                    min_intersection_eta_gap = min(min_intersection_eta_gap, eta_gap)
+                    relation = _direction_relation(
+                        own_node.get("direction"),
+                        other_node.get("direction"),
+                    )
+                    if relation == "same":
+                        same_direction_intersections += 1
+                    elif relation == "opposing":
+                        opposing_direction_intersections += 1
+                    else:
+                        crossing_direction_intersections += 1
+
+        other_edges = prefix_edges(other_prefix)
+        for source, target in own_edges:
+            if (source, target) in other_edges:
+                same_edge_conflicts += 1
+                conflict_agents.add(other)
+            head_on_node = other_edges.get((target, source))
+            if head_on_node is None:
+                continue
+            head_on_edge_conflicts += 1
+            conflict_agents.add(other)
+            own_node = own_edges[(source, target)]
+            eta_gap = abs(
+                _agent_eta(env, handle, int(own_node.get("step", 0)))
+                - _agent_eta(env, other, int(head_on_node.get("step", 0)))
+            )
+            min_head_on_eta_gap = min(min_head_on_eta_gap, eta_gap)
+
+    if not np.isfinite(min_intersection_eta_gap):
+        min_intersection_eta_gap = 999.0
+    if not np.isfinite(min_head_on_eta_gap):
+        min_head_on_eta_gap = 999.0
+
+    return {
+        f"{prefix_name}_prefix_len": float(len(prefix)),
+        f"{prefix_name}_prefix_conflict_agents": float(len(conflict_agents)),
+        f"{prefix_name}_prefix_cell_intersections": float(cell_intersections),
+        f"{prefix_name}_prefix_first_intersection_step": float(first_intersection_step),
+        f"{prefix_name}_prefix_min_intersection_eta_gap": float(min_intersection_eta_gap),
+        f"{prefix_name}_prefix_same_direction_intersections": float(same_direction_intersections),
+        f"{prefix_name}_prefix_opposing_direction_intersections": float(opposing_direction_intersections),
+        f"{prefix_name}_prefix_crossing_direction_intersections": float(crossing_direction_intersections),
+        f"{prefix_name}_prefix_same_edge_conflicts": float(same_edge_conflicts),
+        f"{prefix_name}_prefix_head_on_edge_conflicts": float(head_on_edge_conflicts),
+        f"{prefix_name}_prefix_min_head_on_eta_gap": float(min_head_on_eta_gap),
     }
 
 
