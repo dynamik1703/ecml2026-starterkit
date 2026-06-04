@@ -919,6 +919,20 @@ Initial route-conflict checkpoint results:
   be deployed yet. The next useful data step is targeted hard-case mining
   around known helpful side-detours and known success-regression side-detours,
   then leave-window-out validation that accepts good rows with zero bad rows.
+- `tools/counterfactual_decision_eval.py` now supports
+  `--focus-counterfactual-csv`, which converts previously labelled
+  counterfactual good/bad rows into seed/agent/time windows. This avoids
+  collecting mostly early neutral decisions when the goal is hard-case mining.
+- Focused hard-case reruns over all four route-conflict counterfactual CSVs
+  produced much denser label sets: an 8-step window produced 60 rows with
+  good/neutral/bad `26/2/32`; a 20-step window produced 67 rows with
+  `27/7/33`.
+- Even with this denser hard-case data, cross-split validation is not safe for
+  deployment. For `hard_w8`, the best aggregated binary split result at
+  threshold 0.50 accepted good/neutral/bad `37/4/30`; for `hard_w20`, the best
+  comparable result accepted `36/14/29`. Higher thresholds reduce accepted
+  good rows but still leak bad rows. The monotone rescue-rule grid again found
+  no non-empty zero-bad rule on either hard-case dataset.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20

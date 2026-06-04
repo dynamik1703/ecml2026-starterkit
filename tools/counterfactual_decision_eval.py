@@ -41,6 +41,7 @@ from tools.evaluate_sampled import (
     repo_root,
 )
 from flatland.envs.persistence import RailEnvPersister
+from tools.train_counterfactual_gate import outcome_category
 
 
 MOVE_ACTIONS = (1, 2, 3)
@@ -541,6 +542,33 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--focus-counterfactual-csv",
+        nargs="+",
+        type=Path,
+        help=(
+            "CSV rows from previous counterfactual runs. Sample only the "
+            "seed/agent windows around rows whose outcome category matches "
+            "--focus-counterfactual-categories."
+        ),
+    )
+    parser.add_argument(
+        "--focus-counterfactual-categories",
+        default="good,bad",
+        help="Comma-separated outcome categories to focus from the CSV: good,neutral,bad.",
+    )
+    parser.add_argument(
+        "--focus-counterfactual-window-before",
+        type=int,
+        default=20,
+        help="Steps before each selected counterfactual event to include.",
+    )
+    parser.add_argument(
+        "--focus-counterfactual-window-after",
+        type=int,
+        default=20,
+        help="Steps after each selected counterfactual event to include.",
+    )
+    parser.add_argument(
         "--focus-window-before-stationary",
         type=int,
         help=(
@@ -595,6 +623,16 @@ def parse_args() -> argparse.Namespace:
         args.focus_window_after_stationary,
         args.focus_window_before_deadline,
         args.focus_window_after_deadline,
+    )
+    merge_focus(
+        args.focus_handles_by_seed,
+        args.focus_windows_by_seed,
+        *load_focus_counterfactuals(
+            args.focus_counterfactual_csv,
+            args.focus_counterfactual_categories,
+            args.focus_counterfactual_window_before,
+            args.focus_counterfactual_window_after,
+        ),
     )
     return args
 
@@ -655,6 +693,72 @@ def load_focus_failures(
     return focus, windows
 
 
+def merge_focus(
+    focus: dict[int, set[int]],
+    windows: dict[tuple[int, int], tuple[int, int]],
+    new_focus: dict[int, set[int]],
+    new_windows: dict[tuple[int, int], tuple[int, int]],
+) -> None:
+    for seed, handles in new_focus.items():
+        focus.setdefault(seed, set()).update(handles)
+    for key, window in new_windows.items():
+        if key not in windows:
+            windows[key] = window
+            continue
+        current_start, current_end = windows[key]
+        new_start, new_end = window
+        windows[key] = (min(current_start, new_start), max(current_end, new_end))
+
+
+def load_focus_counterfactuals(
+    paths: list[Path] | None,
+    categories_value: str,
+    window_before: int,
+    window_after: int,
+) -> tuple[dict[int, set[int]], dict[tuple[int, int], tuple[int, int]]]:
+    if not paths:
+        return {}, {}
+    categories = {
+        item.strip().lower()
+        for item in categories_value.split(",")
+        if item.strip()
+    }
+    valid_categories = {"good", "neutral", "bad"}
+    unknown = categories - valid_categories
+    if unknown:
+        raise ValueError(
+            "--focus-counterfactual-categories contains unknown values: "
+            f"{','.join(sorted(unknown))}"
+        )
+
+    focus: dict[int, set[int]] = {}
+    windows: dict[tuple[int, int], tuple[int, int]] = {}
+    for path in paths:
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                category = outcome_category(row, reward_epsilon=1e-6)
+                if category not in categories:
+                    continue
+                seed = int(float(row["seed"]))
+                handle_id = int(float(row["agent_id"]))
+                env_time = int(float(row["env_time"]))
+                focus.setdefault(seed, set()).add(handle_id)
+                key = (seed, handle_id)
+                window = (
+                    max(0, env_time - window_before),
+                    max(0, env_time + window_after),
+                )
+                if key not in windows:
+                    windows[key] = window
+                else:
+                    current_start, current_end = windows[key]
+                    windows[key] = (
+                        min(current_start, window[0]),
+                        max(current_end, window[1]),
+                    )
+    return focus, windows
+
+
 def focused_handles_for_seed(args: argparse.Namespace, seed: int) -> set[int] | None:
     if args.focus_agent_ids is not None:
         return args.focus_agent_ids
@@ -707,11 +811,12 @@ def parse_forced_actions(value: str | None) -> tuple[int, ...] | None:
 
 def main() -> int:
     args = parse_args()
-    seeds = (
-        [int(item) for item in args.seeds.split(",") if item.strip()]
-        if args.seeds
-        else [args.seed + index for index in range(args.episodes)]
-    )
+    if args.seeds:
+        seeds = [int(item) for item in args.seeds.split(",") if item.strip()]
+    elif args.focus_counterfactual_csv and args.focus_handles_by_seed:
+        seeds = sorted(args.focus_handles_by_seed)
+    else:
+        seeds = [args.seed + index for index in range(args.episodes)]
     rows: list[dict[str, Any]] = []
     for seed in seeds:
         baseline, events = collect_decisions(args, seed)
