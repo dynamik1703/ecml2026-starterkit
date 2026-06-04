@@ -836,6 +836,29 @@ Current guarded rerank local measurements:
   `0.878231 / 0.918403`, rerank `0.878832 / 0.920139`; reward
   wins/losses/ties `2/0/94`, success wins/losses/ties `1/0/95`.
 
+Experimental near-tie side-detour candidate:
+- `submission.logit_detour_policy.MyPolicy` is not the Docker default. It adds
+  a narrow candidate-generation rule on top of guarded rerank: when guarded
+  rerank would move forward, try a distance-neutral side action only if the
+  torch action logit is near-tie, current deadline slack is high, the candidate
+  has no future head-on risk, no residual tight head-on pair, and no cell or
+  edge interaction with planned route prefixes.
+- Loose near-tie rules were unsafe: early locally neutral side detours can
+  remove later rescue opportunities. On mined low-performing seeds, a loose
+  rule regressed seed 452; on seeds 10-209, the tight rule before prefix
+  interaction filtering improved four seeds but still regressed two reward-only
+  cases.
+- After requiring a completely non-interacting candidate prefix, validation
+  versus `submission.rerank_policy.MyPolicy` found no local regressions:
+  seeds 10-209 `0.916138 / 0.940000` -> `0.917174 / 0.940833`, reward
+  wins/losses/ties `1/0/199`, success wins/losses/ties `1/0/199`; mined
+  96-seed stress set `0.892065 / 0.878472` -> `0.894223 / 0.880208`, reward
+  wins/losses/ties `1/0/95`, success wins/losses/ties `1/0/95`.
+- The effect is very sparse and currently comes from seed 207 in these local
+  validation sets. Keep this as an experimental policy or ablation candidate,
+  not as evidence that broad side-detour expansion should replace the guarded
+  rerank default.
+
 Historical unguarded rerank measurements before the left-detour slack guard:
 - Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.914221 / 0.939167`.
 - Seeds 210-309: hybrid `0.924562 / 0.946667`, rerank `0.928594 / 0.948333`.
