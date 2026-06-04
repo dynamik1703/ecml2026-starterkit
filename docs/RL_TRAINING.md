@@ -924,10 +924,16 @@ Initial 64-feature PPO anchor experiments:
   on seeds 100-129 it improved seed 120 to full success and had no success
   losses: baseline `0.936044 / 0.950000`, candidate `0.939039 / 0.955556`,
   reward wins/losses/ties `1/2/27`, success `1/0/29`. On seeds 130-159 it was
-  exactly tied: `0/0/30` reward and success wins/losses/ties. This is not a
-  submission checkpoint yet, but it is the first RL direction worth scaling:
-  repeat on broader seed blocks and require zero success regressions before any
-  longer run.
+  exactly tied: `0/0/30` reward and success wins/losses/ties.
+- Broader validation rejects that loose PPO checkpoint for deployment. Across
+  seeds 100-249, guarded rerank baseline/candidate means were
+  `0.920969 / 0.940000` versus `0.920777 / 0.940000`; reward
+  wins/losses/ties were `3/6/141` and success `2/2/146`. The two success gains
+  were seeds 120 and 215, but seeds 205 and 206 regressed by one train each.
+  Treat this as useful evidence that 64-feature anchored PPO can find real
+  rescues, but the current rollout objective is not yet safe enough. Do not
+  scale this checkpoint; the next RL iteration needs a success-regression
+  penalty or hard validation-aware selection before longer training.
 
 Evaluate a 64-feature checkpoint with the matching observation builder:
 
