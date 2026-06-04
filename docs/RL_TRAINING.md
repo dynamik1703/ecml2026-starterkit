@@ -816,7 +816,13 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
 
 Current guarded rerank local measurements:
 - Seeds 10-59: hybrid `0.912794 / 0.946667`, rerank `0.914406 / 0.946667`.
-- Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.915676 / 0.940000`.
+- Seeds 10-209 after the residual head-on deadline-slack guard: hybrid
+  `0.913843 / 0.938333`, rerank `0.916138 / 0.940000`; reward
+  wins/losses/ties `6/0/194`, success wins/losses/ties `2/0/198`.
+- Mined failure-deadline + success-hard-negative stress seeds
+  (`96` exact seeds from the counterfactual windows): hybrid
+  `0.878231 / 0.918403`, rerank `0.878832 / 0.920139`; reward
+  wins/losses/ties `2/0/94`, success wins/losses/ties `1/0/95`.
 
 Historical unguarded rerank measurements before the left-detour slack guard:
 - Seeds 10-209: hybrid `0.913843 / 0.938333`, rerank `0.914221 / 0.939167`.
@@ -843,7 +849,17 @@ Before the guard, seeds 10-59 changed only two seeds: seed 12 improved
 reward with unchanged success. The current guard keeps seed 12 and blocks seed
 54.
 
-For seeds 10-209, the current guarded reranker changes five seeds, all positive:
-seed 12 `+0.080593`, seed 79 `+0.093583`, seed 131 `+0.071347`, seed 138
-`+0.091575`, and seed 181 `+0.029551`. It blocks the previous regressions on
-seed 54 and seed 118.
+For seeds 10-209, the current guarded reranker changes six seeds, all positive:
+seed 12 `+0.080593`, seed 79 `+0.093583`, seed 88 `+0.092387`, seed 131
+`+0.071347`, seed 138 `+0.091575`, and seed 181 `+0.029551`. It blocks the
+previous regressions on seed 54 and seed 118.
+
+The residual head-on deadline-slack guard came from the mined stress-set
+regressions. Before this guard, seeds 896, 1019, and 1033 regressed by
+`-0.133400`, `-0.074405`, and `-0.076453` reward while preserving success. The
+bad detours had residual reverse-edge prefix conflicts whose minimum true pair
+deadline slack was `80..89`; known good detours with residual reverse-edge
+prefix conflicts had at least `95`. The online guard therefore rejects a
+candidate side detour only when the residual head-on pair deadline slack is
+below `90`, while retaining the broader deadline-conflict penalty as a score
+penalty for ETA-near conflicts.

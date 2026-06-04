@@ -17,6 +17,11 @@ class RerankPolicy(HybridPolicy):
     FUTURE_RERANK_MAX_ETA_GAP = 2.0
     FUTURE_RERANK_MIN_RISK_IMPROVEMENT = 20.0
     FUTURE_RERANK_LEFT_MAX_SLACK = 115.0
+    FUTURE_RERANK_DEADLINE_CONFLICT_MAX_STEP = 30
+    FUTURE_RERANK_DEADLINE_CONFLICT_MAX_ETA_GAP = 4.0
+    FUTURE_RERANK_DEADLINE_TIGHT_SLACK = 220.0
+    FUTURE_RERANK_DEADLINE_PENALTY_COEF = 0.75
+    FUTURE_RERANK_HEAD_ON_TIGHT_PAIR_SLACK = 90.0
 
     def act_many(
         self, handles: List[int], observations: List[Any], **kwargs
@@ -138,6 +143,12 @@ class RerankPolicy(HybridPolicy):
             handle,
             obs_builder._build_local_action_mask(handle),
         )
+        baseline_deadline_penalty = self._deadline_conflict_penalty(
+            obs_builder,
+            handle,
+            baseline_action,
+            planned_prefixes,
+        )
 
         best_action = None
         best_score = baseline_risk
@@ -176,13 +187,234 @@ class RerankPolicy(HybridPolicy):
                 candidate,
                 planned_prefixes,
             )
+            deadline_penalty = self._deadline_conflict_penalty(
+                obs_builder,
+                handle,
+                candidate,
+                planned_prefixes,
+            )
+            if self._reject_residual_head_on_detour(
+                obs_builder,
+                handle,
+                candidate,
+                planned_prefixes,
+            ):
+                continue
             distance_penalty = max(0.0, candidate_distance - current_distance)
-            score = risk + 0.25 * distance_penalty
+            score = (
+                risk
+                + 0.25 * distance_penalty
+                + max(0.0, deadline_penalty - baseline_deadline_penalty)
+            )
             if score + self.FUTURE_RERANK_MIN_RISK_IMPROVEMENT < best_score:
                 best_score = score
                 best_action = candidate
 
         return best_action
+
+    def _reject_residual_head_on_detour(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        planned_prefixes: dict[int, list[dict[str, Any]]],
+    ) -> bool:
+        min_pair_slack = self._residual_head_on_min_pair_deadline_slack(
+            obs_builder,
+            handle,
+            action,
+            planned_prefixes,
+        )
+        if not np.isfinite(min_pair_slack):
+            return False
+        if min_pair_slack < self.FUTURE_RERANK_HEAD_ON_TIGHT_PAIR_SLACK:
+            return True
+        return False
+
+    def _residual_head_on_min_pair_deadline_slack(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        planned_prefixes: dict[int, list[dict[str, Any]]],
+    ) -> float:
+        own_prefix = self._route_prefix_for_action(
+            obs_builder,
+            handle,
+            action,
+            self.FUTURE_RERANK_LOOKAHEAD_CELLS,
+        )
+        if not own_prefix:
+            return np.inf
+        own_edges = self._prefix_edges(own_prefix)
+        if not own_edges:
+            return np.inf
+
+        min_pair_slack = np.inf
+        for other, other_prefix in planned_prefixes.items():
+            if other == handle or not other_prefix:
+                continue
+            other_edges = self._prefix_edges(other_prefix)
+            for source, target in own_edges:
+                other_node = other_edges.get((target, source))
+                if other_node is None:
+                    continue
+                own_slack = self._prefix_deadline_slack(
+                    obs_builder,
+                    handle,
+                    own_edges[(source, target)],
+                )
+                other_slack = self._prefix_deadline_slack(
+                    obs_builder,
+                    other,
+                    other_node,
+                )
+                if np.isfinite(own_slack) and np.isfinite(other_slack):
+                    min_pair_slack = min(min_pair_slack, own_slack, other_slack)
+        return min_pair_slack
+
+    def _deadline_conflict_penalty(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        planned_prefixes: dict[int, list[dict[str, Any]]],
+    ) -> float:
+        own_prefix = self._route_prefix_for_action(
+            obs_builder,
+            handle,
+            action,
+            self.FUTURE_RERANK_LOOKAHEAD_CELLS,
+        )
+        if not own_prefix:
+            return 0.0
+
+        own_speed = self._agent_speed(obs_builder.env.agents[handle])
+        penalty = 0.0
+        seen_conflicts = set()
+        for other, other_prefix in planned_prefixes.items():
+            if other == handle or not other_prefix:
+                continue
+
+            other_speed = self._agent_speed(obs_builder.env.agents[other])
+            other_positions = {}
+            other_edges = {}
+            for node in other_prefix:
+                other_positions.setdefault(node["position"], node)
+                previous = node["prev_position"]
+                if previous is None or previous == node["position"]:
+                    continue
+                other_edges.setdefault((previous, node["position"]), node)
+
+            for own_node in own_prefix:
+                if int(own_node["step"]) > self.FUTURE_RERANK_DEADLINE_CONFLICT_MAX_STEP:
+                    break
+
+                same_cell_node = other_positions.get(own_node["position"])
+                if same_cell_node is not None:
+                    key = (other, own_node["step"], same_cell_node["step"], 0)
+                    if key not in seen_conflicts:
+                        penalty += self._deadline_conflict_node_penalty(
+                            obs_builder,
+                            handle,
+                            other,
+                            own_node,
+                            same_cell_node,
+                            own_speed,
+                            other_speed,
+                            head_on=False,
+                        )
+                        seen_conflicts.add(key)
+
+                previous = own_node["prev_position"]
+                if previous is None or previous == own_node["position"]:
+                    continue
+                reverse_node = other_edges.get((own_node["position"], previous))
+                if reverse_node is None:
+                    continue
+                key = (other, own_node["step"], reverse_node["step"], 1)
+                if key in seen_conflicts:
+                    continue
+                penalty += self._deadline_conflict_node_penalty(
+                    obs_builder,
+                    handle,
+                    other,
+                    own_node,
+                    reverse_node,
+                    own_speed,
+                    other_speed,
+                    head_on=True,
+                )
+                seen_conflicts.add(key)
+
+        return penalty
+
+    def _deadline_conflict_node_penalty(
+        self,
+        obs_builder: Any,
+        handle: int,
+        other: int,
+        own_node: dict[str, Any],
+        other_node: dict[str, Any],
+        own_speed: float,
+        other_speed: float,
+        head_on: bool,
+    ) -> float:
+        own_step = int(own_node["step"])
+        other_step = int(other_node["step"])
+        if own_step < 1 or own_step > self.FUTURE_RERANK_DEADLINE_CONFLICT_MAX_STEP:
+            return 0.0
+        eta_gap = abs(own_step / own_speed - other_step / other_speed)
+        if eta_gap > self.FUTURE_RERANK_DEADLINE_CONFLICT_MAX_ETA_GAP:
+            return 0.0
+
+        own_slack = self._prefix_deadline_slack(obs_builder, handle, own_node)
+        other_slack = self._prefix_deadline_slack(obs_builder, other, other_node)
+        if not np.isfinite(own_slack) or not np.isfinite(other_slack):
+            return 0.0
+
+        pair_slack = min(own_slack, other_slack)
+        if pair_slack >= self.FUTURE_RERANK_DEADLINE_TIGHT_SLACK:
+            return 0.0
+
+        slack_deficit = min(
+            300.0,
+            self.FUTURE_RERANK_DEADLINE_TIGHT_SLACK - pair_slack,
+        )
+        eta_factor = (
+            1.0
+            + (
+                self.FUTURE_RERANK_DEADLINE_CONFLICT_MAX_ETA_GAP
+                - eta_gap
+            )
+            / max(1.0, self.FUTURE_RERANK_DEADLINE_CONFLICT_MAX_ETA_GAP)
+        )
+        head_on_factor = 1.35 if head_on else 1.0
+        priority_factor = 1.15 if other_slack < own_slack else 1.0
+        return (
+            self.FUTURE_RERANK_DEADLINE_PENALTY_COEF
+            * slack_deficit
+            * eta_factor
+            * head_on_factor
+            * priority_factor
+        )
+
+    def _prefix_deadline_slack(
+        self,
+        obs_builder: Any,
+        handle: int,
+        node: dict[str, Any],
+    ) -> float:
+        position = node["position"]
+        direction = node["direction"]
+        if position is None or direction is None or not obs_builder._is_in_bounds(position):
+            return np.inf
+        distance_map = obs_builder._get_distance_map(handle)
+        remaining_distance = distance_map[position[0], position[1], direction]
+        if not np.isfinite(remaining_distance):
+            return np.inf
+        total_distance = int(node["step"]) + remaining_distance
+        return float(obs_builder._deadline_slack(handle, total_distance))
 
     def _future_head_on_risk(
         self,

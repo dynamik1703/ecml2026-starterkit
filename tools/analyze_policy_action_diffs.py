@@ -390,6 +390,50 @@ def future_risk(
         return float("nan")
 
 
+def deadline_conflict_penalty(
+    policy: Any,
+    obs_builder: Any,
+    handle: int,
+    action: int,
+    prefixes: dict[int, Any],
+) -> float:
+    if not hasattr(policy, "_deadline_conflict_penalty") or not prefixes:
+        return float("nan")
+    try:
+        return float(
+            policy._deadline_conflict_penalty(
+                obs_builder,
+                handle,
+                action,
+                prefixes,
+            )
+        )
+    except Exception:
+        return float("nan")
+
+
+def residual_head_on_min_pair_deadline_slack(
+    policy: Any,
+    obs_builder: Any,
+    handle: int,
+    action: int,
+    prefixes: dict[int, Any],
+) -> float:
+    if not hasattr(policy, "_residual_head_on_min_pair_deadline_slack") or not prefixes:
+        return float("nan")
+    try:
+        return float(
+            policy._residual_head_on_min_pair_deadline_slack(
+                obs_builder,
+                handle,
+                action,
+                prefixes,
+            )
+        )
+    except Exception:
+        return float("nan")
+
+
 def mask_values(observation: Any) -> dict[str, float]:
     values = np.asarray(observation, dtype=np.float32)[-len(ACTION_COLUMNS) :]
     return {
@@ -502,7 +546,24 @@ def diff_row(
     distance, slack = distance_and_slack(obs_builder, handle)
     baseline_target = target_metrics(obs_builder, handle, baseline_action)
     candidate_target = target_metrics(obs_builder, handle, candidate_action)
-    prefixes = planned_prefixes(baseline_policy, obs_builder, baseline_actions)
+    prefix_policy = (
+        baseline_policy
+        if hasattr(baseline_policy, "_route_prefix_for_action")
+        else candidate_policy
+    )
+    prefixes = planned_prefixes(prefix_policy, obs_builder, baseline_actions)
+    baseline_prefix = route_prefix_for_action(
+        prefix_policy,
+        obs_builder,
+        handle,
+        baseline_action,
+    )
+    candidate_prefix = route_prefix_for_action(
+        prefix_policy,
+        obs_builder,
+        handle,
+        candidate_action,
+    )
     baseline_logits = raw_logits(baseline_policy, observation)
     candidate_logits = raw_logits(candidate_policy, observation)
     return {
@@ -547,6 +608,20 @@ def diff_row(
         "candidate_distance_delta": (
             candidate_target["target_distance"] - baseline_target["target_distance"]
         ),
+        **prefix_conflict_features(
+            "baseline",
+            baseline_prefix,
+            prefixes,
+            handle,
+            env,
+        ),
+        **prefix_conflict_features(
+            "candidate",
+            candidate_prefix,
+            prefixes,
+            handle,
+            env,
+        ),
         **logit_features(
             "baseline_raw",
             baseline_logits,
@@ -562,18 +637,50 @@ def diff_row(
         "baseline_corridor_len": corridor_len(obs_builder, handle, baseline_action),
         "candidate_corridor_len": corridor_len(obs_builder, handle, candidate_action),
         "baseline_future_head_on_risk": future_risk(
-            baseline_policy,
+            prefix_policy,
             obs_builder,
             handle,
             baseline_action,
             prefixes,
         ),
         "candidate_future_head_on_risk": future_risk(
-            baseline_policy,
+            prefix_policy,
             obs_builder,
             handle,
             candidate_action,
             prefixes,
+        ),
+        "baseline_deadline_conflict_penalty": deadline_conflict_penalty(
+            prefix_policy,
+            obs_builder,
+            handle,
+            baseline_action,
+            prefixes,
+        ),
+        "candidate_deadline_conflict_penalty": deadline_conflict_penalty(
+            prefix_policy,
+            obs_builder,
+            handle,
+            candidate_action,
+            prefixes,
+        ),
+        "baseline_residual_head_on_min_pair_deadline_slack": (
+            residual_head_on_min_pair_deadline_slack(
+                prefix_policy,
+                obs_builder,
+                handle,
+                baseline_action,
+                prefixes,
+            )
+        ),
+        "candidate_residual_head_on_min_pair_deadline_slack": (
+            residual_head_on_min_pair_deadline_slack(
+                prefix_policy,
+                obs_builder,
+                handle,
+                candidate_action,
+                prefixes,
+            )
         ),
     }
 
