@@ -123,6 +123,25 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_counterfactual_failure_deadline_720_40_top12.csv
 ```
 
+For hard-negative regression data, select completed episodes with the lowest
+normalized reward. These are full-success baselines where small forced changes
+can still break a later arrival:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/mine_failure_seeds.py \
+  --episodes 80 \
+  --seed 1000 \
+  --num-agents 6 \
+  --line-length 2 \
+  --selection-mode full-success-low-reward \
+  --top-k 24 \
+  --print-counterfactual-command \
+  --output-csv /private/tmp/ecml_eval_1000_80.csv \
+  --output-json /private/tmp/ecml_eval_1000_80.json \
+  --counterfactual-output /private/tmp/ecml_counterfactual_success_hardneg_1000_80_top24.csv
+```
+
 Each row is a candidate training example for a learned gate/reranker:
 `reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
 forced action improved the baseline. Feature columns include observation
@@ -277,6 +296,37 @@ First fresh prefix-feature batches:
   the learned gate should remain offline-only. The next best data step is to
   mine more 760-like success-loss negatives and validate with explicit
   seed-window holdouts before any online gate/reranker deployment.
+- A second successful-seed hard-negative range 1000-1079 was evaluated with
+  reward mean `0.909273` and success-rate mean `0.939583`. The 24 lowest-reward
+  full-success seeds
+  (`1003,1051,1072,1077,1033,1019,1050,1020,1078,1025,1015,1059,1047,1048,1065,1027,1076,1007,1037,1035,1000,1056,1057,1066`)
+  produced 369 broad movement counterfactual rows: 21 good, 306 neutral,
+  42 bad, with reward wins/losses/ties `23/40/306` and success
+  wins/losses/ties `0/19/350`. This is a much harder negative set than the
+  920-999 block; several alternatives lose one or two successful arrivals.
+- Random seed splits on the 1000-1079 successful hard-negative block confirm
+  that this data is difficult: binary only-prefix at threshold 0.90 accepted
+  `6/6/1`, and threshold 0.97 accepted only `1/1/0`; multiclass variants mostly
+  accepted bad actions or collapsed to zero-good accepts.
+- Combining the three failure-deadline windows plus both successful hard-negative
+  blocks gives 938 rows: 114 good, 748 neutral, 76 bad. Random splits can be
+  made safe only at very low recall: multiclass without-prefix at threshold
+  0.97 accepted `7/0/0`, while threshold 0.95 still accepted `18/0/2`.
+- Explicit holdouts remain the deciding evidence:
+  - Train the three failure-deadline windows plus 920-999 hard negatives,
+    validate on 1000-1079 hard negatives: multiclass all-features threshold
+    0.95 accepted `3/14/7`, threshold 0.97 accepted `3/9/5`; not safe.
+  - With `--max-bad-probability 0.01` and thresholds up to 0.995, the same
+    holdout reaches zero-bad only when it accepts zero good actions
+    (`0/1/0` without prefix features at threshold 0.995).
+  - Train 720-759 + 840-919 + both successful hard-negative blocks, validate
+    on the hard 760-839 failure window: default multiclass threshold 0.95
+    accepted `3/6/1`; stricter bad-probability gating reaches zero-bad only
+    with zero-good accepts.
+  Conclusion: full-success low-reward mining is the right source for hard
+  negatives, but the current small MLP gate and feature set still do not
+  generalize into a useful online gate. Keep it as an offline diagnostic until
+  a holdout can accept useful good actions with `accepted_bad=0`.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.

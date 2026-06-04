@@ -81,6 +81,18 @@ def flatten_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def is_candidate(flat: dict[str, Any], args: argparse.Namespace) -> bool:
+    if args.selection_mode == "full-success-low-reward":
+        if float(flat["success_rate"]) < 1.0:
+            return False
+        if int(flat["failed_agents"]) > 0:
+            return False
+        if (
+            args.max_reward is not None
+            and float(flat["normalized_reward"]) > args.max_reward
+        ):
+            return False
+        return True
+
     if float(flat["success_rate"]) < args.success_threshold:
         return True
     if int(flat["failed_agents"]) >= args.min_failed_agents:
@@ -93,7 +105,17 @@ def is_candidate(flat: dict[str, Any], args: argparse.Namespace) -> bool:
     return False
 
 
-def ranking_key(flat: dict[str, Any]) -> tuple[float, float, float, float]:
+def ranking_key(
+    flat: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[float, float, float, float]:
+    if args.selection_mode == "full-success-low-reward":
+        return (
+            float(flat["normalized_reward"]),
+            -float(flat["env_time"]),
+            -float(flat["max_episode_steps"]),
+            float(flat["seed"]),
+        )
     return (
         -float(flat["failed_agents"]),
         float(flat["success_rate"]),
@@ -164,9 +186,12 @@ def counterfactual_command(args: argparse.Namespace, seeds: list[int]) -> str:
         parts.extend(["--scene", args.scene])
     if args.policy_checkpoint is not None:
         parts.extend(["--policy-checkpoint", str(args.policy_checkpoint)])
-    if args.output_json is not None:
+    if args.output_json is not None and args.selection_mode == "failures":
         parts.extend(["--focus-failures-json", str(args.output_json)])
-    if args.focus_window_before_stationary is not None:
+    if (
+        args.focus_window_before_stationary is not None
+        and args.selection_mode == "failures"
+    ):
         parts.extend(
             [
                 "--focus-window-before-stationary",
@@ -175,7 +200,10 @@ def counterfactual_command(args: argparse.Namespace, seeds: list[int]) -> str:
                 str(args.focus_window_after_stationary),
             ]
         )
-    if args.focus_window_before_deadline is not None:
+    if (
+        args.focus_window_before_deadline is not None
+        and args.selection_mode == "failures"
+    ):
         parts.extend(
             [
                 "--focus-window-before-deadline",
@@ -217,7 +245,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-reward",
         type=float,
-        help="Also include seeds whose normalized reward is at or below this value.",
+        help=(
+            "In failure mode, also include seeds whose normalized reward is at "
+            "or below this value. In full-success-low-reward mode, filter "
+            "selected successful seeds to this maximum reward."
+        ),
+    )
+    parser.add_argument(
+        "--selection-mode",
+        choices=["failures", "full-success-low-reward"],
+        default="failures",
+        help=(
+            "Select failure-rich seeds, or completed episodes with the lowest "
+            "normalized reward for hard-negative counterfactual mining."
+        ),
     )
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--output-csv", type=Path)
@@ -281,10 +322,11 @@ def main() -> int:
             flush=True,
         )
 
-    ranked = sorted(candidates, key=ranking_key)
+    ranked = sorted(candidates, key=lambda flat: ranking_key(flat, args))
     selected = ranked[: max(0, args.top_k)]
     summary = {
         "policy": args.policy,
+        "selection_mode": args.selection_mode,
         "episodes": len(flat_rows),
         "candidate_seeds": len(candidates),
         "selected_seeds": len(selected),
@@ -307,7 +349,12 @@ def main() -> int:
         f"selected_seeds={summary['selected_seeds']}"
     )
     if selected:
-        print("\nSelected failure seeds:")
+        selected_label = (
+            "failure seeds"
+            if args.selection_mode == "failures"
+            else "full-success low-reward seeds"
+        )
+        print(f"\nSelected {selected_label}:")
         print("seed,success_rate,normalized_reward,failed_agents,failed_agent_ids")
         for row in selected:
             print(
