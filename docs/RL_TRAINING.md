@@ -976,6 +976,33 @@ Initial 64-feature PPO anchor experiments:
   single trivially separable one-step decision. Next RL work should use
   sequence-level acceptance/training signals instead of more one-step terminal
   reward tuning.
+- `tools/evaluate_policy_diff_prefixes.py` measures that sequence effect
+  directly. It runs the baseline policy, but adaptively replaces the first `k`
+  current-trajectory disagreements with the candidate action. On critical seeds
+  `205,206,215` for `/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt`:
+  seed 205 regressed after the first diff
+  (`1@188:a3:MOVE_FORWARD->MOVE_LEFT`), seed 215 improved after the first diff
+  (`1@194:a4:MOVE_FORWARD->MOVE_LEFT`), and seed 206 only lost success after
+  the third diff:
+  `1@243:a0:MOVE_FORWARD->MOVE_LEFT;2@334:a4:MOVE_LEFT->STOP_MOVING;3@335:a4:MOVE_LEFT->STOP_MOVING`.
+  Prefix summary over these three seeds: `k=1` had success wins/losses/ties
+  `1/1/1`; `k>=3` had `1/2/0`, matching the full candidate's failure count.
+  This gives us a better next training target: learn or regularize against
+  harmful diff-prefixes, especially repeated stop overrides after an initially
+  neutral route deviation.
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/evaluate_policy_diff_prefixes.py \
+  --candidate-checkpoint /private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --seeds 205,206,215 \
+  --prefix-lengths 1 2 3 5 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-csv /private/tmp/ecml_diff_prefix_terminal_stronger_critical.csv \
+  --output-json /private/tmp/ecml_diff_prefix_terminal_stronger_critical.json
+```
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
