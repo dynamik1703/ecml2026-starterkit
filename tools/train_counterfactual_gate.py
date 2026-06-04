@@ -259,8 +259,10 @@ def category_index(category: str) -> int:
 
 
 def train(args: argparse.Namespace) -> dict[str, Any]:
-    rows = read_rows(args.csv)
-    if not rows:
+    train_rows_input = read_rows(args.csv)
+    validation_rows = read_rows(args.validation_csv) if args.validation_csv else []
+    rows = train_rows_input + validation_rows
+    if not train_rows_input:
         raise ValueError("No rows loaded")
     feature_columns = filter_feature_columns(choose_feature_columns(rows), args)
     if not feature_columns:
@@ -269,12 +271,19 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     x_raw = feature_matrix(rows, feature_columns)
     y = np.asarray([label_row(row, args.reward_epsilon) for row in rows], dtype=np.float32)
     categories = [outcome_category(row, args.reward_epsilon) for row in rows]
-    train_mask, val_mask = seed_split(
-        rows,
-        args.val_fraction,
-        args.split_seed,
-        args.ordered_seed_split,
-    )
+    if validation_rows:
+        train_mask = np.array(
+            [index < len(train_rows_input) for index in range(len(rows))],
+            dtype=bool,
+        )
+        val_mask = ~train_mask
+    else:
+        train_mask, val_mask = seed_split(
+            rows,
+            args.val_fraction,
+            args.split_seed,
+            args.ordered_seed_split,
+        )
     x, mean, std = standardize(x_raw[train_mask], x_raw)
 
     train_x = torch.as_tensor(x[train_mask], dtype=torch.float32)
@@ -367,6 +376,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     ] if len(val_y) else []
     summary = {
         "rows": len(rows),
+        "input_rows": len(train_rows_input),
+        "validation_input_rows": len(validation_rows),
         "features": len(feature_columns),
         "train_rows": int(train_mask.sum()),
         "val_rows": int(val_mask.sum()),
@@ -426,6 +437,12 @@ def parse_args() -> argparse.Namespace:
         description="Train a small classifier for counterfactual gate labels."
     )
     parser.add_argument("csv", nargs="+", type=Path)
+    parser.add_argument(
+        "--validation-csv",
+        nargs="+",
+        type=Path,
+        help="Use these CSV rows as an explicit validation set instead of a seed split.",
+    )
     parser.add_argument(
         "--include-feature-regex",
         help="Only use feature columns whose names match this regular expression.",

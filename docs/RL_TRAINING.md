@@ -193,6 +193,31 @@ First fresh prefix-feature batches:
   This deadline window is better than a last-stationary-progress window for
   Flatland late-arrival failures, because many failed agents keep moving until
   episode end and simply miss `latest_arrival`.
+- A fresh failure-mined range 760-839 produced 32 incomplete seeds from 80
+  episodes. The selected top-20 seeds
+  (`803,779,761,836,763,773,815,829,783,812,762,781,809,792,789,819,782,780,824,814`)
+  yielded 121 deadline-window rows: 19 good, 94 neutral, 8 bad, with reward
+  wins/losses/ties `21/6/94` and success wins/losses/ties `7/2/112`.
+  This range is harder and more useful for hard-negative coverage than the
+  earlier 720-759 range.
+- Combining the 720-759 and 760-839 deadline-window sets gives 188 rows:
+  39 good, 139 neutral, 10 bad. Eight shuffled split seeds:
+  - Binary only-prefix gate: threshold 0.90 accepted `28/23/1`;
+    threshold 0.95 accepted `20/15/0`.
+  - Multiclass only-prefix gate: threshold 0.90 accepted `21/18/0`;
+    threshold 0.95 accepted `17/16/0`.
+  This is the first broader zero-bad result with nontrivial recall, but it is
+  still mined-data validation, not deployment validation.
+- Explicit window-holdout is stricter and exposes remaining generalization
+  risk:
+  - Train 720-759, validate 760-839, binary only-prefix: threshold 0.95
+    accepted `5/5/2`; not safe.
+  - Train 760-839, validate 720-759, binary only-prefix: threshold 0.95
+    accepted `3/4/0`; safe but low recall.
+  - Train 720-759, validate 760-839, multiclass only-prefix: threshold 0.95
+    accepted `4/4/4`; not safe.
+  Conclusion: the 760-839 hard negatives are important, and we need more
+  independent failure-mined windows before considering an online learned gate.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
@@ -269,6 +294,20 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --objective multiclass \
   --max-bad-probability 0.01 \
   --epochs 500 \
+  --hidden-size 32
+```
+
+For explicit window-holdout validation, train on one CSV and validate on another:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_counterfactual_gate.py \
+  /private/tmp/ecml_counterfactual_failure_deadline_720_40_top12.csv \
+  --validation-csv /private/tmp/ecml_counterfactual_failure_deadline_760_80_top20.csv \
+  --include-feature-regex '^(baseline_prefix_|forced_prefix_)' \
+  --objective binary \
+  --thresholds 0.75 0.9 0.95 0.97 \
+  --epochs 300 \
   --hidden-size 32
 ```
 
