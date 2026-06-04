@@ -459,6 +459,42 @@ First fresh prefix-feature batches:
   involving agents with less deadline room. The next data step is to regenerate
   the failure-deadline and full-success hard-negative CSVs with these columns
   and re-run the gate/rule holdouts.
+- The hard 760-839 failure-deadline set and the 1080-1159 full-success
+  hard-negative set were regenerated with deadline-aware prefix features:
+  - 760-839 regenerated 121 rows with unchanged label counts: 19 good,
+    94 neutral, 8 bad; reward wins/losses/ties `21/6/94`; success
+    wins/losses/ties `7/2/112`.
+  - 1080-1159 regenerated 255 rows with unchanged label counts: 21 good,
+    216 neutral, 18 bad; reward wins/losses/ties `23/16/216`; success
+    wins/losses/ties `0/5/250`.
+- On the combined regenerated 760+1080 data, deadline-aware features are strong
+  bad-vs-rest signals:
+  - `baseline_prefix_min_other_deadline_slack`: bad median `172.5`, rest
+    median `999`, effect size about `-0.97`.
+  - `forced_prefix_min_pair_deadline_slack`: bad median `145.5`, rest median
+    `999`, effect size about `-0.97`.
+  - `forced_prefix_min_other_deadline_slack`: bad median `164`, rest median
+    `999`, effect size about `-0.97`.
+  The delta features are weaker than absolute slack at conflict points, which
+  suggests that deadline pressure identifies risky contexts rather than a
+  simple forced-minus-baseline rescue direction.
+- Explicit gate holdouts with the regenerated deadline-aware rows improved
+  when training only on prefix/risk features
+  (`baseline_prefix_*`, `forced_prefix_*`, and future-head-on risk columns):
+  - Train 760-839, validate 1080-1159: threshold 0.97 accepted `2/9/0`;
+    threshold 0.99 accepted `1/5/0`.
+  - Train 1080-1159, validate 760-839: threshold 0.95 accepted `3/1/0`;
+    threshold 0.97 accepted `2/1/0`.
+  With `--max-bad-probability 0.01`, the same setup remains zero-bad but loses
+  recall: `2/8/0` on 1080 at threshold 0.97, and `2/1/0` on 760 at threshold
+  0.90.
+- Random seed splits over the combined 376 regenerated rows are still unsafe:
+  multiclass all-features at threshold 0.99 accepted `7/5/4`, and multiclass
+  only-prefix at threshold 0.99 accepted `8/1/6`. Conclusion: deadline-aware
+  prefix features are a real improvement for explicit holdouts, but not enough
+  for deployment. The next step is to regenerate at least one more independent
+  failure window and one more full-success low-reward window with the new
+  columns before considering a learned/rule gate integration.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
