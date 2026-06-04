@@ -98,10 +98,14 @@ def outcome_category(row: dict[str, str], reward_epsilon: float) -> str:
     reward_delta = safe_float(row.get("reward_delta"))
     success_delta = safe_float(row.get("success_delta"))
     failed_delta = safe_float(row.get("failed_agents_delta"))
-    if success_delta < -1e-9 or failed_delta > 0 or reward_delta < -reward_epsilon:
-        return "bad"
-    if success_delta > 1e-9 or reward_delta > reward_epsilon:
+    if success_delta > 1e-9:
         return "good"
+    if success_delta < -1e-9 or failed_delta > 0:
+        return "bad"
+    if reward_delta > reward_epsilon:
+        return "good"
+    if reward_delta < -reward_epsilon:
+        return "bad"
     return "neutral"
 
 
