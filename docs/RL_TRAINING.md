@@ -947,6 +947,22 @@ Initial route-conflict checkpoint results:
   plausible signals: good side-detours have slightly shorter divergence,
   higher prefix overlap and fewer same-state-priority competitors. This is
   useful as model input, but still not enough for a deployable hard gate.
+- A conservative counterfactual value/risk ensemble was added as an offline
+  evaluation tool (`tools/evaluate_counterfactual_value_ensemble.py`). It
+  trains bootstrap MLPs with a utility target
+  `reward_delta + success_weight * success_delta - failed_weight * new_failures`
+  and a separate bad-risk head. Acceptance uses a lower confidence bound on
+  utility and an upper confidence bound on bad probability. On `hard_w8_rejoin`
+  and `hard_w20_rejoin`, the relaxed all-feature ensemble still accepted bad
+  rows (for example w8 accepted good/neutral/bad `1/0/1` at
+  `min_utility=0.05,max_bad_probability=0.20`; w20 accepted `1/0/2` at
+  `0.10,0.10`). More conservative settings with higher bad weights and
+  stronger uncertainty penalties accepted nothing. A rerank-feature-only
+  ablation over w8+w20 accepted bad rows with negative true utility, while a
+  linear rejoin+priority-only model again accepted nothing. Do not integrate
+  this offline value ensemble into the submission yet; the next useful RL step
+  is to expose these trajectory/priority signals to rollout training rather
+  than trying to hard-gate one-step counterfactual labels.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
