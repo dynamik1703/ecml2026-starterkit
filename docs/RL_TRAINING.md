@@ -886,6 +886,24 @@ Initial route-conflict checkpoint results:
   52-feature gate likely needs more labelled counterfactual decisions and
   trajectory context, not a single threshold on the current route-conflict
   observation.
+- A focused route-conflict counterfactual dataset over the BC win/loss seeds
+  102, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 118, 120, 126, 127,
+  128 and 129 used `MyRouteConflictObservationBuilder` with forced `LEFT,RIGHT`
+  alternatives and produced 204 labelled one-step counterfactuals: reward
+  wins/losses/ties `15/14/175`, success wins/losses/ties `2/4/198`.
+  This includes mixed labels within the same seed, for example seed 108 and
+  seed 111 contain both helpful and harmful side detours.
+- Linear, MLP and multiclass counterfactual gates trained on this 204-row
+  dataset overfit the training split but failed seedwise cross-split
+  validation. Across split seeds `1,3,5,7,11,13,17,19`, all tested objectives
+  and feature ablations accepted zero validation good rows at thresholds
+  `0.75,0.90,0.95,0.99`, while still accepting some neutral or bad rows. Do not
+  deploy a learned 52-feature gate from this dataset alone.
+- Next data step: mine a broader route-conflict counterfactual dataset across
+  non-overlapping seed windows and include more successful hard-negative seeds.
+  The gate target should be strict high-precision acceptance of side detours;
+  deployment should happen only after leave-window-out validation accepts good
+  rows with zero bad rows.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20
