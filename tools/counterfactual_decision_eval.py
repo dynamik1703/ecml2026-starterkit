@@ -238,6 +238,15 @@ def decision_row(
         "prefix_same_edge_conflicts",
         "prefix_head_on_edge_conflicts",
         "prefix_min_head_on_eta_gap",
+        "prefix_min_own_deadline_slack",
+        "prefix_min_other_deadline_slack",
+        "prefix_min_pair_deadline_slack",
+        "prefix_own_deadline_miss_conflicts",
+        "prefix_other_deadline_miss_conflicts",
+        "prefix_pair_deadline_miss_conflicts",
+        "prefix_own_tight_deadline_conflicts",
+        "prefix_other_tight_deadline_conflicts",
+        "prefix_pair_tight_deadline_conflicts",
     ):
         prefix_delta_features[f"forced_{suffix}_delta"] = (
             forced_prefix_features[f"forced_{suffix}"]

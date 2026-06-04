@@ -196,6 +196,16 @@ def _agent_eta(env: Any, handle: int, step: int) -> float:
     return float(step) / speed
 
 
+def _agent_deadline_slack_at(env: Any, handle: int, step: int) -> float:
+    try:
+        latest_arrival = env.agents[handle].latest_arrival
+    except Exception:
+        latest_arrival = None
+    if latest_arrival is None:
+        return 999.0
+    return float(latest_arrival) - float(env._elapsed_steps) - _agent_eta(env, handle, step)
+
+
 def _direction_relation(own_direction: Any, other_direction: Any) -> str:
     if own_direction is None or other_direction is None:
         return "crossing"
@@ -236,6 +246,15 @@ def prefix_conflict_features(
     first_intersection_step = 0
     min_intersection_eta_gap = float("inf")
     min_head_on_eta_gap = float("inf")
+    min_own_deadline_slack = float("inf")
+    min_other_deadline_slack = float("inf")
+    min_pair_deadline_slack = float("inf")
+    own_deadline_miss_conflicts = 0
+    other_deadline_miss_conflicts = 0
+    pair_deadline_miss_conflicts = 0
+    own_tight_deadline_conflicts = 0
+    other_tight_deadline_conflicts = 0
+    pair_tight_deadline_conflicts = 0
 
     for other, other_prefix in prefixes.items():
         if other == handle or not other_prefix:
@@ -261,6 +280,18 @@ def prefix_conflict_features(
                         - _agent_eta(env, other, other_step)
                     )
                     min_intersection_eta_gap = min(min_intersection_eta_gap, eta_gap)
+                    own_slack = _agent_deadline_slack_at(env, handle, own_step)
+                    other_slack = _agent_deadline_slack_at(env, other, other_step)
+                    pair_slack = min(own_slack, other_slack)
+                    min_own_deadline_slack = min(min_own_deadline_slack, own_slack)
+                    min_other_deadline_slack = min(min_other_deadline_slack, other_slack)
+                    min_pair_deadline_slack = min(min_pair_deadline_slack, pair_slack)
+                    own_deadline_miss_conflicts += int(own_slack < 0.0)
+                    other_deadline_miss_conflicts += int(other_slack < 0.0)
+                    pair_deadline_miss_conflicts += int(pair_slack < 0.0)
+                    own_tight_deadline_conflicts += int(own_slack < 20.0)
+                    other_tight_deadline_conflicts += int(other_slack < 20.0)
+                    pair_tight_deadline_conflicts += int(pair_slack < 20.0)
                     relation = _direction_relation(
                         own_node.get("direction"),
                         other_node.get("direction"),
@@ -288,11 +319,37 @@ def prefix_conflict_features(
                 - _agent_eta(env, other, int(head_on_node.get("step", 0)))
             )
             min_head_on_eta_gap = min(min_head_on_eta_gap, eta_gap)
+            own_slack = _agent_deadline_slack_at(
+                env,
+                handle,
+                int(own_node.get("step", 0)),
+            )
+            other_slack = _agent_deadline_slack_at(
+                env,
+                other,
+                int(head_on_node.get("step", 0)),
+            )
+            pair_slack = min(own_slack, other_slack)
+            min_own_deadline_slack = min(min_own_deadline_slack, own_slack)
+            min_other_deadline_slack = min(min_other_deadline_slack, other_slack)
+            min_pair_deadline_slack = min(min_pair_deadline_slack, pair_slack)
+            own_deadline_miss_conflicts += int(own_slack < 0.0)
+            other_deadline_miss_conflicts += int(other_slack < 0.0)
+            pair_deadline_miss_conflicts += int(pair_slack < 0.0)
+            own_tight_deadline_conflicts += int(own_slack < 20.0)
+            other_tight_deadline_conflicts += int(other_slack < 20.0)
+            pair_tight_deadline_conflicts += int(pair_slack < 20.0)
 
     if not np.isfinite(min_intersection_eta_gap):
         min_intersection_eta_gap = 999.0
     if not np.isfinite(min_head_on_eta_gap):
         min_head_on_eta_gap = 999.0
+    if not np.isfinite(min_own_deadline_slack):
+        min_own_deadline_slack = 999.0
+    if not np.isfinite(min_other_deadline_slack):
+        min_other_deadline_slack = 999.0
+    if not np.isfinite(min_pair_deadline_slack):
+        min_pair_deadline_slack = 999.0
 
     return {
         f"{prefix_name}_prefix_len": float(len(prefix)),
@@ -306,6 +363,15 @@ def prefix_conflict_features(
         f"{prefix_name}_prefix_same_edge_conflicts": float(same_edge_conflicts),
         f"{prefix_name}_prefix_head_on_edge_conflicts": float(head_on_edge_conflicts),
         f"{prefix_name}_prefix_min_head_on_eta_gap": float(min_head_on_eta_gap),
+        f"{prefix_name}_prefix_min_own_deadline_slack": float(min_own_deadline_slack),
+        f"{prefix_name}_prefix_min_other_deadline_slack": float(min_other_deadline_slack),
+        f"{prefix_name}_prefix_min_pair_deadline_slack": float(min_pair_deadline_slack),
+        f"{prefix_name}_prefix_own_deadline_miss_conflicts": float(own_deadline_miss_conflicts),
+        f"{prefix_name}_prefix_other_deadline_miss_conflicts": float(other_deadline_miss_conflicts),
+        f"{prefix_name}_prefix_pair_deadline_miss_conflicts": float(pair_deadline_miss_conflicts),
+        f"{prefix_name}_prefix_own_tight_deadline_conflicts": float(own_tight_deadline_conflicts),
+        f"{prefix_name}_prefix_other_tight_deadline_conflicts": float(other_tight_deadline_conflicts),
+        f"{prefix_name}_prefix_pair_tight_deadline_conflicts": float(pair_tight_deadline_conflicts),
     }
 
 

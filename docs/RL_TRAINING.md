@@ -150,7 +150,12 @@ future-head-on risk, policy logit deltas, and route-prefix conflict features.
 The prefix features compare baseline versus forced lookahead routes against
 other agents' planned prefixes: shared cells, same/opposing/crossing direction
 intersections, same-edge conflicts, head-on edge conflicts, first intersection
-step, and ETA gaps.
+step, and ETA gaps. New counterfactual CSVs also include deadline-aware prefix
+features: minimum own/other/pair deadline slack at conflict points, deadline
+miss conflict counts, tight-deadline conflict counts, and forced-minus-baseline
+deltas for each of those signals. Older `/private/tmp` CSVs created before this
+feature extension do not contain these columns; regenerate counterfactual rows
+before using the deadline-aware features for training or rule selection.
 
 Rank feature contrasts between outcome classes:
 
@@ -438,6 +443,22 @@ First fresh prefix-feature batches:
   success-loss counterfactuals overlap under the current one-step feature set.
   Next, focus on better candidate generation and temporal/global features
   before deploying any learned or rule-based override.
+- Deadline-aware prefix features were added to regenerated counterfactual rows.
+  A smoke run on known hard-negative seeds `1157,1114,1081` produced 48 rows:
+  11 good, 34 neutral, 3 bad, with reward wins/losses/ties `13/1/34` and
+  success wins/losses/ties `0/3/45`. On this small sample, deadline-aware
+  features were among the strongest bad-vs-rest signals:
+  - `forced_prefix_min_other_deadline_slack`: bad median `182`, rest median
+    `999`, effect size about `-1.59`.
+  - `forced_prefix_min_pair_deadline_slack`: bad median `182`, rest median
+    `999`, effect size about `-1.49`.
+  - `baseline_prefix_min_other_deadline_slack`: bad median `178`, rest median
+    `999`, effect size about `-1.45`.
+  These are still smoke-test numbers, but they support the hypothesis that
+  success-loss bad actions are not just spatial conflicts; they are conflicts
+  involving agents with less deadline room. The next data step is to regenerate
+  the failure-deadline and full-success hard-negative CSVs with these columns
+  and re-run the gate/rule holdouts.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
