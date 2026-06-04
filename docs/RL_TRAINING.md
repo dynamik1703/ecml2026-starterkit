@@ -179,6 +179,22 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
   --output-csv /private/tmp/ecml_safety_rules_all_1193.csv
 ```
 
+Evaluate monotone rescue rules that require the forced action to improve or not
+worsen selected conflict/risk signals relative to the baseline:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
+  .venv/bin/python tools/evaluate_counterfactual_rescue_rules.py \
+  /private/tmp/ecml_counterfactual_failure_deadline_720_40_top12.csv \
+  /private/tmp/ecml_counterfactual_failure_deadline_760_80_top20.csv \
+  /private/tmp/ecml_counterfactual_failure_deadline_840_80_top20.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_920_80_top20.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_1000_80_top24.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_1080_80_top20.csv \
+  --top-k 20 \
+  --output-csv /private/tmp/ecml_rescue_rules_all_1193.csv
+```
+
 First fresh prefix-feature batches:
 - Seeds 740-749 produced 107 rows with reward wins/losses/ties `0/8/99` and
   success wins/losses/ties `0/0/107`; useful mostly as hard negatives.
@@ -408,6 +424,20 @@ First fresh prefix-feature batches:
   as diagnostic filters, but not yet as a winning-action generator. The next
   practical policy step should combine a positive rescuer signal with these
   safety features, then validate with strict seed-window holdouts.
+- A monotone rescue-rule grid over the same 1193 rows also failed to produce a
+  useful deployment rule. It tested conditions such as baseline conflict/risk
+  presence, non-increasing forced conflict agents, improved ETA gaps, reduced
+  head-on/opposing prefix deltas, non-increasing future head-on risk, positive
+  policy logit delta, and bounded forced-distance delta. The best zero-bad
+  rules again accepted only `3/0/0` good/neutral/bad.
+- The best strict rescue rule selected on the previous 938 rows accepted
+  `0/0/0` on the 1080-1159 holdout. A relaxed rule that allowed no conflict
+  increase and required positive logit delta accepted `3/8/1` on 1080-1159 and
+  `1/2/2` on the hard 760-839 failure window. Conclusion: simple monotone
+  rescuer+filter rules are still too brittle; useful positives and bad
+  success-loss counterfactuals overlap under the current one-step feature set.
+  Next, focus on better candidate generation and temporal/global features
+  before deploying any learned or rule-based override.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
