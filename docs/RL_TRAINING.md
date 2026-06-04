@@ -243,6 +243,40 @@ First fresh prefix-feature batches:
   760-839-like hard negatives still break generalization. The next data step
   should deliberately mine more hard-negative failure windows, not just more
   positive rescue examples.
+- Successful-seed hard-negative mining from evaluated seeds 920-999 selected
+  20 full-success seeds with lower baseline reward
+  (`997,985,957,983,974,977,931,933,996,941,959,950,991,922,947,934,965,937,975,940`)
+  and sampled broad movement counterfactuals. This produced 237 rows: 16 good,
+  200 neutral, 21 bad, with reward wins/losses/ties `19/18/200` and success
+  wins/losses/ties `0/7/230`. Several bad examples have positive immediate
+  reward but lose a successful arrival later, so they are exactly the kind of
+  hard negatives a safe learned gate must reject.
+- On the successful-seed hard-negative set alone, random seed splits can learn
+  some safe low-recall decisions: binary only-prefix at threshold 0.95 accepted
+  `6/5/0`, and multiclass all-features at threshold 0.95 accepted `2/2/0`.
+  This is useful local signal, not deployment evidence.
+- Training on the three failure-deadline windows and validating on the
+  successful-seed hard negatives fails the safety requirement: multiclass
+  all-features accepted `9/34/8` at threshold 0.95 and `8/22/5` at threshold
+  0.97. The failure-focused positives do not teach the gate enough about
+  preserving already-successful episodes.
+- Combining the three failure-deadline windows with the successful-seed hard
+  negatives gives 569 rows: 93 good, 442 neutral, 34 bad. Random split
+  validation is still not safe: multiclass all-features at threshold 0.95
+  accepted `39/36/13`; binary all-features accepted `42/42/12`.
+- Adding successful-seed hard negatives to the training side improves some
+  leave-window-out safety but reduces recall and still does not solve the
+  hardest 760-839 holdout:
+  - Train 720-759 + 760-839 + successful hard negatives, validate 840-919:
+    threshold 0.75 accepted `15/3/0`; threshold 0.95 accepted `8/1/0`.
+  - Train 720-759 + 840-919 + successful hard negatives, validate 760-839:
+    threshold 0.95 accepted `5/5/1`; still not safe.
+  - Train 760-839 + 840-919 + successful hard negatives, validate 720-759:
+    threshold 0.97 accepted `4/5/0`, but lower thresholds accept one bad.
+  Conclusion: successful-seed hard negatives are valuable regression data, but
+  the learned gate should remain offline-only. The next best data step is to
+  mine more 760-like success-loss negatives and validate with explicit
+  seed-window holdouts before any online gate/reranker deployment.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
