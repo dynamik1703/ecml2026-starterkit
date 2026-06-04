@@ -152,6 +152,18 @@ other agents' planned prefixes: shared cells, same/opposing/crossing direction
 intersections, same-edge conflicts, head-on edge conflicts, first intersection
 step, and ETA gaps.
 
+Rank feature contrasts between outcome classes:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
+  .venv/bin/python tools/analyze_counterfactual_features.py \
+  /private/tmp/ecml_counterfactual_success_hardneg_1000_80_top24.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_1080_80_top20.csv \
+  --comparison bad:rest \
+  --top-k 20 \
+  --output-csv /private/tmp/ecml_success_hardneg_feature_bad_rest.csv
+```
+
 First fresh prefix-feature batches:
 - Seeds 740-749 produced 107 rows with reward wins/losses/ties `0/8/99` and
   success wins/losses/ties `0/0/107`; useful mostly as hard negatives.
@@ -327,6 +339,42 @@ First fresh prefix-feature batches:
   negatives, but the current small MLP gate and feature set still do not
   generalize into a useful online gate. Keep it as an offline diagnostic until
   a holdout can accept useful good actions with `accepted_bad=0`.
+- Feature-contrast analysis over all 938 counterfactual rows shows that bad
+  actions are most strongly associated with prefix conflict features, not raw
+  policy confidence:
+  - `forced_prefix_min_intersection_eta_gap`: bad median `1`, rest median `999`;
+    effect size about `-0.96`.
+  - `forced_prefix_conflict_agents`: bad mean `1.22`, rest mean `0.54`;
+    effect size about `+0.87`.
+  - `baseline_prefix_cell_intersections`, `baseline_prefix_conflict_agents`,
+    and head-on/opposing prefix counts are also high for bad rows.
+  This supports using prefix/ETA features as a safety filter, but also shows
+  why the current MLP is fragile: good and bad rows can both occur in late,
+  tight-slack states, so thresholding policy logits or immediate reward is not
+  enough.
+- A third successful low-reward range 1080-1159 was mined with
+  `--selection-mode full-success-low-reward --max-reward 0.91`. It produced
+  16 selected full-success seeds
+  (`1111,1157,1115,1125,1081,1141,1114,1108,1083,1143,1120,1159,1134,1103,1107,1092`)
+  from 80 episodes, with reward mean `0.918627` and success-rate mean
+  `0.941667`. Broad movement counterfactuals on those seeds produced 255 rows:
+  21 good, 216 neutral, 18 bad, with reward wins/losses/ties `23/16/216` and
+  success wins/losses/ties `0/5/250`. The low-reward filter found fewer bad
+  rows than 1000-1079, but includes high-value cases where immediate reward
+  improves while one later arrival is lost.
+- The 1080-1159 block remains hard for the learned gate:
+  - Random splits on this block alone are unsafe; binary only-prefix at
+    threshold 0.97 accepted `1/2/4`, and multiclass variants still accepted
+    bad actions.
+  - Combining all current counterfactual CSVs gives 1193 rows: 135 good,
+    964 neutral, 94 bad. Random splits are still unsafe at useful recall:
+    multiclass all-features threshold 0.95 accepted `31/35/10`.
+  - Train on the previous 938 rows and validate on 1080-1159: default
+    multiclass threshold 0.95 accepted `1/6/2`; threshold 0.97 accepted
+    `0/5/2`.
+  Conclusion: keep mining full-success low-reward hard negatives, but the next
+  model improvement should be a safety-first prefix/ETA rule or monotonic
+  reranker around the learned score, not just more MLP threshold tuning.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
