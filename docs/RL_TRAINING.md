@@ -83,6 +83,19 @@ other agents' planned prefixes: shared cells, same/opposing/crossing direction
 intersections, same-edge conflicts, head-on edge conflicts, first intersection
 step, and ETA gaps.
 
+First fresh prefix-feature batches:
+- Seeds 740-749 produced 107 rows with reward wins/losses/ties `0/8/99` and
+  success wins/losses/ties `0/0/107`; useful mostly as hard negatives.
+- Seeds 720-729 produced 120 rows with reward wins/losses/ties `8/8/104` and
+  success wins/losses/ties `10/0/110`.
+- Combined 227-row diagnostic set: 10 good, 14 bad, 203 neutral. With five
+  shuffled seed splits, a 32-hidden weighted binary gate accepted
+  good/neutral/bad `4/0/0` at threshold 0.90 and `3/0/0` at threshold 0.95.
+  The multiclass gate with `--max-bad-probability 0.01` accepted `4/1/0` at
+  threshold 0.90 and `3/1/0` at threshold 0.95. This is a small, mined sample,
+  but the zero-bad validation result is the first positive sign that explicit
+  prefix-conflict features may make a learned gate viable.
+
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
 The positive label was the known useful seed-55 `MOVE_RIGHT -> MOVE_FORWARD`
