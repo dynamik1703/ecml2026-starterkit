@@ -725,12 +725,13 @@ def no_diff_row(seed: int, env: Any, reward_values: list[float]) -> dict[str, An
     }
 
 
-def analyze_seed(args: argparse.Namespace, seed: int) -> dict[str, Any]:
+def analyze_seed(args: argparse.Namespace, seed: int) -> list[dict[str, Any]]:
     env, obs_builder = make_env(args)
     observations, _ = env.reset(random_seed=seed)
     baseline_policy = instantiate_policy(args.baseline_policy, args.baseline_checkpoint)
     candidate_policy = instantiate_policy(args.candidate_policy, args.candidate_checkpoint)
     reward_values: list[float] = []
+    rows: list[dict[str, Any]] = []
 
     while int(env._elapsed_steps) < env._max_episode_steps:
         handles = list(env.get_agent_handles())
@@ -742,20 +743,24 @@ def analyze_seed(args: argparse.Namespace, seed: int) -> dict[str, Any]:
 
         for handle, observation in zip(handles, obs_list):
             if baseline_actions.get(handle) != candidate_actions.get(handle):
-                return diff_row(
-                    args,
-                    seed,
-                    env,
-                    obs_builder,
-                    handle,
-                    observation,
-                    baseline_policy,
-                    candidate_policy,
-                    baseline_raw_actions,
-                    candidate_raw_actions,
-                    baseline_actions,
-                    candidate_actions,
+                rows.append(
+                    diff_row(
+                        args,
+                        seed,
+                        env,
+                        obs_builder,
+                        handle,
+                        observation,
+                        baseline_policy,
+                        candidate_policy,
+                        baseline_raw_actions,
+                        candidate_raw_actions,
+                        baseline_actions,
+                        candidate_actions,
+                    )
                 )
+                if len(rows) >= args.max_diffs_per_seed:
+                    return rows
 
         observations, rewards_by_agent, dones, _ = env.step(baseline_actions)
         reward_values.extend(
@@ -764,7 +769,7 @@ def analyze_seed(args: argparse.Namespace, seed: int) -> dict[str, Any]:
         )
         if done_all(dones):
             break
-    return no_diff_row(seed, env, reward_values)
+    return rows or [no_diff_row(seed, env, reward_values)]
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -807,6 +812,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument(
+        "--max-diffs-per-seed",
+        type=int,
+        default=1,
+        help="Maximum synchronized action differences to record for each seed.",
+    )
+    parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
@@ -817,6 +828,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.max_diffs_per_seed <= 0:
+        raise ValueError("--max-diffs-per-seed must be positive")
     seeds = (
         [int(item) for item in args.seeds.split(",") if item.strip()]
         if args.seeds
@@ -824,24 +837,25 @@ def main() -> int:
     )
     rows = []
     for seed in seeds:
-        row = analyze_seed(args, seed)
-        rows.append(row)
-        if row["has_diff"]:
-            print(
-                "seed={seed} step={env_time} agent={agent_id} "
-                "baseline={baseline_action_name} candidate={candidate_action_name} "
-                "raw={baseline_raw_action_name}->{candidate_raw_action_name} "
-                "slack={slack:.6g} dist_delta={candidate_distance_delta:.6g}".format(
-                    **row
-                ),
-                flush=True,
-            )
-        else:
-            print(
-                f"seed={seed} no_diff reward={row['normalized_reward']:.6g} "
-                f"success={row['success_rate']:.6g}",
-                flush=True,
-            )
+        seed_rows = analyze_seed(args, seed)
+        rows.extend(seed_rows)
+        for row in seed_rows:
+            if row["has_diff"]:
+                print(
+                    "seed={seed} step={env_time} agent={agent_id} "
+                    "baseline={baseline_action_name} candidate={candidate_action_name} "
+                    "raw={baseline_raw_action_name}->{candidate_raw_action_name} "
+                    "slack={slack:.6g} dist_delta={candidate_distance_delta:.6g}".format(
+                        **row
+                    ),
+                    flush=True,
+                )
+            else:
+                print(
+                    f"seed={seed} no_diff reward={row['normalized_reward']:.6g} "
+                    f"success={row['success_rate']:.6g}",
+                    flush=True,
+                )
 
     changed = [row for row in rows if row["has_diff"]]
     print(

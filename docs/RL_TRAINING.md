@@ -954,6 +954,28 @@ Initial 64-feature PPO anchor experiments:
   non-negative mean success delta and non-negative mean reward delta. A smoke
   run on the strict tied checkpoint passed on seeds 100-101; the known loose PPO
   checkpoint failed on critical seeds 205,206,215 with two success regressions.
+- Stronger terminal shaping and a more regularized mid-anchor variant both
+  reproduced the same critical failure pattern. The stronger terminal run
+  `/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt` used
+  `terminal_failure_penalty=0.8`, `terminal_team_failure_penalty=0.5` and
+  `reward_clip=1.5`; the mid-anchor run
+  `/private/tmp/ecml_ppo_trajectory_anchor_mid_u3.pt` used
+  `learning_rate=1.5e-5`, `teacher_ce_coef=0.3`, `anchor_kl_coef=5.0`,
+  `terminal_failure_penalty=0.5` and `terminal_team_failure_penalty=0.3`.
+  Both failed seeds 205,206,215 with success wins/losses/ties `1/2/0`.
+- `tools/analyze_policy_action_diffs.py --max-diffs-per-seed` can now inspect
+  more than the first synchronized action difference. `tools/counterfactual_decision_eval.py`
+  can focus directly on those action-diff CSVs via `--focus-action-diff-csv`.
+  On the stronger terminal PPO checkpoint, the first diff was
+  `MOVE_FORWARD -> MOVE_LEFT` on all critical seeds. One-step counterfactuals
+  labelled this exact diff as bad on seed 205 (`success_delta=-0.166667`),
+  neutral on seed 206, and good on seed 215 (`success_delta=+0.166667`). For
+  seed 206, the second synchronized diff was `MOVE_LEFT -> STOP_MOVING`; forcing
+  stop at that single step only reduced reward, not success. This means the PPO
+  success regression is caused by trajectory drift or action sequences, not a
+  single trivially separable one-step decision. Next RL work should use
+  sequence-level acceptance/training signals instead of more one-step terminal
+  reward tuning.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

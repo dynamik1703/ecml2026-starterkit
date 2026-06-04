@@ -645,6 +645,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--focus-action-diff-csv",
+        nargs="+",
+        type=Path,
+        help=(
+            "CSV rows from tools/analyze_policy_action_diffs.py. Sample only "
+            "the seed/agent windows around the first synchronized policy diffs."
+        ),
+    )
+    parser.add_argument(
         "--focus-counterfactual-categories",
         default="good,bad",
         help="Comma-separated outcome categories to focus from the CSV: good,neutral,bad.",
@@ -660,6 +669,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=20,
         help="Steps after each selected counterfactual event to include.",
+    )
+    parser.add_argument(
+        "--focus-action-diff-window-before",
+        type=int,
+        default=0,
+        help="Steps before each selected action-diff event to include.",
+    )
+    parser.add_argument(
+        "--focus-action-diff-window-after",
+        type=int,
+        default=0,
+        help="Steps after each selected action-diff event to include.",
     )
     parser.add_argument(
         "--focus-window-before-stationary",
@@ -725,6 +746,15 @@ def parse_args() -> argparse.Namespace:
             args.focus_counterfactual_categories,
             args.focus_counterfactual_window_before,
             args.focus_counterfactual_window_after,
+        ),
+    )
+    merge_focus(
+        args.focus_handles_by_seed,
+        args.focus_windows_by_seed,
+        *load_focus_action_diffs(
+            args.focus_action_diff_csv,
+            args.focus_action_diff_window_before,
+            args.focus_action_diff_window_after,
         ),
     )
     return args
@@ -852,6 +882,41 @@ def load_focus_counterfactuals(
     return focus, windows
 
 
+def load_focus_action_diffs(
+    paths: list[Path] | None,
+    window_before: int,
+    window_after: int,
+) -> tuple[dict[int, set[int]], dict[tuple[int, int], tuple[int, int]]]:
+    if not paths:
+        return {}, {}
+
+    focus: dict[int, set[int]] = {}
+    windows: dict[tuple[int, int], tuple[int, int]] = {}
+    for path in paths:
+        with path.open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row.get("has_diff", "True").lower() == "false":
+                    continue
+                seed = int(float(row["seed"]))
+                handle_id = int(float(row["agent_id"]))
+                env_time = int(float(row["env_time"]))
+                focus.setdefault(seed, set()).add(handle_id)
+                key = (seed, handle_id)
+                window = (
+                    max(0, env_time - window_before),
+                    max(0, env_time + window_after),
+                )
+                if key not in windows:
+                    windows[key] = window
+                else:
+                    current_start, current_end = windows[key]
+                    windows[key] = (
+                        min(current_start, window[0]),
+                        max(current_end, window[1]),
+                    )
+    return focus, windows
+
+
 def focused_handles_for_seed(args: argparse.Namespace, seed: int) -> set[int] | None:
     if args.focus_agent_ids is not None:
         return args.focus_agent_ids
@@ -906,7 +971,10 @@ def main() -> int:
     args = parse_args()
     if args.seeds:
         seeds = [int(item) for item in args.seeds.split(",") if item.strip()]
-    elif args.focus_counterfactual_csv and args.focus_handles_by_seed:
+    elif (
+        (args.focus_counterfactual_csv or args.focus_action_diff_csv)
+        and args.focus_handles_by_seed
+    ):
         seeds = sorted(args.focus_handles_by_seed)
     else:
         seeds = [args.seed + index for index in range(args.episodes)]
