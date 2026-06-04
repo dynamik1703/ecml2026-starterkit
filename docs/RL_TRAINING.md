@@ -933,6 +933,20 @@ Initial route-conflict checkpoint results:
   comparable result accepted `36/14/29`. Higher thresholds reduce accepted
   good rows but still leak bad rows. The monotone rescue-rule grid again found
   no non-empty zero-bad rule on either hard-case dataset.
+- The hard-case counterfactual tool now adds decision-time trajectory context:
+  route-prefix rejoin features (`prefix_rejoin_*`, `prefix_divergence_len`,
+  `prefix_overlap_ratio`) and relative priority-rank features
+  (`priority_*`). Regenerating the focused hard-case datasets with these
+  columns kept the same labels: `hard_w8_rejoin` has 60 rows with
+  good/neutral/bad `26/2/32`; `hard_w20_rejoin` has 67 rows with `27/7/33`.
+  MLP split validation still leaked bad rows. The best all-feature binary
+  split at threshold 0.50 accepted good/neutral/bad `25/3/33` for w8 and
+  `24/7/31` for w20. An expanded monotone rule grid over rejoin and priority
+  thresholds found non-empty zero-bad rules for the first time, but only one
+  accepted good row (`1/0/0`) in each window. Feature contrasts show weak but
+  plausible signals: good side-detours have slightly shorter divergence,
+  higher prefix overlap and fewer same-state-priority competitors. This is
+  useful as model input, but still not enough for a deployable hard gate.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20

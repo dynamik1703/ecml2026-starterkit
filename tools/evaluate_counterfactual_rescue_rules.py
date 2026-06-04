@@ -43,6 +43,12 @@ def feature_arrays(rows: list[dict[str, str]]) -> dict[str, np.ndarray]:
         "future_head_on_risk_delta",
         "policy_candidate_minus_baseline_logit",
         "forced_distance_delta",
+        "prefix_rejoin_found",
+        "prefix_rejoin_step_delta",
+        "prefix_divergence_len",
+        "prefix_overlap_ratio",
+        "priority_higher_agents",
+        "priority_rank_fraction",
     ]
     return {column: values(rows, column) for column in columns}
 
@@ -61,6 +67,12 @@ def grid(args: argparse.Namespace) -> list[dict[str, float]]:
         args.max_future_risk_delta,
         args.min_logit_delta,
         args.max_forced_distance_delta,
+        args.min_rejoin_found,
+        args.max_rejoin_step_delta,
+        args.max_divergence_len,
+        args.min_overlap_ratio,
+        args.max_priority_higher_agents,
+        args.max_priority_rank_fraction,
     ):
         rules.append(
             {
@@ -75,6 +87,12 @@ def grid(args: argparse.Namespace) -> list[dict[str, float]]:
                 "max_future_risk_delta": items[8],
                 "min_logit_delta": items[9],
                 "max_forced_distance_delta": items[10],
+                "min_rejoin_found": items[11],
+                "max_rejoin_step_delta": items[12],
+                "max_divergence_len": items[13],
+                "min_overlap_ratio": items[14],
+                "max_priority_higher_agents": items[15],
+                "max_priority_rank_fraction": items[16],
             }
         )
     return rules
@@ -111,6 +129,12 @@ def accepted_mask(features: dict[str, np.ndarray], rule: dict[str, float]) -> np
             >= rule["min_logit_delta"]
         )
         & (features["forced_distance_delta"] <= rule["max_forced_distance_delta"])
+        & (features["prefix_rejoin_found"] >= rule["min_rejoin_found"])
+        & (features["prefix_rejoin_step_delta"] <= rule["max_rejoin_step_delta"])
+        & (features["prefix_divergence_len"] <= rule["max_divergence_len"])
+        & (features["prefix_overlap_ratio"] >= rule["min_overlap_ratio"])
+        & (features["priority_higher_agents"] <= rule["max_priority_higher_agents"])
+        & (features["priority_rank_fraction"] <= rule["max_priority_rank_fraction"])
     )
 
 
@@ -177,6 +201,12 @@ def print_results(results: list[dict[str, Any]], top_k: int) -> None:
         "max_future_risk_delta",
         "min_logit_delta",
         "max_forced_distance_delta",
+        "min_rejoin_found",
+        "max_rejoin_step_delta",
+        "max_divergence_len",
+        "min_overlap_ratio",
+        "max_priority_higher_agents",
+        "max_priority_rank_fraction",
     ]
     print(",".join(columns))
     for row in results[:top_k]:
@@ -272,6 +302,42 @@ def parse_args() -> argparse.Namespace:
         type=float,
         nargs="+",
         default=[0, 999],
+    )
+    parser.add_argument(
+        "--min-rejoin-found",
+        type=float,
+        nargs="+",
+        default=[0],
+    )
+    parser.add_argument(
+        "--max-rejoin-step-delta",
+        type=float,
+        nargs="+",
+        default=[999],
+    )
+    parser.add_argument(
+        "--max-divergence-len",
+        type=float,
+        nargs="+",
+        default=[999],
+    )
+    parser.add_argument(
+        "--min-overlap-ratio",
+        type=float,
+        nargs="+",
+        default=[0],
+    )
+    parser.add_argument(
+        "--max-priority-higher-agents",
+        type=float,
+        nargs="+",
+        default=[999],
+    )
+    parser.add_argument(
+        "--max-priority-rank-fraction",
+        type=float,
+        nargs="+",
+        default=[1],
     )
     parser.add_argument("--output-csv", type=Path)
     return parser.parse_args()

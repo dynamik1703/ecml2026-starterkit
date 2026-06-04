@@ -167,6 +167,97 @@ def forced_action_score(
     )
 
 
+def _prefix_positions(prefix: list[dict[str, Any]]) -> dict[tuple[int, int], dict[str, Any]]:
+    positions = {}
+    for node in prefix:
+        position = node.get("position")
+        if position is None or position in positions:
+            continue
+        positions[position] = node
+    return positions
+
+
+def prefix_rejoin_features(
+    baseline_prefix: list[dict[str, Any]],
+    forced_prefix: list[dict[str, Any]],
+) -> dict[str, float]:
+    baseline_positions = _prefix_positions(baseline_prefix)
+    forced_positions = _prefix_positions(forced_prefix)
+    rejoin_forced_step = 0
+    rejoin_baseline_step = 0
+    rejoin_same_direction = 0.0
+    for forced_node in forced_prefix:
+        position = forced_node.get("position")
+        if position not in baseline_positions:
+            continue
+        baseline_node = baseline_positions[position]
+        rejoin_forced_step = int(forced_node.get("step", 0))
+        rejoin_baseline_step = int(baseline_node.get("step", 0))
+        rejoin_same_direction = float(
+            forced_node.get("direction") == baseline_node.get("direction")
+        )
+        break
+
+    if rejoin_forced_step:
+        divergence_len = max(0, rejoin_forced_step - 1)
+        rejoin_step_delta = rejoin_forced_step - rejoin_baseline_step
+    else:
+        divergence_len = len(forced_prefix)
+        rejoin_step_delta = len(forced_prefix) - len(baseline_prefix)
+
+    shared_cells = len(set(baseline_positions).intersection(forced_positions))
+    union_cells = len(set(baseline_positions).union(forced_positions))
+    overlap_ratio = shared_cells / union_cells if union_cells else 0.0
+    return {
+        "prefix_rejoin_found": float(bool(rejoin_forced_step)),
+        "prefix_rejoin_forced_step": float(rejoin_forced_step),
+        "prefix_rejoin_baseline_step": float(rejoin_baseline_step),
+        "prefix_rejoin_step_delta": float(rejoin_step_delta),
+        "prefix_rejoin_same_direction": float(rejoin_same_direction),
+        "prefix_divergence_len": float(divergence_len),
+        "prefix_shared_cells": float(shared_cells),
+        "prefix_overlap_ratio": float(overlap_ratio),
+    }
+
+
+def priority_features(obs_builder: Any, handle: int) -> dict[str, float]:
+    try:
+        own_key = tuple(float(value) for value in obs_builder._priority_key(handle))
+    except Exception:
+        own_key = (3.0, 1e9, 1e9, float(handle))
+
+    higher_priority = 0
+    lower_priority = 0
+    same_state_priority = 0
+    tighter_slack = 0
+    looser_slack = 0
+    for other in obs_builder.env.get_agent_handles():
+        if other == handle:
+            continue
+        try:
+            other_key = tuple(float(value) for value in obs_builder._priority_key(other))
+        except Exception:
+            other_key = (3.0, 1e9, 1e9, float(other))
+        higher_priority += int(other_key < own_key)
+        lower_priority += int(other_key > own_key)
+        same_state_priority += int(other_key[0] == own_key[0])
+        tighter_slack += int(other_key[1] < own_key[1])
+        looser_slack += int(other_key[1] > own_key[1])
+
+    agents = max(1, int(obs_builder.env.get_num_agents()))
+    return {
+        "priority_state_bucket": float(own_key[0]),
+        "priority_effective_slack": float(own_key[1]),
+        "priority_distance": float(own_key[2]),
+        "priority_higher_agents": float(higher_priority),
+        "priority_lower_agents": float(lower_priority),
+        "priority_same_state_agents": float(same_state_priority),
+        "priority_tighter_slack_agents": float(tighter_slack),
+        "priority_looser_slack_agents": float(looser_slack),
+        "priority_rank_fraction": float(higher_priority / agents),
+    }
+
+
 def decision_row(
     args: argparse.Namespace,
     seed: int,
@@ -297,6 +388,8 @@ def decision_row(
         "baseline_future_head_on_risk": baseline_risk,
         "forced_future_head_on_risk": forced_risk,
         "future_head_on_risk_delta": forced_risk - baseline_risk,
+        **priority_features(obs_builder, handle),
+        **prefix_rejoin_features(baseline_prefix, forced_prefix),
         **baseline_prefix_features,
         **forced_prefix_features,
         **prefix_delta_features,
