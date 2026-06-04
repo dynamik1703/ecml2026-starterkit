@@ -796,14 +796,32 @@ Route-conflict RL training path:
   the 36 base features plus 16 route-conflict features (`obs_size=52`). These
   include near route occupancy, future route intersections, ETA overlap,
   head-on/crossing flags and whether another train has tighter slack.
+- `submission.my_observation_builder.MyTrajectoryConflictObservationBuilder`
+  is the next experimental RL observation. It keeps the 52 route-conflict
+  features at the same indices and appends 12 trajectory/priority features
+  (`obs_size=64`): relative priority rank, tighter-slack peers, same-state
+  priority peers, effective slack, whether a side detour exists, whether the
+  best side detour rejoins the forward greedy prefix, detour divergence length,
+  prefix overlap, distance delta and conflict-count/head-on/opposing deltas.
+  This is intended for learned PPO/BC policies, not for the current Docker
+  default.
 - `tools/train_behavior_clone.py --use-route-conflict-obs` now mirrors
   `tools/train_masked_ppo.py --use-route-conflict-obs`, automatically selecting
   the 52-feature builder and `obs_size=52`.
+- `tools/train_behavior_clone.py --use-trajectory-conflict-obs` and
+  `tools/train_masked_ppo.py --use-trajectory-conflict-obs` select the 64-feature
+  builder and `obs_size=64`.
 - Smoke validation on one BC episode and one PPO update showed the full path is
   executable: BC collected 1360 valid samples on seed 10 and wrote
   `/private/tmp/ecml_bc_route_conflict_smoke.pt`; PPO then wrote
   `/private/tmp/ecml_ppo_route_conflict_smoke.pt`; `tools/evaluate_sampled.py`
   evaluated that checkpoint with the route-conflict builder over seeds 30-31.
+- The trajectory-conflict path also passed smoke validation: one BC episode
+  collected 1360 valid samples and wrote
+  `/private/tmp/ecml_bc_trajectory_conflict_smoke.pt`; one 32-step PPO update
+  wrote `/private/tmp/ecml_ppo_trajectory_conflict_smoke.pt`; a two-episode
+  load/eval smoke with `MyTrajectoryConflictObservationBuilder` completed over
+  seeds 30-31. The smoke checkpoint is not a performance candidate.
 
 Minimal BC warm-start:
 
@@ -835,6 +853,52 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --teacher-ce-coef 0.1 \
   --conflict-priority-penalty-coef 0.05 \
   --output-checkpoint /private/tmp/ecml_ppo_route_conflict.pt
+```
+
+Trajectory-conflict BC warm-start:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_behavior_clone.py \
+  --use-trajectory-conflict-obs \
+  --teacher-policy submission.rerank_policy.MyPolicy \
+  --episodes 40 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2 \
+  --epochs 4 \
+  --class-balanced-loss \
+  --output-checkpoint /private/tmp/ecml_bc_trajectory_conflict.pt
+```
+
+Trajectory-conflict PPO fine-tuning:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_masked_ppo.py \
+  --use-trajectory-conflict-obs \
+  --init-checkpoint /private/tmp/ecml_bc_trajectory_conflict.pt \
+  --updates 20 \
+  --episodes-per-update 4 \
+  --num-agents 6 \
+  --line-length 2 \
+  --teacher-ce-coef 0.1 \
+  --conflict-priority-penalty-coef 0.05 \
+  --output-checkpoint /private/tmp/ecml_ppo_trajectory_conflict.pt
+```
+
+Evaluate a 64-feature checkpoint with the matching observation builder:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/evaluate_sampled.py \
+  --policy submission.my_policy.MyPolicy \
+  --policy-checkpoint /private/tmp/ecml_ppo_trajectory_conflict.pt \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --episodes 50 \
+  --seed 10 \
+  --num-agents 6 \
+  --line-length 2
 ```
 
 Evaluate a 52-feature checkpoint with the matching observation builder:

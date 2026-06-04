@@ -23,6 +23,7 @@ class FastTreeObsBuilder(ObservationBuilder):
     ROUTE_CONFLICT_FEATURE_DIM = (
         ROUTE_OCCUPANCY_FEATURE_DIM + ROUTE_INTERSECTION_FEATURE_DIM
     )
+    TRAJECTORY_PRIORITY_FEATURE_DIM = 12
     ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
     SIDE_DETOUR_MARGIN = 4.0
     NEAR_TARGET_PRIORITY_DISTANCE = 20.0
@@ -43,16 +44,24 @@ class FastTreeObsBuilder(ObservationBuilder):
         max_depth=3,
         with_action_mask=True,
         with_route_conflict_features=False,
+        with_trajectory_priority_features=False,
     ):
         self.max_depth = max_depth
+        if with_trajectory_priority_features:
+            with_route_conflict_features = True
         # Append an action mask after the feature block. Useful at inference
         # (no env access in the policy); training computes its own mask from
         # the env, so set with_action_mask=False there.
         self.with_action_mask = with_action_mask
         self.with_route_conflict_features = with_route_conflict_features
+        self.with_trajectory_priority_features = with_trajectory_priority_features
         self.feature_dim = self.BASE_OBSERVATION_DIM + (
             self.ROUTE_CONFLICT_FEATURE_DIM
             if with_route_conflict_features
+            else 0
+        ) + (
+            self.TRAJECTORY_PRIORITY_FEATURE_DIM
+            if with_trajectory_priority_features
             else 0
         )
         # handle -> index into agent.waypoints of last stop visited
@@ -738,6 +747,286 @@ class FastTreeObsBuilder(ObservationBuilder):
         features[7] = min(intersecting_agents, 3) / 3.0
         return features
 
+    def _trajectory_priority_features(self, handle):
+        """Decision-time trajectory context for experimental RL checkpoints.
+
+        Layout:
+          0  fraction of agents with higher priority
+          1  fraction of agents with tighter effective slack
+          2  fraction of agents in the same state-priority bucket
+          3  own effective slack, clipped around the episode horizon
+          4  valid side detour exists
+          5  best side detour rejoins the forward greedy prefix
+          6  best side detour divergence length
+          7  best side detour prefix overlap with forward
+          8  best side detour target-distance delta versus forward
+          9  best side detour conflict-count delta versus forward
+         10  best side detour head-on-conflict delta versus forward
+         11  best side detour opposing-intersection delta versus forward
+        """
+        features = np.zeros(self.TRAJECTORY_PRIORITY_FEATURE_DIM, dtype=np.float32)
+        try:
+            own_key = self._priority_key(handle)
+        except Exception:
+            return features
+
+        other_count = max(1, self.env.get_num_agents() - 1)
+        higher_priority = 0
+        tighter_slack = 0
+        same_state_priority = 0
+        for other in self.env.get_agent_handles():
+            if other == handle:
+                continue
+            try:
+                other_key = self._priority_key(other)
+            except Exception:
+                continue
+            higher_priority += int(other_key < own_key)
+            tighter_slack += int(other_key[1] < own_key[1])
+            same_state_priority += int(other_key[0] == own_key[0])
+
+        features[0] = higher_priority / other_count
+        features[1] = tighter_slack / other_count
+        features[2] = same_state_priority / other_count
+        max_steps = max(1, self.env._max_episode_steps)
+        effective_slack = own_key[1]
+        features[3] = (
+            0.5 + 0.5 * np.clip(effective_slack / max_steps, -1.0, 1.0)
+            if np.isfinite(effective_slack)
+            else 1.0
+        )
+
+        forward_prefix = self._route_prefix_for_action(self.MOVE_FORWARD, handle)
+        if not forward_prefix:
+            return features
+        forward_summary = self._prefix_conflict_summary(forward_prefix, handle)
+        forward_target_distance = self._target_distance(handle, self.MOVE_FORWARD)
+
+        best_candidate = None
+        for action in (self.MOVE_LEFT, self.MOVE_RIGHT):
+            if not self._local_action_valid(handle, action):
+                continue
+            candidate_prefix = self._route_prefix_for_action(action, handle)
+            if not candidate_prefix:
+                continue
+            rejoin = self._prefix_rejoin_summary(forward_prefix, candidate_prefix)
+            candidate_summary = self._prefix_conflict_summary(candidate_prefix, handle)
+            target_distance = self._target_distance(handle, action)
+            distance_delta = (
+                target_distance - forward_target_distance
+                if np.isfinite(target_distance) and np.isfinite(forward_target_distance)
+                else np.inf
+            )
+            sort_key = (
+                candidate_summary["conflict_count"] - forward_summary["conflict_count"],
+                candidate_summary["head_on_count"] - forward_summary["head_on_count"],
+                rejoin["divergence_len"],
+                distance_delta if np.isfinite(distance_delta) else 1e9,
+            )
+            candidate = {
+                "sort_key": sort_key,
+                "rejoin": rejoin,
+                "summary": candidate_summary,
+                "distance_delta": distance_delta,
+            }
+            if best_candidate is None or sort_key < best_candidate["sort_key"]:
+                best_candidate = candidate
+
+        if best_candidate is None:
+            return features
+
+        features[4] = 1.0
+        rejoin = best_candidate["rejoin"]
+        candidate_summary = best_candidate["summary"]
+        features[5] = float(rejoin["found"])
+        features[6] = min(
+            rejoin["divergence_len"],
+            self.ROUTE_CONFLICT_LOOKAHEAD_CELLS,
+        ) / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS
+        features[7] = rejoin["overlap_ratio"]
+        distance_delta = best_candidate["distance_delta"]
+        features[8] = (
+            0.5
+            + 0.5
+            * np.clip(
+                distance_delta / max(1.0, self.SIDE_DETOUR_MARGIN * 2.0),
+                -1.0,
+                1.0,
+            )
+            if np.isfinite(distance_delta)
+            else 1.0
+        )
+        features[9] = 0.5 + 0.5 * np.clip(
+            (candidate_summary["conflict_count"] - forward_summary["conflict_count"])
+            / 3.0,
+            -1.0,
+            1.0,
+        )
+        features[10] = 0.5 + 0.5 * np.clip(
+            (candidate_summary["head_on_count"] - forward_summary["head_on_count"])
+            / 3.0,
+            -1.0,
+            1.0,
+        )
+        features[11] = 0.5 + 0.5 * np.clip(
+            (
+                candidate_summary["opposing_count"]
+                - forward_summary["opposing_count"]
+            )
+            / 3.0,
+            -1.0,
+            1.0,
+        )
+        return features
+
+    def _route_prefix_for_action(self, action, handle):
+        if action not in (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT):
+            return []
+        agent = self.env.agents[handle]
+        if self._state_matches(agent.state, "DONE", "DONE_REMOVED"):
+            return []
+        target_position, target_direction = self._action_target(handle, action)
+        if (
+            target_position is None
+            or target_direction is None
+            or not self._is_in_bounds(target_position)
+        ):
+            return []
+
+        start_position, _ = self._agent_route_start(handle)
+        if start_position is None:
+            return []
+        distance_map = self._get_distance_map(handle)
+        prefix = [
+            {
+                "step": 1,
+                "prev_position": start_position,
+                "position": target_position,
+                "direction": target_direction,
+            }
+        ]
+        current_position = target_position
+        current_direction = target_direction
+        seen = {(current_position, current_direction)}
+        for step_index in range(2, self.ROUTE_CONFLICT_LOOKAHEAD_CELLS + 1):
+            transitions = self.env.rail.get_transitions(
+                (current_position, current_direction)
+            )
+            next_direction = self._best_progress_direction(
+                transitions,
+                current_position,
+                distance_map,
+            )
+            if next_direction is None:
+                break
+            next_position = get_new_position(current_position, next_direction)
+            if not self._is_in_bounds(next_position):
+                break
+            state = (next_position, next_direction)
+            if state in seen:
+                break
+            seen.add(state)
+            prefix.append(
+                {
+                    "step": step_index,
+                    "prev_position": current_position,
+                    "position": next_position,
+                    "direction": next_direction,
+                }
+            )
+            current_position = next_position
+            current_direction = next_direction
+        return prefix
+
+    def _local_action_valid(self, handle, action):
+        try:
+            mask = self._build_local_action_mask(handle)
+            return bool(mask[action] >= 0.5)
+        except Exception:
+            return False
+
+    def _target_distance(self, handle, action):
+        try:
+            target, target_direction = self._action_target(handle, action)
+            if target is None or target_direction is None:
+                return np.inf
+            distance_map = self._get_distance_map(handle)
+            distance = distance_map[target[0], target[1], target_direction]
+            return float(distance) if np.isfinite(distance) else np.inf
+        except Exception:
+            return np.inf
+
+    @staticmethod
+    def _prefix_rejoin_summary(forward_prefix, candidate_prefix):
+        forward_positions = {}
+        for node in forward_prefix:
+            position = node["position"]
+            if position not in forward_positions:
+                forward_positions[position] = node
+        candidate_positions = {node["position"] for node in candidate_prefix}
+        rejoin_step = 0
+        for node in candidate_prefix:
+            if node["position"] in forward_positions:
+                rejoin_step = int(node["step"])
+                break
+        shared = len(set(forward_positions).intersection(candidate_positions))
+        union = len(set(forward_positions).union(candidate_positions))
+        return {
+            "found": bool(rejoin_step),
+            "divergence_len": max(0, rejoin_step - 1) if rejoin_step else len(candidate_prefix),
+            "overlap_ratio": shared / union if union else 0.0,
+        }
+
+    def _prefix_conflict_summary(self, prefix, handle):
+        own_positions = {}
+        own_edges = {}
+        for node in prefix:
+            own_positions.setdefault(node["position"], node)
+            own_edges.setdefault((node["prev_position"], node["position"]), node)
+
+        conflict_count = 0
+        head_on_count = 0
+        opposing_count = 0
+        for other in self.env.get_agent_handles():
+            if other == handle:
+                continue
+            other_prefix = self._route_prefix(other)
+            if not other_prefix:
+                continue
+            for other_node in other_prefix:
+                own_node = own_positions.get(other_node["position"])
+                if own_node is not None:
+                    conflict_count += 1
+                    if self._direction_relation(
+                        own_node.get("direction"),
+                        other_node.get("direction"),
+                    ) == "opposing":
+                        opposing_count += 1
+                previous = other_node.get("prev_position")
+                if previous is None:
+                    continue
+                own_node = own_edges.get((other_node["position"], previous))
+                if own_node is not None:
+                    conflict_count += 1
+                    head_on_count += 1
+        return {
+            "conflict_count": conflict_count,
+            "head_on_count": head_on_count,
+            "opposing_count": opposing_count,
+        }
+
+    @staticmethod
+    def _direction_relation(own_direction, other_direction):
+        if own_direction is None or other_direction is None:
+            return "crossing"
+        own = int(own_direction)
+        other = int(other_direction)
+        if own == other:
+            return "same"
+        if (own + 2) % 4 == other:
+            return "opposing"
+        return "crossing"
+
     @staticmethod
     def _best_route_intersection_candidate(own_positions, own_edges, other_prefix):
         best = None
@@ -1081,6 +1370,21 @@ class FastTreeObsBuilder(ObservationBuilder):
         # 49      crossing future route conflict
         # 50      other train has tighter slack at future conflict
         # 51      count of other route prefixes intersecting ours
+        #
+        # Optional trajectory-priority layout when
+        # with_trajectory_priority_features=True:
+        # 52      fraction of agents with higher priority
+        # 53      fraction of agents with tighter effective slack
+        # 54      fraction of agents in the same state-priority bucket
+        # 55      own effective slack, clipped around the episode horizon
+        # 56      valid side detour exists
+        # 57      best side detour rejoins the forward greedy prefix
+        # 58      best side detour divergence length
+        # 59      best side detour prefix overlap with forward
+        # 60      best side detour target-distance delta versus forward
+        # 61      best side detour conflict-count delta versus forward
+        # 62      best side detour head-on-conflict delta versus forward
+        # 63      best side detour opposing-intersection delta versus forward
 
         observation = np.zeros(self.BASE_OBSERVATION_DIM, dtype=np.float32)
         visited = []
@@ -1237,6 +1541,14 @@ class FastTreeObsBuilder(ObservationBuilder):
                 ]
             )
 
+        if self.with_trajectory_priority_features:
+            observation = np.concatenate(
+                [
+                    observation,
+                    self._trajectory_priority_features(handle),
+                ]
+            )
+
         if not self.with_action_mask:
             return observation
 
@@ -1265,3 +1577,22 @@ class RouteConflictObsBuilder(FastTreeObsBuilder):
 
 
 MyRouteConflictObservationBuilder = RouteConflictObsBuilder
+
+
+class TrajectoryConflictObsBuilder(FastTreeObsBuilder):
+    OBSERVATION_DIM = (
+        FastTreeObsBuilder.BASE_OBSERVATION_DIM
+        + FastTreeObsBuilder.ROUTE_CONFLICT_FEATURE_DIM
+        + FastTreeObsBuilder.TRAJECTORY_PRIORITY_FEATURE_DIM
+    )
+
+    def __init__(self, max_depth=3, with_action_mask=True):
+        super().__init__(
+            max_depth=max_depth,
+            with_action_mask=with_action_mask,
+            with_route_conflict_features=True,
+            with_trajectory_priority_features=True,
+        )
+
+
+MyTrajectoryConflictObservationBuilder = TrajectoryConflictObsBuilder
