@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,35 @@ def choose_feature_columns(rows: list[dict[str, str]]) -> list[str]:
     return feature_columns
 
 
+def filter_feature_columns(
+    feature_columns: list[str],
+    args: argparse.Namespace,
+) -> list[str]:
+    include_pattern = getattr(args, "include_feature_regex", None)
+    exclude_pattern = getattr(args, "exclude_feature_regex", None)
+    drop_prefix_features = bool(getattr(args, "drop_prefix_features", False))
+    if include_pattern:
+        include_regex = re.compile(include_pattern)
+        feature_columns = [
+            column for column in feature_columns if include_regex.search(column)
+        ]
+    if exclude_pattern:
+        exclude_regex = re.compile(exclude_pattern)
+        feature_columns = [
+            column for column in feature_columns if not exclude_regex.search(column)
+        ]
+    if drop_prefix_features:
+        feature_columns = [
+            column
+            for column in feature_columns
+            if not (
+                column.startswith("baseline_prefix_")
+                or column.startswith("forced_prefix_")
+            )
+        ]
+    return feature_columns
+
+
 def feature_matrix(
     rows: list[dict[str, str]],
     feature_columns: list[str],
@@ -232,7 +262,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     rows = read_rows(args.csv)
     if not rows:
         raise ValueError("No rows loaded")
-    feature_columns = choose_feature_columns(rows)
+    feature_columns = filter_feature_columns(choose_feature_columns(rows), args)
     if not feature_columns:
         raise ValueError("No numeric feature columns found")
 
@@ -348,6 +378,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             {int(float(row["seed"])) for row, is_val in zip(rows, val_mask) if is_val}
         ),
         "feature_columns": feature_columns,
+        "include_feature_regex": getattr(args, "include_feature_regex", None),
+        "exclude_feature_regex": getattr(args, "exclude_feature_regex", None),
+        "drop_prefix_features": bool(getattr(args, "drop_prefix_features", False)),
         "thresholds": list(args.thresholds),
         "objective": args.objective,
         "max_bad_probability": args.max_bad_probability,
@@ -393,6 +426,19 @@ def parse_args() -> argparse.Namespace:
         description="Train a small classifier for counterfactual gate labels."
     )
     parser.add_argument("csv", nargs="+", type=Path)
+    parser.add_argument(
+        "--include-feature-regex",
+        help="Only use feature columns whose names match this regular expression.",
+    )
+    parser.add_argument(
+        "--exclude-feature-regex",
+        help="Drop feature columns whose names match this regular expression.",
+    )
+    parser.add_argument(
+        "--drop-prefix-features",
+        action="store_true",
+        help="Drop route-prefix conflict features for ablation runs.",
+    )
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--val-fraction", type=float, default=0.25)
     parser.add_argument("--split-seed", type=int, default=13)
