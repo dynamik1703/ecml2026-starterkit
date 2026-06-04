@@ -73,6 +73,37 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_counterfactual_move_50_20.csv
 ```
 
+For better signal density, mine failure-rich seeds first:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/mine_failure_seeds.py \
+  --episodes 40 \
+  --seed 720 \
+  --num-agents 6 \
+  --line-length 2 \
+  --top-k 12 \
+  --print-counterfactual-command \
+  --output-csv /private/tmp/ecml_failure_720_40.csv \
+  --output-json /private/tmp/ecml_failure_720_40.json
+```
+
+Then focus the counterfactual sampler on the failed agents from that JSON:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --seeds 723,742,754,744,722,725,758,748,733,729,749,736 \
+  --policy submission.rerank_policy.MyPolicy \
+  --num-agents 6 \
+  --line-length 2 \
+  --forced-actions LEFT,FORWARD,RIGHT \
+  --max-decisions-per-seed 6 \
+  --max-alternatives-per-decision 2 \
+  --focus-failures-json /private/tmp/ecml_failure_720_40.json \
+  --output-csv /private/tmp/ecml_counterfactual_failure_focus_720_40_top12.csv
+```
+
 Each row is a candidate training example for a learned gate/reranker:
 `reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
 forced action improved the baseline. Feature columns include observation
@@ -112,6 +143,22 @@ First fresh prefix-feature batches:
   prefix features help analysis, but the learned gate still needs either more
   targeted data, better temporal/conflict features, or a different model before
   online deployment.
+- Failure-focused mining is a better data source than broad critical-decision
+  sampling. On seeds 720-759, `tools/mine_failure_seeds.py` found 16 incomplete
+  seeds and selected the 12 worst (`723,742,754,744,722,725,758,748,733,729,
+  749,736`). Sampling only the failed agents in those seeds produced 81 rows:
+  19 good, 59 neutral, 3 bad, with reward wins/losses/ties `19/3/59` and
+  success wins/losses/ties `4/0/77`. Five shuffled split seeds on this mined
+  set were much cleaner:
+  - Binary gate, all features: threshold 0.90 accepted `11/2/0`;
+    threshold 0.95 accepted `11/1/0`.
+  - Binary gate, without prefix features: threshold 0.90 accepted `11/1/0`;
+    threshold 0.95 accepted `11/0/0`.
+  - Multiclass gate, all features: threshold 0.90 accepted `12/1/0`;
+    threshold 0.95 accepted `11/0/0`.
+  This is not deployment evidence yet because the mined set contains only
+  three bad examples, but it validates the next data strategy: mine failure
+  seeds and failed-agent decisions first, then expand bad/hard-negative coverage.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.

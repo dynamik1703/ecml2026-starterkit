@@ -305,6 +305,7 @@ def collect_decisions(
     actions_by_agent: dict[int, list[int]] = defaultdict(list)
     rows: list[dict[str, Any]] = []
     decision_count = 0
+    focus_handles = focused_handles_for_seed(args, seed)
 
     while int(env._elapsed_steps) < env._max_episode_steps:
         handles = list(env.get_agent_handles())
@@ -316,6 +317,8 @@ def collect_decisions(
         for handle in handles:
             if len(rows) >= args.max_decisions_per_seed * args.max_alternatives_per_decision:
                 break
+            if focus_handles is not None and handle not in focus_handles:
+                continue
             if handle not in actions:
                 continue
             observation = observations_by_handle[handle]
@@ -511,6 +514,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-decisions-per-seed", type=int, default=8)
     parser.add_argument("--max-alternatives-per-decision", type=int, default=2)
     parser.add_argument("--min-corridor-len", type=int, default=4)
+    parser.add_argument(
+        "--focus-agent-ids",
+        help="Comma-separated agent ids to sample decisions from for every seed.",
+    )
+    parser.add_argument(
+        "--focus-failures-json",
+        type=Path,
+        help=(
+            "JSON from tools/mine_failure_seeds.py. When present, sample only "
+            "the failed agents for each seed that appears in the file."
+        ),
+    )
     parser.add_argument("--critical-only", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-do-nothing", action="store_true")
     parser.add_argument(
@@ -524,7 +539,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-json", type=Path)
     args = parser.parse_args()
     args.forced_action_ids = parse_forced_actions(args.forced_actions)
+    args.focus_agent_ids = parse_focus_agent_ids(args.focus_agent_ids)
+    args.focus_handles_by_seed = load_focus_failures(args.focus_failures_json)
     return args
+
+
+def parse_focus_agent_ids(value: str | None) -> set[int] | None:
+    if not value:
+        return None
+    return {int(item) for item in value.split(",") if item.strip()}
+
+
+def load_focus_failures(path: Path | None) -> dict[int, set[int]]:
+    if path is None:
+        return {}
+    with path.open() as handle:
+        payload = json.load(handle)
+    rows = payload.get("details", payload.get("rows", []))
+    focus: dict[int, set[int]] = {}
+    for row in rows:
+        seed = int(row["seed"])
+        failed_agents = row.get("failed_agents", [])
+        handles = {
+            int(agent["agent_id"])
+            for agent in failed_agents
+            if "agent_id" in agent
+        }
+        if handles:
+            focus[seed] = handles
+    return focus
+
+
+def focused_handles_for_seed(args: argparse.Namespace, seed: int) -> set[int] | None:
+    if args.focus_agent_ids is not None:
+        return args.focus_agent_ids
+    return args.focus_handles_by_seed.get(seed)
 
 
 def parse_forced_actions(value: str | None) -> tuple[int, ...] | None:
