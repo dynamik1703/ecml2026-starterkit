@@ -164,6 +164,21 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
   --output-csv /private/tmp/ecml_success_hardneg_feature_bad_rest.csv
 ```
 
+Evaluate simple prefix/ETA safety rules against counterfactual labels:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
+  .venv/bin/python tools/evaluate_counterfactual_safety_rules.py \
+  /private/tmp/ecml_counterfactual_failure_deadline_720_40_top12.csv \
+  /private/tmp/ecml_counterfactual_failure_deadline_760_80_top20.csv \
+  /private/tmp/ecml_counterfactual_failure_deadline_840_80_top20.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_920_80_top20.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_1000_80_top24.csv \
+  /private/tmp/ecml_counterfactual_success_hardneg_1080_80_top20.csv \
+  --top-k 20 \
+  --output-csv /private/tmp/ecml_safety_rules_all_1193.csv
+```
+
 First fresh prefix-feature batches:
 - Seeds 740-749 produced 107 rows with reward wins/losses/ties `0/8/99` and
   success wins/losses/ties `0/0/107`; useful mostly as hard negatives.
@@ -375,6 +390,24 @@ First fresh prefix-feature batches:
   Conclusion: keep mining full-success low-reward hard negatives, but the next
   model improvement should be a safety-first prefix/ETA rule or monotonic
   reranker around the learned score, not just more MLP threshold tuning.
+- A grid search over simple prefix/ETA safety rules on all 1193 current
+  counterfactual rows found 7092 zero-bad rules out of 48600, but the best
+  useful zero-bad rule accepted only `3/0/0` good/neutral/bad. The best rule
+  required no increase in conflict agents, head-on ETA gap at least 20,
+  at most one head-on edge conflict, at most one opposing-direction
+  intersection, and `future_head_on_risk_delta <= -1`. This is safe but too
+  low-recall for an online override.
+- Prefix/ETA-only rules are not safe. When `future_head_on_risk_delta` is
+  unconstrained, the best grid result on all 1193 rows accepted `14/28/6`.
+  Requiring only non-increasing future risk (`<= 0`) still accepted `14/28/6`.
+  On the successful hard-negative rows only, the best non-increasing-risk rule
+  accepted `8/25/5`.
+- A fixed best zero-bad rule selected on the previous 938 rows accepted
+  `3/0/0` on those rows, but `0/0/0` on the 1080-1159 holdout and `0/0/0` on
+  the hard 760-839 failure window. Conclusion: simple safety rules are useful
+  as diagnostic filters, but not yet as a winning-action generator. The next
+  practical policy step should combine a positive rescuer signal with these
+  safety features, then validate with strict seed-window holdouts.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
