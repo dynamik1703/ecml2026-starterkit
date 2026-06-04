@@ -50,6 +50,7 @@ def aggregate_metrics(
         summary = train(
             argparse.Namespace(
                 csv=csvs,
+                validation_csv=None,
                 include_feature_regex=include_regex,
                 exclude_feature_regex=exclude_regex,
                 drop_prefix_features=drop_prefix_features,

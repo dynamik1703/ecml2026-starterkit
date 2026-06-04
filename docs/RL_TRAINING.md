@@ -218,6 +218,31 @@ First fresh prefix-feature batches:
     accepted `4/4/4`; not safe.
   Conclusion: the 760-839 hard negatives are important, and we need more
   independent failure-mined windows before considering an online learned gate.
+- A third independent failure-mined range 840-919 produced 25 incomplete seeds
+  from 80 episodes. The selected top-20 seeds
+  (`896,901,877,864,885,915,855,879,853,870,909,847,891,898,906,892,903,916,840,886`)
+  yielded 144 deadline-window rows: 38 good, 103 neutral, 3 bad, with reward
+  wins/losses/ties `37/4/103` and success wins/losses/ties `15/0/129`.
+  The range is strongly positive-heavy; useful for recall, but weak for bad
+  coverage.
+- Combining the 720-759, 760-839 and 840-919 deadline-window sets gives
+  332 rows: 77 good, 242 neutral, 13 bad. Eight shuffled split seeds:
+  - Binary all features: threshold 0.95 accepted `74/27/5`; not safe.
+  - Multiclass all features: threshold 0.95 accepted `83/22/4`; not safe.
+  - Binary only-prefix: threshold 0.95 accepted `44/30/7`; not safe.
+  - Multiclass only-prefix: threshold 0.95 accepted `42/31/7`; not safe.
+  Random seed splits over mined data are still too optimistic for deployment.
+- Leave-window-out validation over the three mined ranges:
+  - Train 720-759 + 760-839, validate 840-919, multiclass all features:
+    threshold 0.95 accepted `11/4/0`; clean holdout.
+  - Train 720-759 + 840-919, validate 760-839, multiclass all features:
+    threshold 0.95 accepted `8/7/3`; not safe.
+  - Train 760-839 + 840-919, validate 720-759, multiclass all features:
+    threshold 0.95 accepted `15/6/1`; threshold 0.97 accepted `13/6/0`.
+  Conclusion: the current gate is improving as a diagnostic/ranking model, but
+  760-839-like hard negatives still break generalization. The next data step
+  should deliberately mine more hard-negative failure windows, not just more
+  positive rescue examples.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
