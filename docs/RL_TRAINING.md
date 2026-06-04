@@ -822,6 +822,23 @@ Route-conflict RL training path:
   wrote `/private/tmp/ecml_ppo_trajectory_conflict_smoke.pt`; a two-episode
   load/eval smoke with `MyTrajectoryConflictObservationBuilder` completed over
   seeds 30-31. The smoke checkpoint is not a performance candidate.
+- A 40-episode trajectory-conflict BC warm-start
+  (`/private/tmp/ecml_bc_trajectory_conflict_40.pt`) collected 96950 valid
+  samples from seeds 10-49 with teacher reward/success `0.922663 / 0.950000`.
+  The teacher disagreed with the expanded init checkpoint only 63 times, mostly
+  on `MOVE_RIGHT` and `MOVE_LEFT`, so the learned policy is still dominated by
+  the old actor. Pure `submission.my_policy.MyPolicy` evaluation on validation
+  seeds 100-129 regressed versus guarded rerank: baseline
+  `0.936044 / 0.950000`, candidate `0.878421 / 0.933333`; reward
+  wins/losses/ties `2/15/13`, success `3/4/23`. Wrapping the same checkpoint in
+  `submission.rerank_policy.MyPolicy` reduced but did not remove the problem:
+  seeds 100-129 gave `0.931983 / 0.944444` with reward `4/6/20`, success
+  `1/1/28`; seeds 130-159 gave baseline `0.882811 / 0.950000`, candidate
+  `0.858286 / 0.938889`, reward `2/8/20`, success `2/4/24`. Do not deploy this
+  BC checkpoint or use it as an unconstrained PPO starting point. The next RL
+  attempt should start from the stable default actor with the 64-feature
+  observation, use strong teacher/KL anchoring, and require seedwise regression
+  gates after each short PPO run.
 
 Minimal BC warm-start:
 
