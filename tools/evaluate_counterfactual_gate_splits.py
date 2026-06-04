@@ -158,7 +158,7 @@ def main() -> int:
             )
             for metric in result["metrics"]:
                 print(
-                    "  threshold={threshold:.2f} precision={precision:.3f} "
+                    "  threshold={threshold:.3f} precision={precision:.3f} "
                     "recall={recall:.3f} tp/fp/fn/tn={tp}/{fp}/{fn}/{tn} "
                     "accepted(g/n/b)={accepted_good}/{accepted_neutral}/"
                     "{accepted_bad}".format(**metric)

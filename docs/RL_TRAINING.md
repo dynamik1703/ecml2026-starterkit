@@ -95,6 +95,23 @@ First fresh prefix-feature batches:
   threshold 0.90 and `3/1/0` at threshold 0.95. This is a small, mined sample,
   but the zero-bad validation result is the first positive sign that explicit
   prefix-conflict features may make a learned gate viable.
+- Expanding the fresh prefix-feature set with seeds 730-739 and 750-759
+  produced 467 rows: 32 good, 403 neutral, 32 bad. Eight shuffled split seeds
+  showed the 227-row result was not yet robust:
+  - Binary gate, all 83 features: at thresholds 0.90/0.95 accepted
+    `8/22/7` and `5/14/3` good/neutral/bad.
+  - Binary gate, without prefix features: at thresholds 0.90/0.95 accepted
+    `8/30/3` and `5/16/2`.
+  - Multiclass gate, all features: at thresholds 0.90/0.95 accepted
+    `6/12/5` and `6/11/4`.
+  - Multiclass gate, without prefix features: at thresholds 0.90/0.95 accepted
+    `11/25/4` and `6/11/2`.
+  More conservative thresholds and stronger bad weights only reached zero-bad
+  when useful accepts collapsed to zero. Feature summaries show good and bad
+  overrides still overlap strongly on prefix-conflict deltas. Conclusion:
+  prefix features help analysis, but the learned gate still needs either more
+  targeted data, better temporal/conflict features, or a different model before
+  online deployment.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
