@@ -998,6 +998,23 @@ Initial 64-feature PPO anchor experiments:
   Over seeds `120,205,206,215`, prefix `k=1` had success wins/losses/ties
   `1/1/2`; `k>=3` had `1/2/1`. This reinforces that the next objective should
   prioritize zero success regressions over positive mean reward deltas.
+- `submission.ppo_sequence_gated_policy.MyPolicy` is the first online wrapper
+  for these prefix findings. It keeps guarded rerank as the baseline, queries a
+  PPO checkpoint in parallel, rejects all non-side-detour candidate deviations
+  (including the harmful repeated `STOP_MOVING` pattern), and accepts only
+  `MOVE_FORWARD -> MOVE_LEFT/RIGHT` when the target is finite/free,
+  distance-neutral, and the candidate prefix has no cell or edge interaction
+  with the current planned prefixes. With
+  `/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt` and
+  `MyTrajectoryConflictObservationBuilder`:
+  - Critical seeds `205,206,215`: baseline `0.834180 / 0.833333`,
+    sequence-gated PPO `0.873129 / 0.888889`, reward `1/0/2`, success `1/0/2`.
+  - Seeds `100-129`: baseline `0.936044 / 0.950000`, sequence-gated PPO
+    `0.939042 / 0.950000`, reward `1/0/29`, success `0/0/30`.
+  - Seeds `130-159`: exact tie, reward and success `0/0/30`.
+  This is not the Docker default yet, but it is the first PPO-derived wrapper
+  that passes the local zero-success-regression gate on both known critical
+  cases and the first two 30-seed validation blocks.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
