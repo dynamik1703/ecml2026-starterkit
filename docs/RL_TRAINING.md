@@ -876,6 +876,16 @@ Initial route-conflict checkpoint results:
   Do not continue with these PPO shaping coefficients. The next RL step should
   either stabilise PPO with much stronger teacher anchoring/smaller updates, or
   learn a new route-conflict-aware gate/reranker from first-difference labels.
+- First-difference analysis of the balanced BC checkpoint on the same seeds
+  showed most deviations are distance-neutral `MOVE_FORWARD -> MOVE_RIGHT`
+  detours. All five reward-positive first deviations had zero route occupancy,
+  zero future route-intersection signals and zero candidate prefix conflicts,
+  but many reward-negative deviations had the same zero-conflict feature
+  pattern. Prefix conflict filters would block obvious bad cases such as seeds
+  102 and 114, but they do not separate the silent bad detours. A useful
+  52-feature gate likely needs more labelled counterfactual decisions and
+  trajectory context, not a single threshold on the current route-conflict
+  observation.
 
 Rejected shortcut: a hard future-head-on yield rule that stopped the lower
 priority train for reverse-edge conflicts with ETA gap <= 1 and own step <= 20

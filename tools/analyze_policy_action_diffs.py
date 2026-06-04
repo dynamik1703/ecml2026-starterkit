@@ -446,7 +446,7 @@ def observation_scalar_features(observation: Any) -> dict[str, float]:
     values = np.asarray(observation, dtype=np.float32)
     if values.shape[0] < 36:
         return {}
-    return {
+    features = {
         "obs_ready_to_depart": float(values[4]),
         "obs_active": float(values[5]),
         "obs_done": float(values[6]),
@@ -460,6 +460,28 @@ def observation_scalar_features(observation: Any) -> dict[str, float]:
         "obs_waypoint_progress": float(values[34]),
         "obs_time_slack": float(values[35]),
     }
+    if values.shape[0] >= 52:
+        features.update(
+            {
+                "obs_route_occupancy_distance": float(values[36]),
+                "obs_route_occupancy_opposing": float(values[37]),
+                "obs_route_occupancy_same_direction": float(values[38]),
+                "obs_route_occupancy_relative_slack": float(values[39]),
+                "obs_route_occupancy_other_tighter": float(values[40]),
+                "obs_route_occupancy_side_detour_available": float(values[41]),
+                "obs_route_occupancy_blocker_stopped": float(values[42]),
+                "obs_route_occupancy_count": float(values[43]),
+                "obs_route_intersection_own_distance": float(values[44]),
+                "obs_route_intersection_other_distance": float(values[45]),
+                "obs_route_intersection_eta_risk": float(values[46]),
+                "obs_route_intersection_other_first": float(values[47]),
+                "obs_route_intersection_head_on": float(values[48]),
+                "obs_route_intersection_crossing": float(values[49]),
+                "obs_route_intersection_other_tighter": float(values[50]),
+                "obs_route_intersection_count": float(values[51]),
+            }
+        )
+    return features
 
 
 def direction_features(
