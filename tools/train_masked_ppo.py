@@ -206,6 +206,26 @@ def action_distribution(
     return Categorical(logits=logits / max(1e-6, temperature)), values
 
 
+def anchor_policy_kl(
+    policy: ActorCritic,
+    anchor_policy: ActorCritic,
+    observations: torch.Tensor,
+    temperature: float,
+) -> torch.Tensor:
+    current_logits, _ = policy.masked_forward(observations)
+    with torch.no_grad():
+        anchor_logits, _ = anchor_policy.masked_forward(observations)
+
+    current_logits = current_logits / max(1e-6, temperature)
+    anchor_logits = anchor_logits / max(1e-6, temperature)
+    valid_actions = torch.isfinite(current_logits) & torch.isfinite(anchor_logits)
+    current_logits = current_logits.masked_fill(~valid_actions, -1e9)
+    anchor_logits = anchor_logits.masked_fill(~valid_actions, -1e9)
+    current_log_probs = torch.log_softmax(current_logits, dim=-1)
+    anchor_probs = torch.softmax(anchor_logits, dim=-1)
+    return F.kl_div(current_log_probs, anchor_probs, reduction="batchmean")
+
+
 def collect_rollout(
     args: argparse.Namespace,
     policy: ActorCritic,
@@ -371,6 +391,7 @@ def ppo_update(
     policy: ActorCritic,
     optimizer: torch.optim.Optimizer,
     rollout: dict[str, torch.Tensor],
+    anchor_policy: ActorCritic | None,
 ) -> dict[str, float]:
     observations = rollout["observations"]
     actions = rollout["actions"]
@@ -386,6 +407,7 @@ def ppo_update(
     entropies = []
     teacher_losses = []
     teacher_valid_fractions = []
+    anchor_kls = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -426,6 +448,16 @@ def ppo_update(
                 loss = loss + args.teacher_ce_coef * teacher_loss
                 teacher_losses.append(float(teacher_loss.item()))
 
+            if anchor_policy is not None and args.anchor_kl_coef != 0.0:
+                anchor_kl = anchor_policy_kl(
+                    policy,
+                    anchor_policy,
+                    observations[batch_idx],
+                    args.rollout_temperature,
+                )
+                loss = loss + args.anchor_kl_coef * anchor_kl
+                anchor_kls.append(float(anchor_kl.item()))
+
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
@@ -446,6 +478,9 @@ def ppo_update(
             float(np.mean(teacher_valid_fractions))
             if teacher_valid_fractions
             else float("nan")
+        ),
+        "anchor_kl": (
+            float(np.mean(anchor_kls)) if anchor_kls else float("nan")
         ),
     }
 
@@ -562,6 +597,15 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Cross-entropy weight for keeping PPO close to a teacher policy.",
     )
+    parser.add_argument(
+        "--anchor-kl-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "KL penalty against the initial actor checkpoint. Useful when adding "
+            "new observation features but keeping PPO close to the stable actor."
+        ),
+    )
     parser.add_argument("--normalize-advantages", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -636,15 +680,32 @@ def main() -> int:
         checkpoint_path=str(checkpoint_path) if checkpoint_path is not None else None,
     )
     policy.train()
+    anchor_policy = None
+    if args.anchor_kl_coef != 0.0:
+        anchor_policy = ActorCritic(
+            obs_size=args.obs_size,
+            n_actions=args.n_actions,
+            hidden_size=args.hidden_size,
+            num_hidden_layers=args.num_hidden_layers,
+            checkpoint_path=str(checkpoint_path) if checkpoint_path is not None else None,
+        )
+        anchor_policy.eval()
+        for parameter in anchor_policy.parameters():
+            parameter.requires_grad_(False)
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     for update in range(args.updates):
         rollout, rollout_stats = collect_rollout(args, policy, args.seed + update * 1000)
-        loss_stats = ppo_update(args, policy, optimizer, rollout)
+        loss_stats = ppo_update(args, policy, optimizer, rollout, anchor_policy)
         teacher_loss_text = (
             f" teacher_loss={loss_stats['teacher_loss']:.6g}"
             f" teacher_valid={loss_stats['teacher_valid_fraction']:.3g}"
             if not np.isnan(loss_stats["teacher_loss"])
+            else ""
+        )
+        anchor_kl_text = (
+            f" anchor_kl={loss_stats['anchor_kl']:.6g}"
+            if not np.isnan(loss_stats["anchor_kl"])
             else ""
         )
         print(
@@ -656,7 +717,8 @@ def main() -> int:
             f"policy_loss={loss_stats['policy_loss']:.6g} "
             f"value_loss={loss_stats['value_loss']:.6g} "
             f"entropy={loss_stats['entropy']:.6g}"
-            f"{teacher_loss_text}",
+            f"{teacher_loss_text}"
+            f"{anchor_kl_text}",
             flush=True,
         )
 

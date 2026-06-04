@@ -900,9 +900,34 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --num-agents 6 \
   --line-length 2 \
   --teacher-ce-coef 0.1 \
+  --anchor-kl-coef 2.0 \
   --conflict-priority-penalty-coef 0.05 \
   --output-checkpoint /private/tmp/ecml_ppo_trajectory_conflict.pt
 ```
+
+`tools/train_masked_ppo.py --anchor-kl-coef` adds a KL penalty against the
+initial checkpoint policy. This is useful for 64-feature PPO because the stable
+36-feature actor is expanded with zero weights for the new features; the KL term
+lets PPO learn small feature-dependent deviations without drifting far from the
+known-safe actor.
+
+Initial 64-feature PPO anchor experiments:
+- Strict run `/private/tmp/ecml_ppo_trajectory_anchor_u3.pt`: 3 updates, 2
+  complete episodes/update, `learning_rate=1e-5`, `teacher_ce_coef=0.5`,
+  `anchor_kl_coef=20.0`, `conflict_priority_penalty_coef=0.02`,
+  `global_slack_reward_coef=0.02`. The run stayed extremely close to the
+  anchor (`anchor_kl` up to `3.45e-6`) and was exactly tied with guarded rerank
+  on seeds 100-129: reward/success wins/losses/ties `0/0/30`.
+- Looser run `/private/tmp/ecml_ppo_trajectory_anchor2_u3.pt`: same rollout
+  setup with `learning_rate=2e-5`, `teacher_ce_coef=0.2`, `anchor_kl_coef=2.0`.
+  This produced the first small positive PPO gate result. Against guarded rerank
+  on seeds 100-129 it improved seed 120 to full success and had no success
+  losses: baseline `0.936044 / 0.950000`, candidate `0.939039 / 0.955556`,
+  reward wins/losses/ties `1/2/27`, success `1/0/29`. On seeds 130-159 it was
+  exactly tied: `0/0/30` reward and success wins/losses/ties. This is not a
+  submission checkpoint yet, but it is the first RL direction worth scaling:
+  repeat on broader seed blocks and require zero success regressions before any
+  longer run.
 
 Evaluate a 64-feature checkpoint with the matching observation builder:
 
