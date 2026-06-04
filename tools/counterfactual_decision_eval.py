@@ -319,6 +319,11 @@ def collect_decisions(
                 break
             if focus_handles is not None and handle not in focus_handles:
                 continue
+            focus_window = focused_window_for_seed_handle(args, seed, handle)
+            if focus_window is not None:
+                focus_start, focus_end = focus_window
+                if not focus_start <= int(env._elapsed_steps) <= focus_end:
+                    continue
             if handle not in actions:
                 continue
             observation = observations_by_handle[handle]
@@ -526,6 +531,41 @@ def parse_args() -> argparse.Namespace:
             "the failed agents for each seed that appears in the file."
         ),
     )
+    parser.add_argument(
+        "--focus-window-before-stationary",
+        type=int,
+        help=(
+            "With --focus-failures-json, sample only decisions within this many "
+            "steps before each failed agent's last observed movement."
+        ),
+    )
+    parser.add_argument(
+        "--focus-window-before-deadline",
+        type=int,
+        help=(
+            "With --focus-failures-json, sample only decisions within this many "
+            "steps before each failed agent's latest_arrival deadline. This "
+            "takes precedence over --focus-window-before-stationary."
+        ),
+    )
+    parser.add_argument(
+        "--focus-window-after-deadline",
+        type=int,
+        default=30,
+        help=(
+            "With --focus-window-before-deadline, also keep this many steps "
+            "after each failed agent's latest_arrival deadline."
+        ),
+    )
+    parser.add_argument(
+        "--focus-window-after-stationary",
+        type=int,
+        default=30,
+        help=(
+            "With --focus-window-before-stationary, also keep this many steps "
+            "after each failed agent's last observed movement."
+        ),
+    )
     parser.add_argument("--critical-only", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--include-do-nothing", action="store_true")
     parser.add_argument(
@@ -540,7 +580,13 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     args.forced_action_ids = parse_forced_actions(args.forced_actions)
     args.focus_agent_ids = parse_focus_agent_ids(args.focus_agent_ids)
-    args.focus_handles_by_seed = load_focus_failures(args.focus_failures_json)
+    args.focus_handles_by_seed, args.focus_windows_by_seed = load_focus_failures(
+        args.focus_failures_json,
+        args.focus_window_before_stationary,
+        args.focus_window_after_stationary,
+        args.focus_window_before_deadline,
+        args.focus_window_after_deadline,
+    )
     return args
 
 
@@ -550,15 +596,23 @@ def parse_focus_agent_ids(value: str | None) -> set[int] | None:
     return {int(item) for item in value.split(",") if item.strip()}
 
 
-def load_focus_failures(path: Path | None) -> dict[int, set[int]]:
+def load_focus_failures(
+    path: Path | None,
+    window_before_stationary: int | None,
+    window_after_stationary: int,
+    window_before_deadline: int | None,
+    window_after_deadline: int,
+) -> tuple[dict[int, set[int]], dict[tuple[int, int], tuple[int, int]]]:
     if path is None:
-        return {}
+        return {}, {}
     with path.open() as handle:
         payload = json.load(handle)
     rows = payload.get("details", payload.get("rows", []))
     focus: dict[int, set[int]] = {}
+    windows: dict[tuple[int, int], tuple[int, int]] = {}
     for row in rows:
         seed = int(row["seed"])
+        env_time = int(row.get("env_time", 0))
         failed_agents = row.get("failed_agents", [])
         handles = {
             int(agent["agent_id"])
@@ -567,13 +621,43 @@ def load_focus_failures(path: Path | None) -> dict[int, set[int]]:
         }
         if handles:
             focus[seed] = handles
-    return focus
+        if window_before_deadline is None and window_before_stationary is None:
+            continue
+        for agent in failed_agents:
+            if "agent_id" not in agent:
+                continue
+            handle = int(agent["agent_id"])
+            missed_by = agent.get("missed_by")
+            if window_before_deadline is not None and missed_by is not None:
+                deadline_step = max(0, env_time - int(missed_by))
+                windows[(seed, handle)] = (
+                    max(0, deadline_step - window_before_deadline),
+                    max(0, deadline_step + window_after_deadline),
+                )
+                continue
+            if window_before_stationary is None:
+                continue
+            stationary_tail = int(agent.get("stationary_tail") or 0)
+            last_progress_step = max(0, env_time - stationary_tail)
+            windows[(seed, handle)] = (
+                max(0, last_progress_step - window_before_stationary),
+                max(0, last_progress_step + window_after_stationary),
+            )
+    return focus, windows
 
 
 def focused_handles_for_seed(args: argparse.Namespace, seed: int) -> set[int] | None:
     if args.focus_agent_ids is not None:
         return args.focus_agent_ids
     return args.focus_handles_by_seed.get(seed)
+
+
+def focused_window_for_seed_handle(
+    args: argparse.Namespace,
+    seed: int,
+    handle: int,
+) -> tuple[int, int] | None:
+    return args.focus_windows_by_seed.get((seed, handle))
 
 
 def parse_forced_actions(value: str | None) -> tuple[int, ...] | None:

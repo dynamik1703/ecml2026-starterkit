@@ -166,6 +166,24 @@ def counterfactual_command(args: argparse.Namespace, seeds: list[int]) -> str:
         parts.extend(["--policy-checkpoint", str(args.policy_checkpoint)])
     if args.output_json is not None:
         parts.extend(["--focus-failures-json", str(args.output_json)])
+    if args.focus_window_before_stationary is not None:
+        parts.extend(
+            [
+                "--focus-window-before-stationary",
+                str(args.focus_window_before_stationary),
+                "--focus-window-after-stationary",
+                str(args.focus_window_after_stationary),
+            ]
+        )
+    if args.focus_window_before_deadline is not None:
+        parts.extend(
+            [
+                "--focus-window-before-deadline",
+                str(args.focus_window_before_deadline),
+                "--focus-window-after-deadline",
+                str(args.focus_window_after_deadline),
+            ]
+        )
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -213,6 +231,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--forced-actions", default="LEFT,FORWARD,RIGHT")
     parser.add_argument("--max-decisions-per-seed", type=int, default=8)
     parser.add_argument("--max-alternatives-per-decision", type=int, default=2)
+    parser.add_argument(
+        "--focus-window-before-stationary",
+        type=int,
+        help=(
+            "Include this failed-agent time-window argument in the generated "
+            "counterfactual command."
+        ),
+    )
+    parser.add_argument(
+        "--focus-window-after-stationary",
+        type=int,
+        default=30,
+        help="After-window used in generated counterfactual commands.",
+    )
+    parser.add_argument(
+        "--focus-window-before-deadline",
+        type=int,
+        help=(
+            "Include this latest-arrival deadline window argument in generated "
+            "counterfactual commands."
+        ),
+    )
+    parser.add_argument(
+        "--focus-window-after-deadline",
+        type=int,
+        default=30,
+        help="Deadline after-window used in generated counterfactual commands.",
+    )
     return parser.parse_args()
 
 

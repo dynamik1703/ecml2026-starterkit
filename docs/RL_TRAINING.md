@@ -104,6 +104,25 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_counterfactual_failure_focus_720_40_top12.csv
 ```
 
+For late-arrival failures, focus decisions around each failed agent's deadline
+instead of the whole failed-agent trajectory:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --seeds 723,742,754,744,722,725,758,748,733,729,749,736 \
+  --policy submission.rerank_policy.MyPolicy \
+  --num-agents 6 \
+  --line-length 2 \
+  --forced-actions LEFT,FORWARD,RIGHT \
+  --max-decisions-per-seed 6 \
+  --max-alternatives-per-decision 2 \
+  --focus-failures-json /private/tmp/ecml_failure_720_40.json \
+  --focus-window-before-deadline 300 \
+  --focus-window-after-deadline 60 \
+  --output-csv /private/tmp/ecml_counterfactual_failure_deadline_720_40_top12.csv
+```
+
 Each row is a candidate training example for a learned gate/reranker:
 `reward_delta`, `success_delta`, and `failed_agents_delta` label whether the
 forced action improved the baseline. Feature columns include observation
@@ -159,6 +178,21 @@ First fresh prefix-feature batches:
   This is not deployment evidence yet because the mined set contains only
   three bad examples, but it validates the next data strategy: mine failure
   seeds and failed-agent decisions first, then expand bad/hard-negative coverage.
+- Deadline-window focusing on the same 12 seeds with
+  `--focus-window-before-deadline 300 --focus-window-after-deadline 60`
+  produced 67 rows: 20 good, 45 neutral, 2 bad, with reward wins/losses/ties
+  `20/2/45` and success wins/losses/ties `4/0/63`. Five shuffled split seeds:
+  - Binary gate, all features: threshold 0.90 accepted `14/3/0`;
+    threshold 0.95 accepted `11/2/0`.
+  - Binary gate, without prefix features: threshold 0.90 accepted `11/1/0`;
+    threshold 0.95 accepted `11/0/0`.
+  - Multiclass gate, all features: threshold 0.90 accepted `11/2/0`;
+    threshold 0.95 accepted `11/1/0`.
+  - Multiclass gate, without prefix features: threshold 0.90 accepted `11/3/0`;
+    threshold 0.95 accepted `11/0/0`.
+  This deadline window is better than a last-stationary-progress window for
+  Flatland late-arrival failures, because many failed agents keep moving until
+  episode end and simply miss `latest_arrival`.
 
 Initial smoke test on seeds 10 and 55 with three decisions per seed produced
 13 labels: reward wins/losses/ties `1/8/4`, success wins/losses/ties `0/0/13`.
