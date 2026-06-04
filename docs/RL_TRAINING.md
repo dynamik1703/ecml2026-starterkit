@@ -948,6 +948,23 @@ Initial 64-feature PPO anchor experiments:
   this mild form is not enough; next try either stronger outcome shaping with
   validation after every update, or checkpoint selection that only keeps
   zero-success-regression candidates.
+- `tools/validate_policy_gate.py` automates that checkpoint-selection gate. It
+  reuses the seedwise compare logic and exits with status `1` when a candidate
+  violates the configured limits. Defaults require zero success regressions,
+  non-negative mean success delta and non-negative mean reward delta. A smoke
+  run on the strict tied checkpoint passed on seeds 100-101; the known loose PPO
+  checkpoint failed on critical seeds 205,206,215 with two success regressions.
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/validate_policy_gate.py \
+  --candidate-checkpoint /private/tmp/ecml_ppo_trajectory_anchor2_u3.pt \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --blocks 100-129 130-159 160-189 190-219 220-249 \
+  --num-agents 6 \
+  --line-length 2 \
+  --output-json /private/tmp/ecml_gate_candidate.json
+```
 
 Evaluate a 64-feature checkpoint with the matching observation builder:
 
