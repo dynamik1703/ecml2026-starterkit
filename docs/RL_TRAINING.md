@@ -1375,6 +1375,63 @@ Sequence value/risk ensemble on targeted prefix rows:
   candidate diversity for the current Success-rescue dataset; the next
   candidate should come from a meaningfully different training objective or
   selection criterion, not only a lighter terminal-shaping variant.
+- New success-diversity candidate
+  `/private/tmp/ecml_ppo_trajectory_successdiv_seed610_u4.pt`: a short
+  64-feature trajectory PPO run with seed `610`, `updates=4`,
+  `episodes_per_update=4`, `learning_rate=2e-5`, stronger terminal
+  success/failure shaping (`terminal_success_bonus=0.9`,
+  `terminal_failure_penalty=1.1`, team success/failure `0.5/0.8`), plus
+  teacher/anchor regularization (`teacher_ce=0.35`, `anchor_kl=4.0`) and
+  conflict/slack shaping. Rollout success was mixed
+  (`0.958, 0.833, 0.583, 0.958`), so this is not a deployment candidate by
+  itself; it is a candidate generator for diverse prefix labels.
+- On seeds `100-129`, the success-diversity candidate produced
+  baseline/candidate `0.936044/0.950000 -> 0.937439/0.961111`, reward
+  wins/losses/ties `1/2/27`, success wins/losses/ties `2/0/28`. Changed seeds
+  were `111,119,120`; seed `119` is a new success-positive pattern with
+  `reward_delta=-0.0488281, success_delta=+0.166667`, and seed `120` is the
+  known success-positive rescue.
+- Targeted mining on those `100-129` changed seeds produced 12 rows:
+  `8 good / 4 bad`. Success-positive rows were seed `119`
+  `1@70:a1:MOVE_RIGHT->MOVE_FORWARD` plus later
+  `MOVE_LEFT->MOVE_FORWARD` events, and seed `120`
+  `1@180:a0:MOVE_FORWARD->MOVE_LEFT`; both stayed positive from prefix `1`.
+- On seeds `130-249`, the same candidate was mixed but useful as data:
+  baseline/candidate `0.917200/0.937500 -> 0.917720/0.938889`, reward
+  wins/losses/ties `3/4/113`, success wins/losses/ties `2/1/117`. Changed
+  seeds were `174,184,205,207,211,218,232`; success positives were `184` and
+  `207`, and the known success regression was `205`.
+- Targeted mining on those `130-249` changed seeds produced 28 rows:
+  `8 good / 20 bad`. Success-positive rows were seed `184`
+  `1@96:a4:MOVE_FORWARD->MOVE_RIGHT` and seed `207`
+  `1@86:a3:MOVE_FORWARD->MOVE_RIGHT`, both positive from prefix `1`.
+  Success-negative rows were seed `205`
+  `1@188:a3:MOVE_FORWARD->MOVE_LEFT`, also negative from prefix `1`.
+- First positive auxiliary Success-head holdout: train on broad `100-129`,
+  targeted `250-369`, targeted `370-489`, targeted `490-609`, and the new
+  success-diversity targeted `100-129`; validate on success-diversity targeted
+  `130-249` while excluding the old targeted `130-249` rows to avoid same-seed
+  leakage. With sequence/prefix features, strict bad UCB
+  `max_bad_probability=0.001`, and Success LCB threshold
+  `min_success_probability=0.02`, the model accepted `12/0/0`
+  good/neutral/bad aggregated over three split seeds, all 12 rows
+  success-positive. The accepted rows were only seed `207` across prefixes and
+  split seeds; seed `184` was still missed. At threshold `0.3`, only split
+  seed `5` accepted seed `207`.
+- Canary after adding the success-diversity rows: validating the same
+  Success-head setup on the older terminal-targeted `490-609` holdout did not
+  open bad leaks under strict bad UCB (`max_bad_probability=0.001`), but it
+  still accepted only reward-positive rows and `accepted_success_positive=0`.
+  So the Success head is finally learning one held-out success-rescue pattern,
+  but the recall is still narrow and candidate/motif-specific.
+- Assessment after success-diversity candidate: changing the PPO objective did
+  produce valuable new Success-positive patterns (`119`, `184`, `207`) and a
+  first clean Success-head transfer on seed `207`. This validates the direction:
+  invest in candidate generation and mined sequence labels. It is still not an
+  online gate; next best step is train one or two more short, differently
+  seeded success-diversity candidates and require each to add at least one new
+  success-positive seed or a new hard negative before spending time on longer
+  RL runs.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
