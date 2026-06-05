@@ -1687,13 +1687,13 @@ Sequence value/risk ensemble on targeted prefix rows:
     (`reward_delta=+0.133120`, success unchanged), successdiv seed610/730
     seeds `119/120`, and Anchor2 seed `589`. Hitemp seed840 added no accepted
     rows under these strict thresholds.
-  - Online validation is stricter than the offline row audit. Adding
-    `targeted_seed901` as a third candidate source recovered seed `280`, but
-    also introduced a pure reward regression on seed `264`
+  - Online validation is stricter than the offline row audit. Before the
+    first-diff guard, adding `targeted_seed901` as a third candidate source
+    recovered seed `280`, but also introduced a pure reward regression on seed
+    `264`
     (`reward_delta=-0.116713`, success unchanged). The same seeds with only
     the existing two candidates (`successdiv_seed610`,
-    `terminal_stronger`) stayed neutral. Therefore `targeted_seed901` should
-    remain a mining/audit source, not a global online candidate source.
+    `terminal_stronger`) stayed neutral.
   - Adding successdiv seed730 or Anchor2 as extra candidate sources did not
     add new online wins beyond the existing two-candidate list. Seed `120`
     remains blocked online by the current guards even though it appears in
@@ -1701,7 +1701,7 @@ Sequence value/risk ensemble on targeted prefix rows:
   - The existing two-candidate list was then validated on the previously
     missing full windows `250-369` and `370-489`; both were exactly neutral and
     passed the zero-loss gate (`reward 0/0/120`, success `0/0/120` in each
-    window). Current best candidate list remains
+    window). At this point, the best candidate list remained
     `successdiv_seed610 + terminal_stronger`.
 - Assessment after this audit: candidate recall should not be expanded by
   simply appending PPO checkpoints. The online gate can accept actions whose
@@ -1711,6 +1711,48 @@ Sequence value/risk ensemble on targeted prefix rows:
   learned risk model or candidate generator around these newly identified
   motifs, especially distinguishing seed `280`-like reward rescues from
   seed `264`-like reward leaks.
+- `submission.sequence_success_policy.MyPolicy` now has two debug/safety
+  additions for this exact failure mode. `ECML_SEQUENCE_TRACE_PATH` writes
+  accepted Sequence-Gate decisions as JSONL, and
+  `ECML_SEQUENCE_TRACE_ALL=1` also writes rejected scored decisions. The trace
+  showed seed `264` first rejected `1@18:a1:MOVE_RIGHT->MOVE_FORWARD`, then
+  later accepted `1@122:a5:MOVE_RIGHT->MOVE_FORWARD` as a singleton event with
+  low bad UCB. That singleton is out-of-distribution relative to the mined
+  `first k candidate diffs` prefix rows, where seed `264` becomes bad once
+  the first and second diffs are combined.
+- The policy therefore defaults `ECML_SEQUENCE_FIRST_DIFF_ONLY=1`: each
+  candidate checkpoint may contribute at most its first episode-level
+  baseline-vs-candidate diff to the learned sequence gate. This is per
+  candidate source, so an early rejected diff from one PPO checkpoint does not
+  block a later first diff from another checkpoint. With only
+  `targeted_seed901`, this blocks seed `264` while keeping seed `280`
+  (`reward_delta=+0.133120`, success unchanged).
+- After the first-diff guard, the three-candidate list
+  `successdiv_seed610 + terminal_stronger + targeted_seed901` is the best
+  current experimental online Sequence-Gate configuration:
+  - Known hard/fast suite `119,120,207,280,529,578,589,258,264,311,335,343,392,452,477`:
+    reward wins/losses/ties `4/1/10`, success `3/0/12`; changed seeds were
+    `119` (success win with reward tradeoff), `207`, `280`, `529`, and `589`.
+    The previous `264` leak stayed neutral.
+  - `100-129`: changed only seed `119`
+    (`reward_delta=-0.0488281`, `success_delta=+0.166667`). This fails the
+    strict non-negative mean-reward gate but has no success loss.
+  - `130-249`: changed only seed `207`
+    (`reward_delta=+0.207176`, `success_delta=+0.166667`), gate pass.
+  - `250-369`: changed only seed `280`
+    (`reward_delta=+0.133120`, success unchanged), gate pass.
+  - `370-489`: exactly neutral, gate pass.
+  - `490-609`: changed seeds `529` (`reward_delta=+0.0718391`) and `589`
+    (`reward_delta=+0.150893`, `success_delta=+0.166667`), gate pass.
+  - Aggregate over `100-609`: baseline/candidate
+    `0.917837/0.939869 -> 0.918845/0.940850`, reward wins/losses/ties
+    `4/1/505`, success wins/losses/ties `3/0/507`.
+- Assessment after the first-diff guard: this is a meaningful recall gain with
+  one known reward tradeoff but no observed success loss over the checked
+  windows. The guard is not seed-specific; it aligns online acceptance with the
+  prefix-mining distribution. The remaining open question is whether the
+  `119` success-for-reward tradeoff should be accepted in competition scoring
+  or controlled by a stricter reward-aware Success gate.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

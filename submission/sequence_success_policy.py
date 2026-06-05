@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -170,11 +171,17 @@ class SequenceSuccessPolicy(RerankPolicy):
         candidate_checkpoint_paths = self._candidate_checkpoint_paths(
             candidate_checkpoint_path
         )
+        existing_candidate_paths = [
+            path for path in candidate_checkpoint_paths if Path(path).exists()
+        ]
         self.candidate_policies = [
             RerankPolicy(checkpoint_path=path)
-            for path in candidate_checkpoint_paths
-            if Path(path).exists()
+            for path in existing_candidate_paths
         ]
+        self.candidate_policy_paths = {
+            id(policy): path
+            for policy, path in zip(self.candidate_policies, existing_candidate_paths)
+        }
         self.sequence_scorer = (
             self._load_scorer(sequence_model_path)
             if Path(sequence_model_path).exists()
@@ -188,7 +195,13 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_LEFT_MAX_SLACK",
             self.FUTURE_RERANK_LEFT_MAX_SLACK,
         )
+        self.trace_path = os.environ.get("ECML_SEQUENCE_TRACE_PATH", "").strip()
+        self.trace_all = bool(self._env_int("ECML_SEQUENCE_TRACE_ALL", 0))
+        self.first_diff_only = bool(
+            self._env_int("ECML_SEQUENCE_FIRST_DIFF_ONLY", 1)
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
+        self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
 
     @staticmethod
@@ -238,8 +251,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             return
         if self._last_step is None or step < self._last_step:
             self._accepted_event_details = []
+            self._seen_candidate_diff_policy_ids = set()
         elif step == 0 and self._last_step != 0:
             self._accepted_event_details = []
+            self._seen_candidate_diff_policy_ids = set()
         self._last_step = step
 
     def act_many(
@@ -300,7 +315,15 @@ class SequenceSuccessPolicy(RerankPolicy):
                     if (
                         candidate_action is not None
                         and baseline_action != candidate_action
-                        and self._accept_candidate_action(
+                    ):
+                        policy_id = id(candidate_policy)
+                        if (
+                            self.first_diff_only
+                            and policy_id in self._seen_candidate_diff_policy_ids
+                        ):
+                            continue
+                        self._seen_candidate_diff_policy_ids.add(policy_id)
+                        if self._accept_candidate_action(
                             env=env,
                             obs_builder=obs_builder,
                             handle=handle,
@@ -313,11 +336,10 @@ class SequenceSuccessPolicy(RerankPolicy):
                             candidate_actions=candidate_actions,
                             candidate_policy=candidate_policy,
                             reserved_targets=reserved_targets,
-                        )
-                    ):
-                        adjusted[handle] = RailEnvActions(candidate_action)
-                        action_id = candidate_action
-                        break
+                        ):
+                            adjusted[handle] = RailEnvActions(candidate_action)
+                            action_id = candidate_action
+                            break
 
             if action_id is not None:
                 self._reserve_action_target(
@@ -390,13 +412,121 @@ class SequenceSuccessPolicy(RerankPolicy):
             aggregate = aggregate_event_features(
                 [*self._accepted_event_details, detail]
             )
-            accepted, _ = self.sequence_scorer.score(aggregate)
+            accepted, scores = self.sequence_scorer.score(aggregate)
         except Exception:
             return False
 
+        if accepted or self.trace_all:
+            self._trace_sequence_decision(
+                env=env,
+                handle=handle,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+                candidate_policy=candidate_policy,
+                accepted=accepted,
+                scores=scores,
+                detail=detail,
+                aggregate=aggregate,
+            )
         if accepted:
             self._accepted_event_details.append(detail)
         return bool(accepted)
+
+    def _trace_sequence_decision(
+        self,
+        env: Any,
+        handle: int,
+        baseline_action: int,
+        candidate_action: int,
+        candidate_policy: RerankPolicy,
+        accepted: bool,
+        scores: dict[str, float],
+        detail: dict[str, Any],
+        aggregate: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        row = {
+            "accepted": bool(accepted),
+            "env_time": int(getattr(env, "_elapsed_steps", -1)),
+            "agent_id": int(handle),
+            "candidate_checkpoint": self.candidate_policy_paths.get(
+                id(candidate_policy),
+                "",
+            ),
+            "baseline_action": int(baseline_action),
+            "baseline_action_name": self._action_name(baseline_action),
+            "candidate_action": int(candidate_action),
+            "candidate_action_name": self._action_name(candidate_action),
+            "value_lcb": float(scores.get("value_lcb", 0.0)),
+            "bad_ucb": float(scores.get("bad_ucb", 0.0)),
+            "success_lcb": float(scores.get("success_lcb", 0.0)),
+            "accepted_event_count_before": len(self._accepted_event_details),
+        }
+        for key in (
+            "slack",
+            "distance",
+            "candidate_distance_delta",
+            "candidate_prefix_cell_intersections",
+            "candidate_prefix_head_on_edge_conflicts",
+            "candidate_prefix_same_edge_conflicts",
+            "candidate_prefix_min_pair_deadline_slack",
+            "candidate_future_head_on_risk",
+            "candidate_deadline_conflict_penalty",
+            "candidate_residual_head_on_min_pair_deadline_slack",
+            "candidate_raw_candidate_minus_baseline_logit",
+            "candidate_raw_top_logit_margin",
+            "obs_route_occupancy_count",
+            "obs_route_intersection_count",
+            "obs_route_intersection_head_on",
+        ):
+            if key in detail:
+                row[key] = self._json_safe(detail[key])
+        for key in (
+            "event_count",
+            "event_unique_agents",
+            "event_time_first",
+            "event_time_last",
+            "event_candidate_action_MOVE_FORWARD",
+            "event_candidate_action_MOVE_LEFT",
+            "event_transition_MOVE_RIGHT__MOVE_FORWARD",
+            "event_transition_MOVE_LEFT__MOVE_FORWARD",
+            "event_transition_MOVE_FORWARD__MOVE_LEFT",
+            "event_candidate_prefix_cell_intersections_max",
+            "event_candidate_prefix_head_on_edge_conflicts_max",
+            "event_candidate_prefix_same_edge_conflicts_max",
+            "event_candidate_prefix_min_pair_deadline_slack_min",
+            "event_candidate_future_head_on_risk_max",
+            "event_candidate_deadline_conflict_penalty_max",
+            "event_candidate_residual_head_on_min_pair_deadline_slack_min",
+        ):
+            if key in aggregate:
+                row[key] = self._json_safe(aggregate[key])
+        try:
+            path = Path(self.trace_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a") as handle_obj:
+                json.dump(row, handle_obj, sort_keys=True)
+                handle_obj.write("\n")
+        except Exception:
+            return
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        try:
+            result = float(value)
+        except Exception:
+            return str(value)
+        if not np.isfinite(result):
+            return str(value)
+        return result
+
+    @staticmethod
+    def _action_name(action: int) -> str:
+        try:
+            return RailEnvActions(int(action)).name
+        except Exception:
+            return str(action)
 
     @staticmethod
     def _feature_args() -> Any:
