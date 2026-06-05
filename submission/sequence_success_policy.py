@@ -200,6 +200,9 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.first_diff_only = bool(
             self._env_int("ECML_SEQUENCE_FIRST_DIFF_ONLY", 1)
         )
+        self.rejected_transitions = self._env_transition_set(
+            "ECML_SEQUENCE_REJECT_TRANSITIONS"
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -228,6 +231,38 @@ class SequenceSuccessPolicy(RerankPolicy):
             return int(os.environ.get(name, default))
         except Exception:
             return default
+
+    @classmethod
+    def _env_transition_set(cls, name: str) -> set[tuple[int, int]]:
+        value = os.environ.get(name, "")
+        transitions: set[tuple[int, int]] = set()
+        for item in value.split(","):
+            token = item.strip()
+            if not token or "->" not in token:
+                continue
+            left, right = (part.strip() for part in token.split("->", maxsplit=1))
+            baseline_action = cls._parse_action_token(left)
+            candidate_action = cls._parse_action_token(right)
+            if baseline_action is None or candidate_action is None:
+                continue
+            transitions.add((baseline_action, candidate_action))
+        return transitions
+
+    @staticmethod
+    def _parse_action_token(token: str) -> int | None:
+        if not token:
+            return None
+        try:
+            return int(token)
+        except ValueError:
+            pass
+        name = token.upper()
+        if not name.startswith("MOVE_") and name in {"LEFT", "FORWARD", "RIGHT"}:
+            name = f"MOVE_{name}"
+        try:
+            return int(RailEnvActions[name].value)
+        except Exception:
+            return None
 
     def _load_scorer(self, sequence_model_path: str) -> SequenceEnsembleScorer:
         return SequenceEnsembleScorer(
@@ -376,6 +411,8 @@ class SequenceSuccessPolicy(RerankPolicy):
             ReservationPolicy.MOVE_FORWARD,
             ReservationPolicy.MOVE_RIGHT,
         ):
+            return False
+        if (baseline_action, candidate_action) in self.rejected_transitions:
             return False
         if (
             candidate_action == ReservationPolicy.MOVE_LEFT

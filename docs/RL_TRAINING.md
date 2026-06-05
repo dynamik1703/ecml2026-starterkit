@@ -1753,6 +1753,33 @@ Sequence value/risk ensemble on targeted prefix rows:
   prefix-mining distribution. The remaining open question is whether the
   `119` success-for-reward tradeoff should be accepted in competition scoring
   or controlled by a stricter reward-aware Success gate.
+- Reward-aware tradeoff ablation: `ECML_SEQUENCE_REJECT_TRANSITIONS` can reject
+  comma-separated baseline-to-candidate action transitions such as
+  `MOVE_RIGHT->MOVE_FORWARD` (`RIGHT->FORWARD` and numeric action ids are also
+  accepted). This is an experimental switch and defaults to empty, so the
+  normal Sequence-Gate behavior is unchanged.
+- With the same three-candidate list and
+  `ECML_SEQUENCE_REJECT_TRANSITIONS=MOVE_RIGHT->MOVE_FORWARD`, the known seed
+  `119` tradeoff is blocked while the useful `207`, `280`, `529`, and `589`
+  changes remain:
+  - Known tradeoff seeds `119,207,280,529,589,264,578`: reward
+    wins/losses/ties `4/0/3`, success `2/0/5`; changed seeds were `207`,
+    `280`, `529`, and `589`.
+  - `100-129`: exactly neutral, gate pass.
+  - `130-249`: changed only seed `207`, gate pass.
+  - `250-369`: changed only seed `280`, gate pass.
+  - `370-489`: exactly neutral, gate pass.
+  - `490-609`: changed seeds `529` and `589`, gate pass.
+  - Aggregate over `100-609`: baseline/candidate
+    `0.917837/0.939869 -> 0.918941/0.940523`, reward wins/losses/ties
+    `4/0/506`, success wins/losses/ties `2/0/508`.
+- Assessment of the reward-aware ablation: if the leaderboard score is closer
+  to `normalized_reward`, this transition block is currently preferable:
+  higher aggregate reward than the unblocked three-candidate run and no
+  reward-loss seed in checked windows. If the leaderboard values completion
+  rate more heavily, the unblocked version keeps one extra success-positive
+  seed (`119`) at a small reward cost. Keep both modes available until the
+  official scoring tradeoff is confirmed on real benchmark metadata.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
