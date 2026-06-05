@@ -1679,6 +1679,38 @@ Sequence value/risk ensemble on targeted prefix rows:
   seed (`529`) in checked windows with no observed success loss. It is still
   not ready as a default submission because recall is low, seed `119` trades
   reward for success, and the online feature/scoring path is slow.
+- Candidate-source audit after the multi-candidate prototype:
+  - Offline scoring with the exported Success-only sequence model at
+    `min_utility=999,max_bad_probability=0.0025,min_success_probability=0.02`
+    showed that several mined candidate sources contain apparently safe rows.
+    The useful accepted motifs were: `targeted_seed901` seed `280`
+    (`reward_delta=+0.133120`, success unchanged), successdiv seed610/730
+    seeds `119/120`, and Anchor2 seed `589`. Hitemp seed840 added no accepted
+    rows under these strict thresholds.
+  - Online validation is stricter than the offline row audit. Adding
+    `targeted_seed901` as a third candidate source recovered seed `280`, but
+    also introduced a pure reward regression on seed `264`
+    (`reward_delta=-0.116713`, success unchanged). The same seeds with only
+    the existing two candidates (`successdiv_seed610`,
+    `terminal_stronger`) stayed neutral. Therefore `targeted_seed901` should
+    remain a mining/audit source, not a global online candidate source.
+  - Adding successdiv seed730 or Anchor2 as extra candidate sources did not
+    add new online wins beyond the existing two-candidate list. Seed `120`
+    remains blocked online by the current guards even though it appears in
+    offline prefix rows.
+  - The existing two-candidate list was then validated on the previously
+    missing full windows `250-369` and `370-489`; both were exactly neutral and
+    passed the zero-loss gate (`reward 0/0/120`, success `0/0/120` in each
+    window). Current best candidate list remains
+    `successdiv_seed610 + terminal_stronger`.
+- Assessment after this audit: candidate recall should not be expanded by
+  simply appending PPO checkpoints. The online gate can accept actions whose
+  local prefix row looks safe but whose rollout effect is reward-negative, so
+  every new candidate source needs a fast-suite screen plus full disjoint
+  windows before promotion. The next winner-oriented step is to improve the
+  learned risk model or candidate generator around these newly identified
+  motifs, especially distinguishing seed `280`-like reward rescues from
+  seed `264`-like reward leaks.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
