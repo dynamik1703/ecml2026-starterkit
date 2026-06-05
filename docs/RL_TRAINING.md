@@ -1650,6 +1650,35 @@ Sequence value/risk ensemble on targeted prefix rows:
   next useful prototype is a multi-candidate sequence gate that can combine the
   default success-diversity source (`119/207`) with the terminal-stronger source
   (`529/589`) under the same safety guards.
+- `submission.sequence_success_policy.MyPolicy` now supports
+  `ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINTS`, a comma-separated list of PPO
+  candidate checkpoints. It checks candidates in order and accepts the first
+  action that passes the same exported Sequence Success gate and safety guards;
+  without the env var it keeps the previous single-candidate default. With
+  success-diversity seed610 first and terminal-stronger second, targeted known
+  seeds produced wins on `119`, `207`, `529`, and `589`, while `578` stayed
+  neutral after the left-slack guard.
+- Multi-candidate validation so far:
+  - Fast-suite `258,264,280,311,335,343,392,452,477`: exactly neutral
+    (`0/0/9` reward and success changes).
+  - `100-129`: baseline/candidate `0.936044/0.950000 ->
+    0.934417/0.955556`, reward wins/losses/ties `0/1/29`, success
+    wins/losses/ties `1/0/29`; only seed `119` changed
+    (`reward_delta=-0.0488281`, `success_delta=+0.166667`).
+  - `130-249`: baseline/candidate `0.917200/0.937500 ->
+    0.918927/0.938889`, reward and success wins/losses/ties `1/0/119`;
+    only seed `207` changed.
+  - `490-609`: same as the guarded terminal-only result,
+    `0.918937/0.947222 -> 0.920793/0.948611`, reward wins/losses/ties
+    `2/0/118`, success wins/losses/ties `1/0/119`; changed seeds `529` and
+    `589`.
+- Assessment after multi-candidate sequence gate: this is the best current
+  learned online direction by benefit/effort. It combines multiple PPO
+  generators while preserving the conservative Sequence Success filter, giving
+  three success-positive seeds (`119`, `207`, `589`) and one reward-positive
+  seed (`529`) in checked windows with no observed success loss. It is still
+  not ready as a default submission because recall is low, seed `119` trades
+  reward for success, and the online feature/scoring path is slow.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

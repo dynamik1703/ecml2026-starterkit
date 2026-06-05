@@ -167,11 +167,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
             or DEFAULT_CANDIDATE_CHECKPOINT_PATH
         )
-        self.candidate_policy = (
-            RerankPolicy(checkpoint_path=candidate_checkpoint_path)
-            if Path(candidate_checkpoint_path).exists()
-            else None
+        candidate_checkpoint_paths = self._candidate_checkpoint_paths(
+            candidate_checkpoint_path
         )
+        self.candidate_policies = [
+            RerankPolicy(checkpoint_path=path)
+            for path in candidate_checkpoint_paths
+            if Path(path).exists()
+        ]
         self.sequence_scorer = (
             self._load_scorer(sequence_model_path)
             if Path(sequence_model_path).exists()
@@ -187,6 +190,17 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._last_step: int | None = None
+
+    @staticmethod
+    def _candidate_checkpoint_paths(default_path: str) -> list[str]:
+        value = os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINTS")
+        if not value:
+            return [default_path]
+        return [
+            item.strip()
+            for item in value.split(",")
+            if item.strip()
+        ]
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -235,16 +249,19 @@ class SequenceSuccessPolicy(RerankPolicy):
         **kwargs,
     ) -> Dict[int, RailEnvActions]:
         baseline_actions = super().act_many(handles, observations, **kwargs)
-        if self.candidate_policy is None or self.sequence_scorer is None:
+        if not self.candidate_policies or self.sequence_scorer is None:
             return baseline_actions
         if diff_row is None or add_delta_features is None or aggregate_event_features is None:
             return baseline_actions
 
-        candidate_actions = self.candidate_policy.act_many(
-            handles,
-            observations,
-            **kwargs,
-        )
+        candidate_batches = [
+            (
+                candidate_policy,
+                candidate_policy.act_many(handles, observations, **kwargs),
+                self._raw_policy_actions(candidate_policy, handles, observations),
+            )
+            for candidate_policy in self.candidate_policies
+        ]
         context = runtime_context.get()
         env = context.env
         obs_builder = context.obs_builder
@@ -264,41 +281,43 @@ class SequenceSuccessPolicy(RerankPolicy):
             for handle, action in baseline_actions.items()
         }
         candidate_action_ids = {
-            handle: self._action_id(action)
-            for handle, action in candidate_actions.items()
+            candidate_policy: {
+                handle: self._action_id(action)
+                for handle, action in candidate_actions.items()
+            }
+            for candidate_policy, candidate_actions, _ in candidate_batches
         }
         baseline_raw_actions = self._raw_policy_actions(self, handles, observations)
-        candidate_raw_actions = self._raw_policy_actions(
-            self.candidate_policy,
-            handles,
-            observations,
-        )
 
         reserved_targets: set[tuple[int, int]] = set()
         for handle in sorted(adjusted, key=lambda h: self._priority_key(obs_builder, h)):
             baseline_action = baseline_action_ids.get(handle)
-            candidate_action = candidate_action_ids.get(handle)
             action_id = baseline_action
-            if (
-                baseline_action is not None
-                and candidate_action is not None
-                and baseline_action != candidate_action
-                and self._accept_candidate_action(
-                    env=env,
-                    obs_builder=obs_builder,
-                    handle=handle,
-                    observation=observations_by_handle.get(handle),
-                    baseline_action=baseline_action,
-                    candidate_action=candidate_action,
-                    baseline_raw_actions=baseline_raw_actions,
-                    candidate_raw_actions=candidate_raw_actions,
-                    baseline_actions=baseline_action_ids,
-                    candidate_actions=candidate_action_ids,
-                    reserved_targets=reserved_targets,
-                )
-            ):
-                adjusted[handle] = RailEnvActions(candidate_action)
-                action_id = candidate_action
+            if baseline_action is not None:
+                for candidate_policy, _, candidate_raw_actions in candidate_batches:
+                    candidate_actions = candidate_action_ids[candidate_policy]
+                    candidate_action = candidate_actions.get(handle)
+                    if (
+                        candidate_action is not None
+                        and baseline_action != candidate_action
+                        and self._accept_candidate_action(
+                            env=env,
+                            obs_builder=obs_builder,
+                            handle=handle,
+                            observation=observations_by_handle.get(handle),
+                            baseline_action=baseline_action,
+                            candidate_action=candidate_action,
+                            baseline_raw_actions=baseline_raw_actions,
+                            candidate_raw_actions=candidate_raw_actions,
+                            baseline_actions=baseline_action_ids,
+                            candidate_actions=candidate_actions,
+                            candidate_policy=candidate_policy,
+                            reserved_targets=reserved_targets,
+                        )
+                    ):
+                        adjusted[handle] = RailEnvActions(candidate_action)
+                        action_id = candidate_action
+                        break
 
             if action_id is not None:
                 self._reserve_action_target(
@@ -322,6 +341,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         candidate_raw_actions: dict[int, int],
         baseline_actions: dict[int, int],
         candidate_actions: dict[int, int],
+        candidate_policy: RerankPolicy,
         reserved_targets: set[tuple[int, int]],
     ) -> bool:
         if (
@@ -359,7 +379,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 handle,
                 observation,
                 self,
-                self.candidate_policy,
+                candidate_policy,
                 baseline_raw_actions,
                 candidate_raw_actions,
                 baseline_actions,
