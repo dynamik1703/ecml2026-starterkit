@@ -1122,6 +1122,44 @@ balanced sequence windows with both rescue positives and hard negative
 success-preserving/reward-losing prefixes, then validating with strict
 seed-window holdouts.
 
+Targeted sequence mining is much more useful than broad blind mining:
+- Broad window `100-129`, line length 2, prefix lengths `1,2,3,5`: 80 rows
+  from 20 changed seeds, labels `4 good`, `6 bad`, `70 neutral`. The only good
+  seed was `120`; bad labels came from `108` and `111`. This took several
+  minutes and is too neutral-heavy for rapid iteration.
+- A relaxed `validate_policy_gate.py` scan over `130-249` found only 9
+  outcome-changing seeds out of 120: `174,182,184,205,206,207,211,215,232`.
+  The raw candidate had reward wins/losses/ties `4/5/111` and success
+  wins/losses/ties `3/2/115`.
+- Mining only those 9 changed seeds produced 36 dense sequence rows:
+  `12 good`, `23 bad`, `1 neutral`. Per prefix, there were consistently three
+  good rows and five or six bad rows. This is a better data source than broad
+  windows because it concentrates on the actual candidate decision boundary.
+
+Gate checks from these targeted rows:
+- Train on broad `100-129`, validate on targeted `130-249`: all-features
+  multiclass gate accepted `4/0/0` good/neutral/bad at every tested threshold
+  (`0.75..0.99`). This is the first sign that the seed-120 rescue pattern can
+  transfer to later rescue seeds without accepting bad targeted rows. The
+  tighter sequence/prefix feature regex accepted `4/0/1`, so it was less safe
+  here.
+- The same all-features train-`100-129` model accepted `0/0/0` on the
+  line-length-3 holdout, so it was safe but did not recover any OOD positives.
+  On the same-distribution neutral holdout it accepted `0/2/0` at thresholds
+  up to `0.97` and `0/1/0` at `0.99`.
+- Training on broad `100-129` plus targeted `130-249` made the line-length-3
+  holdout fully inert (`0/0/0`) and still accepted `0/2/0` neutral rows on the
+  neutral holdout.
+
+Assessment after targeted mining: the sequence-gate idea is no longer clearly
+hopeless; targeted changed-seed mining gave useful transfer on targeted
+in-distribution positives. It is still not a deployment candidate because it
+has no demonstrated OOD positive recall and still accepts neutral actions. The
+right next loop is: scan for outcome-changing seeds, mine only those as dense
+sequence rows, hold out whole seed windows and scene/line-length variants, then
+deploy only if accepted bad is zero and accepted good remains nonzero across
+multiple disjoint holdouts.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
