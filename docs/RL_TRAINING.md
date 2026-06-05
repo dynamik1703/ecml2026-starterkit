@@ -1523,6 +1523,14 @@ Sequence value/risk ensemble on targeted prefix rows:
   more small raw-PPO deployment attempts to offline sequence Success/Risk
   learning and candidate generation evaluated first on this fast suite, then
   on full disjoint holdouts.
+- Fast-suite screening of the same candidate with strict success-loss gate
+  (`max_success_losses=0`, seeds `258,264,280,311,335,343,392,452,477`)
+  failed quickly: baseline/candidate `0.765301/0.851852 ->
+  0.816960/0.833333`, reward wins/losses/ties `5/4/0`, success
+  wins/losses/ties `0/1/8`, with the same seed `335` regression. Use this
+  compact suite as the first filter for future PPO/BC candidate generators;
+  only candidates with zero success loss there should be promoted to full
+  120-seed holdout scans.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
