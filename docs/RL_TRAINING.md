@@ -1328,6 +1328,37 @@ Sequence value/risk ensemble on targeted prefix rows:
   Success head confirms the diagnosis but does not solve it yet; the next
   useful work is more diverse Success-positive mining and/or a better bad-risk
   model around stop/side-action sequences.
+- Next disjoint scan on seeds `490-609` with
+  `ecml_ppo_trajectory_terminal_stronger_u3.pt`: baseline/candidate
+  `0.918937/0.947222 -> 0.917667/0.945833`, reward wins/losses/ties
+  `5/6/109`, success wins/losses/ties `1/2/117`. Changed seeds were
+  `499,500,519,529,535,537,578,588,589,603,605`; seed `589` was the only
+  success-positive case (`reward_delta=+0.150893`,
+  `success_delta=+0.166667`), while seeds `519` and `578` were
+  success-negative.
+- Targeted prefix mining for `490-609` produced 44 rows:
+  `19 good / 4 neutral / 21 bad`. Prefix `1` and `2` each had
+  `5/2/4` good/neutral/bad and one success-positive row with no success
+  losses; prefix `3` had `5/0/6` with one success win and one success loss;
+  prefix `5` had `4/0/7` with one success win and two success losses. All four
+  success-positive rows are the same seed `589` event
+  `1@198:a0:MOVE_FORWARD->MOVE_LEFT`; success-negative rows came from seed
+  `519` prefixes `3/5` and seed `578` prefix `5`.
+- Train through targeted `370-489`, validate on targeted `490-609`: the
+  normal value/risk branch still only found reward-positive rows. At
+  `min_utility=-0.25,max_bad_probability=0.001` it accepted `4/0/0`, but
+  `accepted_success_positive=0`; relaxing bad-risk thresholds leaked bad rows.
+  The auxiliary Success branch did not generalize to seed `589`. With
+  sequence/prefix features, its score for seed `589` was near zero
+  (`success_probability_mean` around `1e-5..0.002`) and bad UCB was high
+  (`1.08..1.89`). Increasing the negative weight for non-success rows did not
+  fix this. This is a useful hard positive, but still not enough to deploy a
+  learned Success gate.
+- Assessment after `490-609`: continuing to mine the same PPO candidate gives
+  useful hard labels but not enough Success-positive diversity. Best next
+  step is to evaluate/mine a different checkpoint family for distinct
+  success-positive action patterns, then retrain the Success/Risk audit with
+  the combined windows.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
