@@ -1222,6 +1222,10 @@ Sequence value/risk ensemble on targeted prefix rows:
 - `tools/evaluate_counterfactual_value_ensemble.py` now supports
   `--validation-csv`, so value/risk models can be tested on explicit
   seed-window or OOD holdouts instead of only random seed splits.
+- It also supports `--output-audit-csv` for explicit validation runs. The audit
+  writes per validation row: seed, prefix length, event string, true deltas,
+  utility, value mean/std/lower-confidence-bound, bad probability mean/std/upper
+  confidence bound, and accept/reject for each threshold combination.
 - Simple all-feature value/risk training on broad `100-129` and validation on
   targeted `130-249` leaked bad rows. With sequence/prefix features only, the
   same train/validation split accepted `16/0/0` good/neutral/bad aggregated
@@ -1247,6 +1251,14 @@ Sequence value/risk ensemble on targeted prefix rows:
   unless the utility threshold is high. Keep it offline, but this is now a
   plausible basis for a future online reranker once we add row-level audit
   output and validate on more candidate/window combinations.
+- Row-level audit of the strict `100-249 -> targeted 250-369` run showed the
+  accepted rows were not two distinct rescues. They were the same concrete
+  prefix accepted by different bootstrap split seeds: seed `273`, prefix `1`,
+  event `1@166:a4:MOVE_FORWARD->MOVE_RIGHT`, with true
+  `reward_delta=+0.0574713` and unchanged success. At
+  `min_utility=0.2,max_bad_probability=0.001`, only split seed `3` accepted it;
+  at bad-probability thresholds `0.005..0.02`, split seeds `3` and `5`
+  accepted it. This is plausible and safe, but still very low diversity.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

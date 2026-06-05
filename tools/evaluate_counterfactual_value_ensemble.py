@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from collections import Counter
 from pathlib import Path
@@ -351,6 +352,85 @@ def explicit_validation_metrics(
     return split_results
 
 
+def validation_audit_rows(
+    train_rows: list[dict[str, str]],
+    validation_rows: list[dict[str, str]],
+    feature_columns: list[str],
+    split_seed: int,
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
+    train_x_raw = feature_matrix(train_rows, feature_columns)
+    validation_x_raw = feature_matrix(validation_rows, feature_columns)
+    train_utility, _, _, _, _, train_categories, train_bad_labels = row_arrays(
+        train_rows,
+        args,
+    )
+    (
+        validation_utility,
+        validation_reward_delta,
+        validation_success_delta,
+        validation_failed_delta,
+        validation_categories,
+        _,
+        _,
+    ) = row_arrays(validation_rows, args)
+
+    _, mean, std = standardize(train_x_raw, train_x_raw)
+    train_x = (train_x_raw - mean) / std
+    validation_x = (validation_x_raw - mean) / std
+    models = [
+        train_member(
+            seed=args.torch_seed + split_seed * 1000 + member,
+            train_x=train_x,
+            train_value=train_utility,
+            train_bad=train_bad_labels,
+            train_categories=train_categories,
+            args=args,
+        )
+        for member in range(args.ensemble_size)
+    ]
+    value_mean, value_std, bad_mean, bad_std = predict_ensemble(models, validation_x)
+    value_lcb = value_mean - args.value_std_coef * value_std
+    bad_ucb = bad_mean + args.bad_std_coef * bad_std
+
+    audit_rows: list[dict[str, Any]] = []
+    for row_index, row in enumerate(validation_rows):
+        base = {
+            "split_seed": split_seed,
+            "row_index": row_index,
+            "seed": row.get("seed", ""),
+            "prefix_len": row.get("prefix_len", ""),
+            "forced_applied": row.get("forced_applied", ""),
+            "outcome_category": validation_categories[row_index],
+            "utility": float(validation_utility[row_index]),
+            "reward_delta": float(validation_reward_delta[row_index]),
+            "success_delta": float(validation_success_delta[row_index]),
+            "failed_agents_delta": float(validation_failed_delta[row_index]),
+            "value_mean": float(value_mean[row_index]),
+            "value_std": float(value_std[row_index]),
+            "value_lcb": float(value_lcb[row_index]),
+            "bad_probability_mean": float(bad_mean[row_index]),
+            "bad_probability_std": float(bad_std[row_index]),
+            "bad_probability_ucb": float(bad_ucb[row_index]),
+            "events": row.get("events", ""),
+        }
+        for min_utility in args.min_utility:
+            for max_bad_probability in args.max_bad_probability:
+                accepted = (
+                    value_lcb[row_index] >= min_utility
+                    and bad_ucb[row_index] <= max_bad_probability
+                )
+                audit_rows.append(
+                    {
+                        **base,
+                        "min_utility": min_utility,
+                        "max_bad_probability": max_bad_probability,
+                        "accepted": int(accepted),
+                    }
+                )
+    return audit_rows
+
+
 def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     buckets: dict[tuple[float, float], dict[str, Any]] = {}
     summed_keys = [
@@ -447,6 +527,17 @@ def json_default(value: Any) -> Any:
     raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
+def write_audit_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({key for row in rows for key in row})
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -506,6 +597,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--top-k", type=int, default=25)
     parser.add_argument("--output-json", type=Path)
+    parser.add_argument(
+        "--output-audit-csv",
+        type=Path,
+        help=(
+            "With --validation-csv, write per-validation-row predictions and "
+            "acceptance decisions for each threshold combination."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -537,6 +636,18 @@ def main() -> int:
         else:
             split_results.extend(split_metrics(rows, feature_columns, split_seed, args))
     aggregate = aggregate_metrics(split_results)
+    audit_rows: list[dict[str, Any]] = []
+    if validation_rows and args.output_audit_csv is not None:
+        for split_seed in args.split_seeds:
+            audit_rows.extend(
+                validation_audit_rows(
+                    train_rows,
+                    validation_rows,
+                    feature_columns,
+                    split_seed,
+                    args,
+                )
+            )
 
     print(
         "Data: "
@@ -570,6 +681,8 @@ def main() -> int:
                 default=json_default,
             )
             handle.write("\n")
+    if args.output_audit_csv is not None:
+        write_audit_csv(args.output_audit_csv, audit_rows)
     return 0
 
 
