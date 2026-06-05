@@ -1099,6 +1099,29 @@ PPO wrapper's hand-coded acceptance logic into labelled temporal data. It is
 not yet evidence that an online learned gate is safe; require zero accepted bad
 rows on explicit held-out seed windows before replacing deterministic guards.
 
+First explicit sequence-gate holdouts:
+- Critical training set `120,205,206,207,211,215`, line length 2, prefix lengths
+  `1,2,3,5`: 24 rows with labels `12 good`, `11 bad`, `1 neutral`. This is a
+  deliberately dense sanity set, not an unbiased benchmark.
+- OOD holdout `839-843`, line length 3, prefix lengths `1,2,3`: 15 rows with
+  labels `7 bad`, `8 neutral`. All-features multiclass gate overfit the small
+  training set and accepted holdout good/neutral/bad `0/3/1` at all thresholds
+  from `0.75` to `0.99`. The tighter sequence/prefix feature regex was safer:
+  at thresholds `0.75/0.90` it accepted `0/0/1`, and at `0.95+` it accepted
+  `0/0/0`.
+- Same-distribution neutral holdout `216-225`, line length 2, prefix lengths
+  `1,2,3`: 9 rows, all neutral. All-features gate still accepted neutral rows
+  at every threshold (`0/1/0` at `0.99`); the tighter sequence/prefix feature
+  gate accepted `0/5/0` up to `0.97` and `0/0/0` at `0.99`.
+
+Assessment after these holdouts: sequence labels are the right diagnostic
+direction, but the learned gate is not ready. The all-feature model memorizes
+and leaks bad actions; the safer feature set reaches zero bad only by becoming
+mostly inert. Next useful step is not online deployment; it is mining larger,
+balanced sequence windows with both rescue positives and hard negative
+success-preserving/reward-losing prefixes, then validating with strict
+seed-window holdouts.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
