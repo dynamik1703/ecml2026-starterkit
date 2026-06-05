@@ -1191,6 +1191,33 @@ candidates, mine changed-seed prefix labels per candidate, and only then train
 an ensemble/reranker. Continuing to tune one learned gate on this single PPO
 checkpoint is low expected value.
 
+Candidate-diversity PPO test:
+- Trained `/private/tmp/ecml_ppo_trajectory_mix293_u4.pt` as a small
+  64-feature PPO candidate around seed `293`, with strong teacher/anchor
+  regularization (`learning_rate=1e-5`, `teacher_ce_coef=0.4`,
+  `anchor_kl_coef=8.0`), trajectory-conflict observation, conflict-priority
+  shaping, and terminal success/failure shaping. This was intentionally a
+  short candidate-generation test, not a long training run.
+- On `100-129`, it matched the previous useful seed-120 rescue pattern:
+  baseline/candidate `0.936044 / 0.950000` -> `0.939066 / 0.955556`, reward
+  wins/losses/ties `1/1/28`, success wins/losses/ties `1/0/29`; changed seeds
+  were `111` and `120`.
+- On `130-249`, it was mixed and still unsafe: reward wins/losses/ties
+  `2/3/115`, success wins/losses/ties `1/2/117`; changed seeds
+  `174,205,206,211,215`. The same hard success regressions `205` and `206`
+  remained, and it did not recover the old candidate's additional positives
+  `184` and `207`.
+- On `250-369`, it was worse than useful: reward wins/losses/ties `0/5/115`,
+  success wins/losses/ties `0/1/119`; changed seeds
+  `311,335,361,363,365`.
+- Assessment: simply changing PPO seed mix with stronger regularization did
+  not create useful candidate diversity. It kept some known positives but lost
+  others and still produced hard regressions. Do not mine prefix labels for
+  this checkpoint as a main path. The next candidate-generation experiment
+  should be meaningfully different: e.g. a BC/RL ensemble candidate, a
+  supervised sequence-rescue head trained from targeted prefix rows, or PPO
+  with an explicit offline penalty/regularizer against mined bad prefixes.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
