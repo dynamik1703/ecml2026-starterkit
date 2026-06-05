@@ -1432,6 +1432,33 @@ Sequence value/risk ensemble on targeted prefix rows:
   seeded success-diversity candidates and require each to add at least one new
   success-positive seed or a new hard negative before spending time on longer
   RL runs.
+- Second success-diversity candidate
+  `/private/tmp/ecml_ppo_trajectory_successdiv_seed730_u4.pt`: same short
+  64-feature PPO pattern with seed `730`, slightly higher rollout temperature
+  (`1.05`), stronger team success bonus, and slightly lighter teacher/anchor
+  (`teacher_ce=0.30`, `anchor_kl=3.0`). Rollout success was more stable than
+  seed610 (`0.875, 0.875, 0.917, 0.958`).
+- On seeds `100-129`, seed730 produced
+  baseline/candidate `0.936044/0.950000 -> 0.939996/0.961111`, reward
+  wins/losses/ties `1/1/28`, success wins/losses/ties `2/0/28`. Changed seeds
+  were only `119` and `120`, both success-positive. Targeted mining over those
+  two seeds produced 8 good rows and no bad/neutral rows; the events matched
+  the useful seed610 positives (`119`: `MOVE_RIGHT->MOVE_FORWARD` followed by
+  `MOVE_LEFT->MOVE_FORWARD`; `120`: `MOVE_FORWARD->MOVE_LEFT` then
+  `MOVE_LEFT->MOVE_FORWARD`).
+- On seeds `130-249`, seed730 did not add useful diversity:
+  baseline/candidate `0.917200/0.937500 -> 0.917328/0.936111`, reward
+  wins/losses/ties `1/1/118`, success wins/losses/ties `0/1/119`; changed
+  seeds were `205` and `211`, with the known success regression on `205` and
+  no success-positive rows. Do not mine this block further.
+- Adding the clean seed730 `100-129` positives to the Success-head training set
+  did not broaden holdout seed coverage beyond seed `207`, but it made the
+  signal more robust: on the same success-diversity `130-249` validation, the
+  model still accepted `12/0/0` good/neutral/bad under strict bad UCB
+  `0.001`, and the acceptance remained stable up to
+  `min_success_probability=0.4` instead of dropping after `0.05..0.3`. This is
+  useful as data reinforcement for the `MOVE_*->MOVE_FORWARD` rescue motif,
+  but it is not a new online-policy improvement.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
