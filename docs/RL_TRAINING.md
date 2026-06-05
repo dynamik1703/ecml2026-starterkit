@@ -1587,6 +1587,19 @@ Sequence value/risk ensemble on targeted prefix rows:
   with categories `83 good / 84 neutral / 97 bad`. This is reproducible
   offline model state for the next online gate prototype, not an activated
   submission policy.
+- `tools/score_counterfactual_value_ensemble.py` loads an exported ensemble and
+  scores prefix CSV rows with explicit thresholds. Scoring the exported
+  Success-only model showed that the validation-audit threshold `0.0004` is too
+  strict for the final 15-model export (`0/0/0` on successdiv `130-249`), while
+  `max_bad_probability=0.0025`, `min_utility=999`,
+  `min_success_probability=0.02`, `success_std_coef=0` accepts `4/0/0` on
+  successdiv `130-249`: seed `207`, prefixes `1/2/3/5`, all
+  success-positive. The same exported threshold accepts `0/0/0` on the hitemp
+  `130-249` holdout and `4/0/0` on the fast-suite training rows, only seed
+  `280` reward-positive rows. This is the first persisted Success-only
+  sequence candidate with no observed bad acceptance in these offline checks,
+  but it still has very low recall and needs online prefix-feature integration
+  plus full seed-window validation.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
