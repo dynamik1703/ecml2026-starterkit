@@ -255,6 +255,102 @@ def split_metrics(
     return split_results
 
 
+def row_arrays(
+    rows: list[dict[str, str]],
+    args: argparse.Namespace,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str], np.ndarray]:
+    utility = np.asarray([utility_target(row, args) for row in rows], dtype=np.float32)
+    reward_delta = np.asarray(
+        [safe_float(row.get("reward_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    success_delta = np.asarray(
+        [safe_float(row.get("success_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    failed_delta = np.asarray(
+        [safe_float(row.get("failed_agents_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    reward_delta[~np.isfinite(reward_delta)] = 0.0
+    success_delta[~np.isfinite(success_delta)] = 0.0
+    failed_delta[~np.isfinite(failed_delta)] = 0.0
+    categories = [outcome_category(row, args.reward_epsilon) for row in rows]
+    bad_labels = np.asarray([category == "bad" for category in categories], dtype=np.float32)
+    return (
+        utility,
+        reward_delta,
+        success_delta,
+        failed_delta,
+        np.asarray(categories, dtype=object),
+        categories,
+        bad_labels,
+    )
+
+
+def explicit_validation_metrics(
+    train_rows: list[dict[str, str]],
+    validation_rows: list[dict[str, str]],
+    feature_columns: list[str],
+    split_seed: int,
+    args: argparse.Namespace,
+) -> list[dict[str, Any]]:
+    train_x_raw = feature_matrix(train_rows, feature_columns)
+    validation_x_raw = feature_matrix(validation_rows, feature_columns)
+    train_utility, _, _, _, _, train_categories, train_bad_labels = row_arrays(
+        train_rows,
+        args,
+    )
+    (
+        validation_utility,
+        validation_reward_delta,
+        validation_success_delta,
+        validation_failed_delta,
+        validation_categories,
+        _,
+        _,
+    ) = row_arrays(validation_rows, args)
+
+    _, mean, std = standardize(train_x_raw, train_x_raw)
+    train_x = (train_x_raw - mean) / std
+    validation_x = (validation_x_raw - mean) / std
+
+    models = [
+        train_member(
+            seed=args.torch_seed + split_seed * 1000 + member,
+            train_x=train_x,
+            train_value=train_utility,
+            train_bad=train_bad_labels,
+            train_categories=train_categories,
+            args=args,
+        )
+        for member in range(args.ensemble_size)
+    ]
+    value_mean, value_std, bad_mean, bad_std = predict_ensemble(models, validation_x)
+    value_lcb = value_mean - args.value_std_coef * value_std
+    bad_ucb = bad_mean + args.bad_std_coef * bad_std
+
+    split_results = []
+    for min_utility in args.min_utility:
+        for max_bad_probability in args.max_bad_probability:
+            accepted = (value_lcb >= min_utility) & (bad_ucb <= max_bad_probability)
+            row = metric_row(
+                categories=validation_categories,
+                utility=validation_utility,
+                reward_delta=validation_reward_delta,
+                success_delta=validation_success_delta,
+                failed_delta=validation_failed_delta,
+                accepted=accepted,
+                min_utility=min_utility,
+                max_bad_probability=max_bad_probability,
+            )
+            row["split_seed"] = split_seed
+            row["val_rows"] = len(validation_rows)
+            row["val_seeds"] = sorted({int(float(row["seed"])) for row in validation_rows})
+            split_results.append(row)
+    return split_results
+
+
 def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     buckets: dict[tuple[float, float], dict[str, Any]] = {}
     summed_keys = [
@@ -360,6 +456,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("csv", nargs="+", type=Path)
     parser.add_argument(
+        "--validation-csv",
+        nargs="+",
+        type=Path,
+        help="Use these CSV rows as explicit validation rows instead of random seed splits.",
+    )
+    parser.add_argument(
         "--include-feature-regex",
         help="Only use feature columns whose names match this regular expression.",
     )
@@ -409,8 +511,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    rows = read_rows(args.csv)
-    if not rows:
+    train_rows = read_rows(args.csv)
+    validation_rows = read_rows(args.validation_csv) if args.validation_csv else []
+    rows = train_rows + validation_rows
+    if not train_rows:
         raise ValueError("No rows found")
     categories = [outcome_category(row, args.reward_epsilon) for row in rows]
     counts = Counter(categories)
@@ -420,12 +524,25 @@ def main() -> int:
 
     split_results = []
     for split_seed in args.split_seeds:
-        split_results.extend(split_metrics(rows, feature_columns, split_seed, args))
+        if validation_rows:
+            split_results.extend(
+                explicit_validation_metrics(
+                    train_rows,
+                    validation_rows,
+                    feature_columns,
+                    split_seed,
+                    args,
+                )
+            )
+        else:
+            split_results.extend(split_metrics(rows, feature_columns, split_seed, args))
     aggregate = aggregate_metrics(split_results)
 
     print(
         "Data: "
-        f"rows={len(rows)} good={counts['good']} neutral={counts['neutral']} "
+        f"rows={len(rows)} train_rows={len(train_rows)} "
+        f"validation_rows={len(validation_rows)} "
+        f"good={counts['good']} neutral={counts['neutral']} "
         f"bad={counts['bad']} features={len(feature_columns)} "
         f"splits={','.join(str(seed) for seed in args.split_seeds)}"
     )
@@ -438,6 +555,8 @@ def main() -> int:
                 {
                     "summary": {
                         "rows": len(rows),
+                        "train_rows": len(train_rows),
+                        "validation_rows": len(validation_rows),
                         "categories": dict(counts),
                         "features": len(feature_columns),
                         "feature_columns": feature_columns,

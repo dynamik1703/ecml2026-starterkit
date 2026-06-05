@@ -1218,6 +1218,36 @@ Candidate-diversity PPO test:
   supervised sequence-rescue head trained from targeted prefix rows, or PPO
   with an explicit offline penalty/regularizer against mined bad prefixes.
 
+Sequence value/risk ensemble on targeted prefix rows:
+- `tools/evaluate_counterfactual_value_ensemble.py` now supports
+  `--validation-csv`, so value/risk models can be tested on explicit
+  seed-window or OOD holdouts instead of only random seed splits.
+- Simple all-feature value/risk training on broad `100-129` and validation on
+  targeted `130-249` leaked bad rows. With sequence/prefix features only, the
+  same train/validation split accepted `16/0/0` good/neutral/bad aggregated
+  over three ensemble split seeds at `min_utility=0,max_bad_probability<=0.2`;
+  at `min_utility=0.02` it accepted `4/0/0`.
+- Train on `100-129 + targeted 130-249`, validate on targeted `250-369`:
+  the default value/risk ensemble leaked bad rows (`3/0/1` at
+  `min_utility=0.05`). A stricter configuration with sequence/prefix features,
+  higher bad weights, stronger bad-risk uncertainty, and stronger value lower
+  confidence bounds accepted `2/0/0` at
+  `min_utility=0.2,max_bad_probability=0.005..0.02` and `1/0/0` at
+  `min_utility=0.2,max_bad_probability=0.001`.
+- Train on all current sequence rows and validate on line-length-3 OOD
+  holdout: the strict value/risk model accepted `0/0/0` across all tested
+  thresholds, so it did not leak the known line-length-3 bad prefix. On the
+  same-distribution neutral holdout, the same strict setup still accepted
+  neutral rows at lower utility thresholds, but `min_utility=0.4` accepted
+  `0/0/0`.
+- Assessment: this is the first supervised sequence-rescue result that is
+  better than the simple gate classifier. It can find some held-out good
+  targeted prefixes with zero bad leakage under strict settings. It still has
+  low recall, no demonstrated OOD positive recall, and some neutral acceptance
+  unless the utility threshold is high. Keep it offline, but this is now a
+  plausible basis for a future online reranker once we add row-level audit
+  output and validate on more candidate/window combinations.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
