@@ -1359,6 +1359,22 @@ Sequence value/risk ensemble on targeted prefix rows:
   step is to evaluate/mine a different checkpoint family for distinct
   success-positive action patterns, then retrain the Success/Risk audit with
   the combined windows.
+- Alternative checkpoint check on the same `490-609` range:
+  `ecml_ppo_trajectory_anchor2_u3.pt` produced no new Success-positive seed.
+  Gate summary was baseline/candidate `0.918937/0.947222 ->
+  0.917403/0.945833`, reward wins/losses/ties `2/4/114`, success
+  wins/losses/ties `1/2/117`. Changed seeds were
+  `519,578,588,589,603,605`; the only success-positive seed was again `589`,
+  and success regressions were again `519` and `578`.
+- Targeted Anchor2 mining over those six changed seeds produced 24 rows:
+  `8 good / 3 neutral / 13 bad`. The Success-positive rows were the same
+  event as the stronger-terminal candidate:
+  `1@198:a0:MOVE_FORWARD->MOVE_LEFT` on seed `589` across prefixes
+  `1,2,3,5`. The Success-negative rows came from seed `519` prefixes `3/5`
+  and seed `578` prefixes `2/3/5`. Conclusion: Anchor2 is not useful
+  candidate diversity for the current Success-rescue dataset; the next
+  candidate should come from a meaningfully different training objective or
+  selection criterion, not only a lighter terminal-shaping variant.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
