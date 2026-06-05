@@ -1459,6 +1459,36 @@ Sequence value/risk ensemble on targeted prefix rows:
   `min_success_probability=0.4` instead of dropping after `0.05..0.3`. This is
   useful as data reinforcement for the `MOVE_*->MOVE_FORWARD` rescue motif,
   but it is not a new online-policy improvement.
+- High-temperature success-diversity candidate
+  `/private/tmp/ecml_ppo_trajectory_successdiv_hitemp_seed840_u4.pt`: a more
+  exploratory short PPO run with rollout temperature `1.25`, lower teacher/kl
+  anchoring (`teacher_ce=0.18`, `anchor_kl=1.5`), stronger team success
+  shaping and the same 64-feature trajectory observation. Rollout success was
+  reasonable (`0.875, 0.917, 0.958, 0.917`), but the gate results show that
+  more exploration did not add positive diversity.
+- On seeds `100-129`, seed840 produced
+  baseline/candidate `0.936044/0.950000 -> 0.931859/0.955556`, reward
+  wins/losses/ties `0/2/28`, success wins/losses/ties `1/0/29`. Changed seeds
+  were `111` and `119`; the only success-positive seed was the already-known
+  `119`, plus the known reward-negative `111`. Do not mine this window further
+  as new positive diversity.
+- On seeds `130-249`, seed840 produced
+  baseline/candidate `0.917200/0.937500 -> 0.918542/0.937500`, reward
+  wins/losses/ties `1/2/117`, success wins/losses/ties `1/1/118`. Changed
+  seeds were `198,207,211`: known positive `207`, neutral/reward-negative
+  `211`, and a new success regression on seed `198`.
+- Targeted mining of seed840 `130-249` produced 12 rows:
+  `4 good / 1 neutral / 7 bad`. The positive rows were seed `207`
+  `1@39:a3:MOVE_RIGHT->MOVE_FORWARD`, a useful variant of the
+  `MOVE_*->MOVE_FORWARD` rescue motif. The new hard negative was seed `198`:
+  prefix `1` was neutral, but prefixes `2/3/5` became success-negative after
+  `1@285:a2:MOVE_LEFT->MOVE_FORWARD;2@288:a0:MOVE_FORWARD->MOVE_LEFT`.
+- Adding the seed840 mined rows to the Success-head training set did not hurt
+  the existing success-diversity `130-249` validation. The strict bad-UCB run
+  still accepted `12/0/0` and remained stable up to
+  `min_success_probability=0.5`. Seed840 is therefore useful as
+  hard-negative/robustness data, but not as a source of new success-positive
+  coverage.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
