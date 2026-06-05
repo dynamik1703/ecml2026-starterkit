@@ -1600,6 +1600,30 @@ Sequence value/risk ensemble on targeted prefix rows:
   sequence candidate with no observed bad acceptance in these offline checks,
   but it still has very low recall and needs online prefix-feature integration
   plus full seed-window validation.
+- `submission.sequence_success_policy.MyPolicy` is the first online prototype
+  for that persisted Success-only sequence candidate. It keeps guarded rerank
+  as the baseline, queries the success-diversity PPO checkpoint in parallel,
+  builds cumulative diff-prefix features through the existing mining feature
+  pipeline, and accepts a candidate deviation only when the exported sequence
+  ensemble passes the Success-only thresholds. It is not the Docker/default
+  policy; it depends on the local exported model and PPO checkpoint paths, and
+  the online feature path is currently slow.
+- Online validation of this prototype with trajectory-conflict observations:
+  seed `207` improved from `0.783854/0.833333` to `0.991030/1.000000`
+  (`reward_delta=+0.207176`, `success_delta=+0.166667`). The fast-suite seeds
+  `258,264,280,311,335,343,392,452,477` stayed exactly neutral
+  (`0/0/9` reward and success changes). Full disjoint windows were also safe
+  but neutral: `250-369` stayed `0/0/120`, and `370-489` stayed `0/0/120`.
+  On `130-249`, the only changed seed was `207`, giving aggregate
+  baseline/candidate `0.917200/0.937500 -> 0.918927/0.938889`,
+  reward and success wins/losses/ties `1/0/119`.
+- Assessment after online integration: this is a real learned online gate now,
+  not just a CSV audit, and it safely recovers one known Success rescue.
+  However, recall is still extremely low and runtime is high because the
+  wrapper rebuilds the broad prefix feature row and scores a 15-model ensemble
+  online. The next useful work is either to distill this Success-only gate into
+  a smaller feature/model path, or to mine/train more Success-positive motifs
+  before spending effort on deployment optimization.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

@@ -1,0 +1,390 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+import numpy as np
+import torch
+import torch.nn as nn
+from flatland.envs.rail_env_action import RailEnvActions
+
+from submission import runtime_context
+from submission.rerank_policy import RerankPolicy
+from submission.reservation_policy import ReservationPolicy
+
+try:
+    from tools.analyze_policy_action_diffs import diff_row
+    from tools.mine_diff_prefix_dataset import (
+        add_delta_features,
+        aggregate_event_features,
+    )
+except Exception:  # pragma: no cover - submission fallback for stripped packages.
+    diff_row = None
+    add_delta_features = None
+    aggregate_event_features = None
+
+
+DEFAULT_SEQUENCE_MODEL_PATH = "/private/tmp/ecml_success_only_sequence_fasttrain.pt"
+DEFAULT_CANDIDATE_CHECKPOINT_PATH = (
+    "/private/tmp/ecml_ppo_trajectory_successdiv_seed610_u4.pt"
+)
+
+
+class SequenceValueRiskMLP(nn.Module):
+    def __init__(self, input_dim: int, hidden_size: int):
+        super().__init__()
+        if hidden_size <= 0:
+            self.shared = nn.Identity()
+            shared_dim = input_dim
+        else:
+            self.shared = nn.Sequential(
+                nn.Linear(input_dim, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU(),
+            )
+            shared_dim = hidden_size
+        self.value_head = nn.Linear(shared_dim, 1)
+        self.bad_head = nn.Linear(shared_dim, 1)
+        self.success_head = nn.Linear(shared_dim, 1)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        hidden = self.shared(features)
+        return (
+            self.value_head(hidden).squeeze(-1),
+            self.bad_head(hidden).squeeze(-1),
+            self.success_head(hidden).squeeze(-1),
+        )
+
+
+class SequenceEnsembleScorer:
+    def __init__(
+        self,
+        checkpoint_path: str,
+        min_utility: float,
+        max_bad_probability: float,
+        min_success_probability: float,
+        value_std_coef: float,
+        bad_std_coef: float,
+        success_std_coef: float,
+    ):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        self.feature_columns = list(checkpoint["feature_columns"])
+        self.feature_mean = checkpoint["feature_mean"].detach().cpu().numpy()
+        self.feature_std = checkpoint["feature_std"].detach().cpu().numpy()
+        self.min_utility = float(min_utility)
+        self.max_bad_probability = float(max_bad_probability)
+        self.min_success_probability = float(min_success_probability)
+        self.value_std_coef = float(value_std_coef)
+        self.bad_std_coef = float(bad_std_coef)
+        self.success_std_coef = float(success_std_coef)
+        self.models = []
+        for state_dict in checkpoint["model_state_dicts"]:
+            model = SequenceValueRiskMLP(
+                input_dim=int(checkpoint["input_dim"]),
+                hidden_size=int(checkpoint["hidden_size"]),
+            )
+            model.load_state_dict(state_dict)
+            model.eval()
+            self.models.append(model)
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            result = float(value)
+        except Exception:
+            return 0.0
+        return result if np.isfinite(result) else 0.0
+
+    def _feature_vector(self, row: dict[str, Any]) -> np.ndarray:
+        values = [
+            self._safe_float(row.get(column, 0.0))
+            for column in self.feature_columns
+        ]
+        raw = np.asarray(values, dtype=np.float32)
+        return (raw - self.feature_mean) / self.feature_std
+
+    def score(self, row: dict[str, Any]) -> tuple[bool, dict[str, float]]:
+        features = torch.as_tensor(
+            self._feature_vector(row)[None, :],
+            dtype=torch.float32,
+        )
+        values = []
+        bad_probs = []
+        success_probs = []
+        with torch.no_grad():
+            for model in self.models:
+                value_pred, bad_logits, success_logits = model(features)
+                values.append(float(value_pred.item()))
+                bad_probs.append(float(torch.sigmoid(bad_logits).item()))
+                success_probs.append(float(torch.sigmoid(success_logits).item()))
+
+        value_mean = float(np.mean(values))
+        value_std = float(np.std(values))
+        bad_mean = float(np.mean(bad_probs))
+        bad_std = float(np.std(bad_probs))
+        success_mean = float(np.mean(success_probs))
+        success_std = float(np.std(success_probs))
+        value_lcb = value_mean - self.value_std_coef * value_std
+        bad_ucb = bad_mean + self.bad_std_coef * bad_std
+        success_lcb = success_mean - self.success_std_coef * success_std
+        accepted = (
+            bad_ucb <= self.max_bad_probability
+            and (
+                value_lcb >= self.min_utility
+                or success_lcb >= self.min_success_probability
+            )
+        )
+        return accepted, {
+            "value_lcb": value_lcb,
+            "bad_ucb": bad_ucb,
+            "success_lcb": success_lcb,
+        }
+
+
+class SequenceSuccessPolicy(RerankPolicy):
+    """Experimental online wrapper for the exported sequence Success gate.
+
+    The guarded rerank policy remains the baseline. A PPO candidate checkpoint
+    proposes deviations, and the exported sequence ensemble can accept a
+    deviation only if the cumulative accepted-diff prefix scores as low-risk
+    Success rescue. This policy is intentionally not the default submission
+    policy yet.
+    """
+
+    def __init__(self, checkpoint_path: str | None = None):
+        super().__init__(checkpoint_path="./submission/checkpoint.pt")
+        sequence_model_path = (
+            checkpoint_path
+            or os.environ.get("ECML_SEQUENCE_SUCCESS_MODEL")
+            or DEFAULT_SEQUENCE_MODEL_PATH
+        )
+        candidate_checkpoint_path = (
+            os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
+            or DEFAULT_CANDIDATE_CHECKPOINT_PATH
+        )
+        self.candidate_policy = (
+            RerankPolicy(checkpoint_path=candidate_checkpoint_path)
+            if Path(candidate_checkpoint_path).exists()
+            else None
+        )
+        self.sequence_scorer = (
+            self._load_scorer(sequence_model_path)
+            if Path(sequence_model_path).exists()
+            else None
+        )
+        self._accepted_event_details: list[dict[str, Any]] = []
+        self._last_step: int | None = None
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except Exception:
+            return default
+
+    def _load_scorer(self, sequence_model_path: str) -> SequenceEnsembleScorer:
+        return SequenceEnsembleScorer(
+            checkpoint_path=sequence_model_path,
+            min_utility=self._env_float("ECML_SEQUENCE_MIN_UTILITY", 999.0),
+            max_bad_probability=self._env_float(
+                "ECML_SEQUENCE_MAX_BAD_PROBABILITY",
+                0.0025,
+            ),
+            min_success_probability=self._env_float(
+                "ECML_SEQUENCE_MIN_SUCCESS_PROBABILITY",
+                0.02,
+            ),
+            value_std_coef=self._env_float("ECML_SEQUENCE_VALUE_STD_COEF", 2.0),
+            bad_std_coef=self._env_float("ECML_SEQUENCE_BAD_STD_COEF", 2.0),
+            success_std_coef=self._env_float("ECML_SEQUENCE_SUCCESS_STD_COEF", 0.0),
+        )
+
+    def _reset_episode_state_if_needed(self, step: int | None) -> None:
+        if step is None:
+            return
+        if self._last_step is None or step < self._last_step:
+            self._accepted_event_details = []
+        elif step == 0 and self._last_step != 0:
+            self._accepted_event_details = []
+        self._last_step = step
+
+    def act_many(
+        self,
+        handles: List[int],
+        observations: List[Any],
+        **kwargs,
+    ) -> Dict[int, RailEnvActions]:
+        baseline_actions = super().act_many(handles, observations, **kwargs)
+        if self.candidate_policy is None or self.sequence_scorer is None:
+            return baseline_actions
+        if diff_row is None or add_delta_features is None or aggregate_event_features is None:
+            return baseline_actions
+
+        candidate_actions = self.candidate_policy.act_many(
+            handles,
+            observations,
+            **kwargs,
+        )
+        context = runtime_context.get()
+        env = context.env
+        obs_builder = context.obs_builder
+        if (
+            env is None
+            or obs_builder is None
+            or env.get_num_agents() < 6
+            or max(env.height, env.width) < 100
+        ):
+            return baseline_actions
+
+        self._reset_episode_state_if_needed(getattr(env, "_elapsed_steps", None))
+        adjusted = dict(baseline_actions)
+        observations_by_handle = dict(zip(handles, observations))
+        baseline_action_ids = {
+            handle: self._action_id(action)
+            for handle, action in baseline_actions.items()
+        }
+        candidate_action_ids = {
+            handle: self._action_id(action)
+            for handle, action in candidate_actions.items()
+        }
+        baseline_raw_actions = self._raw_policy_actions(self, handles, observations)
+        candidate_raw_actions = self._raw_policy_actions(
+            self.candidate_policy,
+            handles,
+            observations,
+        )
+
+        reserved_targets: set[tuple[int, int]] = set()
+        for handle in sorted(adjusted, key=lambda h: self._priority_key(obs_builder, h)):
+            baseline_action = baseline_action_ids.get(handle)
+            candidate_action = candidate_action_ids.get(handle)
+            action_id = baseline_action
+            if (
+                baseline_action is not None
+                and candidate_action is not None
+                and baseline_action != candidate_action
+                and self._accept_candidate_action(
+                    env=env,
+                    obs_builder=obs_builder,
+                    handle=handle,
+                    observation=observations_by_handle.get(handle),
+                    baseline_action=baseline_action,
+                    candidate_action=candidate_action,
+                    baseline_raw_actions=baseline_raw_actions,
+                    candidate_raw_actions=candidate_raw_actions,
+                    baseline_actions=baseline_action_ids,
+                    candidate_actions=candidate_action_ids,
+                    reserved_targets=reserved_targets,
+                )
+            ):
+                adjusted[handle] = RailEnvActions(candidate_action)
+                action_id = candidate_action
+
+            if action_id is not None:
+                self._reserve_action_target(
+                    reserved_targets,
+                    obs_builder,
+                    handle,
+                    action_id,
+                )
+
+        return adjusted
+
+    def _accept_candidate_action(
+        self,
+        env: Any,
+        obs_builder: Any,
+        handle: int,
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+        baseline_raw_actions: dict[int, int],
+        candidate_raw_actions: dict[int, int],
+        baseline_actions: dict[int, int],
+        candidate_actions: dict[int, int],
+        reserved_targets: set[tuple[int, int]],
+    ) -> bool:
+        if candidate_action not in (
+            ReservationPolicy.MOVE_LEFT,
+            ReservationPolicy.MOVE_FORWARD,
+            ReservationPolicy.MOVE_RIGHT,
+        ):
+            return False
+        if not self._mask_allows(observation, candidate_action):
+            return False
+        target, _ = obs_builder._action_target(handle, candidate_action)
+        if (
+            target is None
+            or target in reserved_targets
+            or obs_builder._occupied_by_other(target, handle)
+        ):
+            return False
+
+        try:
+            detail = diff_row(
+                self._feature_args(),
+                0,
+                env,
+                obs_builder,
+                handle,
+                observation,
+                self,
+                self.candidate_policy,
+                baseline_raw_actions,
+                candidate_raw_actions,
+                baseline_actions,
+                candidate_actions,
+            )
+            detail = add_delta_features(detail)
+            detail["prefix_index"] = len(self._accepted_event_details) + 1
+            aggregate = aggregate_event_features(
+                [*self._accepted_event_details, detail]
+            )
+            accepted, _ = self.sequence_scorer.score(aggregate)
+        except Exception:
+            return False
+
+        if accepted:
+            self._accepted_event_details.append(detail)
+        return bool(accepted)
+
+    @staticmethod
+    def _feature_args() -> Any:
+        class Args:
+            pass
+
+        return Args()
+
+    @staticmethod
+    def _mask_allows(observation: Any, action: int) -> bool:
+        if observation is None:
+            return False
+        values = np.asarray(observation, dtype=np.float32)
+        if values.shape[0] < 5 or action >= 5:
+            return False
+        return bool(values[-5 + action] >= 0.5)
+
+    @staticmethod
+    def _raw_policy_actions(
+        policy: Any,
+        handles: list[int],
+        observations: list[Any],
+    ) -> dict[int, int]:
+        raw_policy = getattr(policy, "rl_policy", None)
+        if raw_policy is None:
+            return {}
+        try:
+            return {
+                handle: RerankPolicy._action_id(action)
+                for handle, action in raw_policy.act_many(handles, observations).items()
+            }
+        except Exception:
+            return {}
+
+
+MyPolicy = SequenceSuccessPolicy
