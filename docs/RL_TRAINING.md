@@ -1531,6 +1531,17 @@ Sequence value/risk ensemble on targeted prefix rows:
   compact suite as the first filter for future PPO/BC candidate generators;
   only candidates with zero success loss there should be promoted to full
   120-seed holdout scans.
+- Targeted prefix mining on the fast-suite changed seeds produced 36 sequence
+  rows: `20 good / 2 neutral / 14 bad`. The bad rows were seed `264`
+  prefixes `2/3/5` (`MOVE_RIGHT->MOVE_FORWARD` twice), seed `311` all
+  prefixes (`MOVE_FORWARD->MOVE_LEFT`), seed `335` prefixes `2/3/5`
+  (`MOVE_FORWARD->MOVE_LEFT` twice, success-negative), and seed `477` all
+  prefixes (`MOVE_RIGHT->MOVE_FORWARD`). The good rows are reward-only
+  positives on seeds `258,280,343,392,452`. This confirms the core sequence
+  issue: seed `335` is neutral at prefix `1` but success-negative from prefix
+  `2`, so a one-step gate cannot reliably protect it. Add these rows to the
+  next offline Success/Risk training pool as hard-negative and reward-positive
+  screening data, not as deployment proof for the raw PPO checkpoint.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
