@@ -1226,6 +1226,12 @@ Sequence value/risk ensemble on targeted prefix rows:
   writes per validation row: seed, prefix length, event string, true deltas,
   utility, value mean/std/lower-confidence-bound, bad probability mean/std/upper
   confidence bound, and accept/reject for each threshold combination.
+- The tool now has an optional auxiliary Success-rescue classifier head. It is
+  enabled for acceptance only when `--min-success-probability` is provided.
+  The default path without that flag keeps the old value/risk acceptance logic.
+  Success acceptance uses a lower confidence bound on predicted
+  `success_delta > 0`, still gated by the bad-probability upper confidence
+  bound. The audit CSV includes success probability mean/std/LCB.
 - Simple all-feature value/risk training on broad `100-129` and validation on
   targeted `130-249` leaked bad rows. With sequence/prefix features only, the
   same train/validation split accepted `16/0/0` good/neutral/bad aggregated
@@ -1304,6 +1310,24 @@ Sequence value/risk ensemble on targeted prefix rows:
   This is too little diversity for the bad-risk head to distinguish risky
   stop/side-action sequences from real success rescues. Treat Success rescue
   as a separate data/model problem rather than a utility-weight tuning issue.
+- Auxiliary Success-head test: with sequence/prefix features, training through
+  targeted `250-369` and validating on `370-489`, conservative Success-LCB
+  acceptance still found `0/0/0`. Removing the Success uncertainty penalty
+  found seed `398` prefixes `3/5` as success-positive good rows only when
+  `max_bad_probability=1.0`; the same rows had bad UCB about `0.90`, so they
+  are not deployable. The head also overpredicted the neutral prefix `1` of
+  the same seed. Using all features accepted many reward-positive rows but
+  still `accepted_success_positive=0`, so this was not real Success-rescue
+  recall.
+- Earlier holdout check for the auxiliary Success head, trained on
+  `100-129 + targeted 130-249` and validated on targeted `250-369`, was also
+  not deployable. At low `min_success_probability=0.05`, it leaked bad rows
+  (`accepted_bad=2` in aggregate) and had negative accepted success delta under
+  conservative bad thresholds. At thresholds `0.1..0.6`, it accepted only
+  reward-positive rows with `accepted_success_positive=0`. Conclusion: the
+  Success head confirms the diagnosis but does not solve it yet; the next
+  useful work is more diverse Success-positive mining and/or a better bad-risk
+  model around stop/side-action sequences.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
