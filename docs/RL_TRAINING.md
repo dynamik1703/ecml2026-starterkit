@@ -1624,6 +1624,32 @@ Sequence value/risk ensemble on targeted prefix rows:
   online. The next useful work is either to distill this Success-only gate into
   a smaller feature/model path, or to mine/train more Success-positive motifs
   before spending effort on deployment optimization.
+- Candidate-source recall check: with the default success-diversity PPO
+  candidate, the online gate also opens seed `119` on `100-129`
+  (`reward_delta=-0.0488281`, `success_delta=+0.166667`) and seed `207` on
+  `130-249` (`reward_delta=+0.207176`, `success_delta=+0.166667`). With the
+  terminal-stronger PPO candidate
+  (`ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT=/private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt`),
+  seed `589` improves from `0.849107/0.833333` to `1.000000/1.000000`, and
+  seed `529` is reward-positive without success change.
+- The terminal-stronger candidate initially leaked seed `578`
+  (`reward_delta=-0.063615`, `success_delta=-0.166667`) because the online gate
+  accepted a late `MOVE_FORWARD->MOVE_LEFT` at time `198`, while the old mined
+  prefix rows for that seed were only harmful after a longer prefix. The online
+  wrapper now has two conservative safety guards: `ECML_SEQUENCE_MAX_ACCEPTED_EVENTS`
+  defaults to `1`, and learned `MOVE_LEFT` deviations are rejected when true
+  slack exceeds `ECML_SEQUENCE_LEFT_MAX_SLACK` (default `115`, matching the
+  existing rerank left-detour slack guard). This blocks seed `578` while keeping
+  seed `589` (`slack=89`) and seed `529`.
+- Full guarded terminal-candidate validation on `490-609` after that guard:
+  baseline/candidate `0.918937/0.947222 -> 0.920793/0.948611`, reward
+  wins/losses/ties `2/0/118`, success wins/losses/ties `1/0/119`. Changed
+  seeds were `529` (`reward_delta=+0.0718391`, success unchanged) and `589`
+  (`reward_delta=+0.150893`, `success_delta=+0.166667`). This is the best
+  online Success-only result so far, but still candidate-source-specific; the
+  next useful prototype is a multi-candidate sequence gate that can combine the
+  default success-diversity source (`119/207`) with the terminal-stronger source
+  (`529/589`) under the same safety guards.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

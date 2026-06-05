@@ -177,6 +177,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             if Path(sequence_model_path).exists()
             else None
         )
+        self.max_accepted_events = self._env_int(
+            "ECML_SEQUENCE_MAX_ACCEPTED_EVENTS",
+            1,
+        )
+        self.left_max_slack = self._env_float(
+            "ECML_SEQUENCE_LEFT_MAX_SLACK",
+            self.FUTURE_RERANK_LEFT_MAX_SLACK,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._last_step: int | None = None
 
@@ -184,6 +192,13 @@ class SequenceSuccessPolicy(RerankPolicy):
     def _env_float(name: str, default: float) -> float:
         try:
             return float(os.environ.get(name, default))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        try:
+            return int(os.environ.get(name, default))
         except Exception:
             return default
 
@@ -309,10 +324,20 @@ class SequenceSuccessPolicy(RerankPolicy):
         candidate_actions: dict[int, int],
         reserved_targets: set[tuple[int, int]],
     ) -> bool:
+        if (
+            self.max_accepted_events >= 0
+            and len(self._accepted_event_details) >= self.max_accepted_events
+        ):
+            return False
         if candidate_action not in (
             ReservationPolicy.MOVE_LEFT,
             ReservationPolicy.MOVE_FORWARD,
             ReservationPolicy.MOVE_RIGHT,
+        ):
+            return False
+        if (
+            candidate_action == ReservationPolicy.MOVE_LEFT
+            and self._current_slack(obs_builder, handle) > self.left_max_slack
         ):
             return False
         if not self._mask_allows(observation, candidate_action):
@@ -368,6 +393,14 @@ class SequenceSuccessPolicy(RerankPolicy):
         if values.shape[0] < 5 or action >= 5:
             return False
         return bool(values[-5 + action] >= 0.5)
+
+    @staticmethod
+    def _current_slack(obs_builder: Any, handle: int) -> float:
+        try:
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            return float(obs_builder._deadline_slack(handle, distance))
+        except Exception:
+            return float("inf")
 
     @staticmethod
     def _raw_policy_actions(
