@@ -1286,6 +1286,24 @@ Sequence value/risk ensemble on targeted prefix rows:
   underestimated. The best next step is not to mainline this gate yet; mine
   more diverse PPO candidates and train the sequence value model on richer
   conflict/priority features or separate reward-vs-success heads.
+- Success-rescue diagnostic on the same `370-489` holdout: increasing
+  `success_weight` to `4.0` did not help; it accepted only `0/1/0` at the soft
+  `min_utility=-0.25` threshold and nothing at non-negative utility thresholds.
+  Reducing value uncertainty from `value_std_coef=2.0` to `1.0` accepted
+  `4/2/0` at `min_utility=0,max_bad_probability<=0.1`, still only the reward
+  rescue pattern plus neutral rows. Using all 716 numeric features increased
+  apparent recall to `8/0/0` at `min_utility=0,max_bad_probability=0.05`, but
+  the accepted rows were again only seed `419` across bootstrap splits and
+  prefix lengths; no accepted row had positive `success_delta`.
+- The rejected success-positive validation rows are from seeds `390`, `394`,
+  and `398`. The strict sequence/prefix model gives them negative value LCBs
+  around `-0.65..-1.21` and very high bad-probability UCBs around
+  `1.0..1.9`. The current training set through `250-369` has only 16
+  success-positive rows from four seeds (`184`, `207`, `215`, `294`), while
+  the `370-489` holdout has eight success-positive rows from three new seeds.
+  This is too little diversity for the bad-risk head to distinguish risky
+  stop/side-action sequences from real success rescues. Treat Success rescue
+  as a separate data/model problem rather than a utility-weight tuning issue.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
