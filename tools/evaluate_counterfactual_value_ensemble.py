@@ -564,6 +564,88 @@ def validation_audit_rows(
     return audit_rows
 
 
+def train_export_ensemble(
+    train_rows: list[dict[str, str]],
+    feature_columns: list[str],
+    args: argparse.Namespace,
+) -> tuple[list[ValueRiskMLP], np.ndarray, np.ndarray]:
+    train_x_raw = feature_matrix(train_rows, feature_columns)
+    (
+        train_utility,
+        _,
+        _,
+        _,
+        _,
+        train_categories,
+        train_bad_labels,
+        train_success_labels,
+    ) = row_arrays(train_rows, args)
+    _, mean, std = standardize(train_x_raw, train_x_raw)
+    train_x = (train_x_raw - mean) / std
+
+    models = []
+    for split_seed in args.split_seeds:
+        for member in range(args.ensemble_size):
+            models.append(
+                train_member(
+                    seed=args.torch_seed + split_seed * 1000 + member,
+                    train_x=train_x,
+                    train_value=train_utility,
+                    train_bad=train_bad_labels,
+                    train_success=train_success_labels,
+                    train_categories=train_categories,
+                    args=args,
+                )
+            )
+    return models, mean, std
+
+
+def serializable_args(args: argparse.Namespace) -> dict[str, Any]:
+    result = {}
+    for key, value in vars(args).items():
+        if isinstance(value, Path):
+            result[key] = str(value)
+        elif isinstance(value, list):
+            result[key] = [
+                str(item) if isinstance(item, Path) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
+def write_model_checkpoint(
+    path: Path,
+    train_rows: list[dict[str, str]],
+    feature_columns: list[str],
+    args: argparse.Namespace,
+) -> None:
+    models, mean, std = train_export_ensemble(train_rows, feature_columns, args)
+    categories = [outcome_category(row, args.reward_epsilon) for row in train_rows]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_class": "ValueRiskMLP",
+            "model_state_dicts": [model.state_dict() for model in models],
+            "feature_columns": feature_columns,
+            "feature_mean": torch.as_tensor(mean, dtype=torch.float32),
+            "feature_std": torch.as_tensor(std, dtype=torch.float32),
+            "input_dim": len(feature_columns),
+            "hidden_size": args.hidden_size,
+            "split_seeds": list(args.split_seeds),
+            "ensemble_size": args.ensemble_size,
+            "config": serializable_args(args),
+            "train_summary": {
+                "rows": len(train_rows),
+                "categories": dict(Counter(categories)),
+                "seeds": sorted({int(float(row["seed"])) for row in train_rows}),
+            },
+        },
+        path,
+    )
+
+
 def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     buckets: dict[tuple[float, float, float | None], dict[str, Any]] = {}
     summed_keys = [
@@ -780,6 +862,14 @@ def parse_args() -> argparse.Namespace:
             "acceptance decisions for each threshold combination."
         ),
     )
+    parser.add_argument(
+        "--output-model",
+        type=Path,
+        help=(
+            "Train a final ensemble on the training CSV rows and save model "
+            "weights, feature columns, normalization statistics, and config."
+        ),
+    )
     args = parser.parse_args()
     if args.success_loss_weight is None:
         args.success_loss_weight = 1.0 if args.min_success_probability else 0.0
@@ -861,6 +951,14 @@ def main() -> int:
             handle.write("\n")
     if args.output_audit_csv is not None:
         write_audit_csv(args.output_audit_csv, audit_rows)
+    if args.output_model is not None:
+        write_model_checkpoint(
+            args.output_model,
+            train_rows=train_rows,
+            feature_columns=feature_columns,
+            args=args,
+        )
+        print(f"saved_model={args.output_model}")
     return 0
 
 

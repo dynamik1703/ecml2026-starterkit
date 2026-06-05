@@ -1577,6 +1577,16 @@ Sequence value/risk ensemble on targeted prefix rows:
   train/persist a Success-only sequence model, require extremely low bad UCB,
   and validate it across the fast suite, success-diversity holdouts, and
   full disjoint seed windows before any deployment.
+- `tools/evaluate_counterfactual_value_ensemble.py` now supports
+  `--output-model`. It trains a final ensemble on the training CSV rows and
+  saves model weights, feature columns, normalization tensors, split seeds,
+  ensemble size, config, and train summary. A Success-only export smoke with
+  the fast-suite training pool wrote
+  `/private/tmp/ecml_success_only_sequence_fasttrain.pt`: 15 models
+  (`split_seeds=1,3,5`, `ensemble_size=5`), 464 features, 264 training rows
+  with categories `83 good / 84 neutral / 97 bad`. This is reproducible
+  offline model state for the next online gate prototype, not an activated
+  submission policy.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
