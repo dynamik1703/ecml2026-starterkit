@@ -1043,6 +1043,62 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-json /private/tmp/ecml_diff_prefix_terminal_stronger_critical.json
 ```
 
+`tools/mine_diff_prefix_dataset.py` turns the same adaptive diff-prefix replay
+into sequence-level training rows. It stores the final episode outcome deltas
+plus aggregated event features from `tools/analyze_policy_action_diffs.py`,
+including route-prefix conflicts, ETA/deadline slack at conflict points, raw
+policy logits, observation route-conflict features, action-transition counts,
+and first/last/mean/min/max values across the forced prefix. The CSV is directly
+readable by `tools/train_counterfactual_gate.py`.
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/mine_diff_prefix_dataset.py \
+  --candidate-policy submission.rerank_policy.MyPolicy \
+  --candidate-checkpoint /private/tmp/ecml_ppo_trajectory_terminal_stronger_u3.pt \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --seeds 205,206,207,215 \
+  --prefix-lengths 1 2 3 \
+  --num-agents 6 \
+  --line-length 2 \
+  --only-changed \
+  --output-csv /private/tmp/ecml_diff_prefix_sequence_train.csv \
+  --output-json /private/tmp/ecml_diff_prefix_sequence_train.json
+```
+
+Smoke results:
+- Seeds `207,215`, line length 2, prefix lengths `1,2`: four good rows, reward
+  wins/losses/ties `2/0/0` per prefix and success wins/losses/ties `2/0/0`.
+  The resulting CSV loaded successfully in `tools/train_counterfactual_gate.py`
+  with roughly `700` numeric feature columns.
+- Seed `839`, line length 3: prefix `1` was bad
+  (`reward_delta=-0.019179`, `success_delta=-0.166667`) while prefix `2` was
+  neutral. This is a useful warning: the same first deviation can be harmful
+  alone but harmless when followed by the candidate's next correction, so the
+  next learned model should use sequence labels rather than only one-step
+  counterfactual labels.
+
+The feature surface is intentionally rich and easy to overfit. For first
+sequence-gate experiments, use explicit seed-window holdouts and feature regex
+filters, for example:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
+  .venv/bin/python tools/train_counterfactual_gate.py \
+  /private/tmp/ecml_diff_prefix_sequence_train.csv \
+  --include-feature-regex '^(event_(baseline_prefix_|candidate_prefix_|candidate_.*_delta|obs_route_|obs_time_slack|slack_|candidate_raw_|baseline_raw_|transition_|count|unique))' \
+  --objective multiclass \
+  --max-bad-probability 0.01 \
+  --thresholds 0.9 0.95 0.97 0.99 \
+  --epochs 500 \
+  --hidden-size 32
+```
+
+Current assessment: this is the right next direction because it converts the
+PPO wrapper's hand-coded acceptance logic into labelled temporal data. It is
+not yet evidence that an online learned gate is safe; require zero accepted bad
+rows on explicit held-out seed windows before replacing deterministic guards.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
