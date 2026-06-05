@@ -1259,6 +1259,33 @@ Sequence value/risk ensemble on targeted prefix rows:
   `min_utility=0.2,max_bad_probability=0.001`, only split seed `3` accepted it;
   at bad-probability thresholds `0.005..0.02`, split seeds `3` and `5`
   accepted it. This is plausible and safe, but still very low diversity.
+- Next disjoint PPO-candidate scan on seeds `370-489` with the same
+  checkpoint produced a difficult holdout: gate summary baseline/candidate
+  `0.917194/0.933333 -> 0.913898/0.936111`, reward wins/losses/ties
+  `2/8/110`, success wins/losses/ties `3/1/116`, with a clear success
+  regression on seed `402`. The changed seeds were
+  `383,390,391,392,394,398,402,406,419,452,484`.
+- Targeted prefix mining over those changed seeds yielded 44 rows:
+  `16 good / 7 neutral / 21 bad`. By prefix length: prefix `1` had
+  `2/5/4` good/neutral/bad, prefix `2` had `4/2/5`, prefix `3` had
+  `5/0/6`, and prefix `5` had `5/0/6`.
+- Train on all current sequence rows through targeted `250-369`, validate on
+  targeted `370-489`: the previous strict sequence/prefix value/risk setting
+  accepted `0/0/0` at `min_utility=0.2,max_bad_probability=0.001..0.02`.
+  A diagnostic frontier showed the model is safe but too pessimistic: at
+  `min_utility=-0.25,max_bad_probability=0.02` it accepted `4/0/0`, all four
+  rows being the same reward rescue on seed `419` across prefix lengths
+  `1,2,3,5` (`1@61:a5:MOVE_FORWARD->MOVE_RIGHT`,
+  `reward_delta=+0.15873`, unchanged success). At `min_utility=-0.5` it also
+  accepted neutral rows from seed `398`; no tested frontier leaked bad rows on
+  this holdout.
+- Assessment after `370-489`: the learned value/risk route is directionally
+  useful and still safer than deploying raw PPO or a hard heuristic gate, but
+  it remains narrow. It recognizes a second reward-rescue pattern with no bad
+  leakage under a softer LCB threshold, while success-rescue rows are still
+  underestimated. The best next step is not to mainline this gate yet; mine
+  more diverse PPO candidates and train the sequence value model on richer
+  conflict/priority features or separate reward-vs-success heads.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
