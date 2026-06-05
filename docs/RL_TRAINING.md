@@ -1489,6 +1489,40 @@ Sequence value/risk ensemble on targeted prefix rows:
   `min_success_probability=0.5`. Seed840 is therefore useful as
   hard-negative/robustness data, but not as a source of new success-positive
   coverage.
+- `tools/train_masked_ppo.py` now supports `--training-seeds`, a comma-separated
+  complete-episode seed list. This lets PPO train directly on curated rescue
+  positives and hard negatives instead of contiguous seed blocks, while keeping
+  the old seed behavior unchanged when the option is omitted. Smoke validation
+  with `--training-seeds 119,120,198,205,207` passed and wrote
+  `/private/tmp/ecml_ppo_training_seeds_smoke.pt`.
+- Targeted-seed PPO candidate
+  `/private/tmp/ecml_ppo_trajectory_targeted_seed901_u4.pt`: trained for
+  4 updates x 4 complete episodes on positives `119,120,184,207,589` plus hard
+  negatives `111,198,205,211,232,519,578`, with trajectory-conflict
+  observation, stronger teacher/anchor regularization (`teacher_ce=0.35`,
+  `anchor_kl=4.0`), rollout temperature `1.05`, conflict-priority penalty
+  `0.025`, slack-progress reward `0.025`, global slack reward `0.03`, terminal
+  success/failure shaping, and reward clip `1.5`.
+- Holdout `250-369` versus guarded rerank:
+  baseline/candidate `0.913467/0.938889 -> 0.916290/0.937500`, reward
+  wins/losses/ties `3/3/114`, success wins/losses/ties `0/1/119`.
+  Changed seeds were `258,264,280,311,335,343`; seed `335` was a success
+  regression (`success_delta=-0.166667`). This candidate is not safe for
+  deployment.
+- Holdout `370-489` versus guarded rerank:
+  baseline/candidate `0.917194/0.933333 -> 0.918245/0.933333`, reward
+  wins/losses/ties `2/1/117`, success wins/losses/ties `0/0/120`.
+  Changed seeds were `392,452,477`, all reward-only. This is acceptable as a
+  diagnostic result but still not enough to justify deploying the raw PPO
+  checkpoint.
+- Assessment after targeted-seed PPO: explicit seed control is useful
+  infrastructure, but this PPO candidate did not create new held-out
+  success-positive diversity. The immediate value is hard-negative curation
+  (`335`) and a compact fast decision suite (`258,264,280,311,335,343,392,452,477`)
+  for candidate screening. The next winner-oriented step should shift from
+  more small raw-PPO deployment attempts to offline sequence Success/Risk
+  learning and candidate generation evaluated first on this fast suite, then
+  on full disjoint holdouts.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
