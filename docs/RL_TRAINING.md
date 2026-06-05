@@ -1554,6 +1554,29 @@ Sequence value/risk ensemble on targeted prefix rows:
   bad-risk head is still too optimistic on reward-only detours, so the next
   training pass should include the fast-suite rows and validate on disjoint
   success-diversity windows.
+- Training the sequence Success/Risk ensemble with the fast-suite rows added
+  and validating on the disjoint success-diversity `130-249` rows made the
+  standard utility gate too conservative at strict thresholds: at
+  `min_utility=0.2,max_bad_probability=0.001,min_success_probability=0.02` it
+  accepted `0/0/0`. Relaxing to `min_utility=-0.25` recovered Success-positive
+  rows but leaked bad rows, so the mixed utility-or-success acceptance is still
+  not deployable with this data.
+- A better diagnostic was a Success-only acceptance branch:
+  `min_utility=999`, `success_std_coef=0`, and a finer bad-UCB threshold.
+  With `max_bad_probability=0.0004..0.0005` and
+  `min_success_probability=0.02..0.05`, validation on success-diversity
+  `130-249` accepted `8/0/0` good/neutral/bad, all success-positive rows from
+  seed `207` across prefixes `1/2/3/5` and split seeds `3/5`. Tighter bad UCB
+  `0.0002..0.0003` accepted `4/0/0`; looser `0.0007` leaked four bad rows.
+  The same Success-only configuration on the hitemp `130-249` holdout accepted
+  `0/0/0`, so it is safe there but has no extra recall.
+- Assessment after fast-suite training: adding hard negatives improved risk
+  calibration enough to create a narrow zero-bad Success-only frontier, but the
+  frontier is threshold-fragile and still recognizes only seed `207`. The next
+  useful step is to treat Success rescue as a separate online gate candidate:
+  train/persist a Success-only sequence model, require extremely low bad UCB,
+  and validate it across the fast suite, success-diversity holdouts, and
+  full disjoint seed windows before any deployment.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
