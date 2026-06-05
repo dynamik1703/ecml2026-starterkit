@@ -1542,6 +1542,18 @@ Sequence value/risk ensemble on targeted prefix rows:
   `2`, so a one-step gate cannot reliably protect it. Add these rows to the
   next offline Success/Risk training pool as hard-negative and reward-positive
   screening data, not as deployment proof for the raw PPO checkpoint.
+- Fast-suite holdout for the existing sequence Success/Risk ensemble, trained
+  on prior prefix rows but not on the new fast-suite rows, is not deployable:
+  with sequence/prefix features and strict thresholds
+  `min_utility=0.2,max_bad_probability=0.001,min_success_probability=0.02`,
+  it accepted `36/0/12` good/neutral/bad validation rows. The accepted bad rows
+  were seed `477` across prefixes `1/2/3/5`; softer threshold combinations
+  also accepted seed `264`. The good news is that the success-negative seed
+  `335` prefixes `2/3/5` were rejected with high bad UCB (`>1.0`) and negative
+  value LCB. The model has learned some success-risk structure, but the reward
+  bad-risk head is still too optimistic on reward-only detours, so the next
+  training pass should include the fast-suite rows and validate on disjoint
+  success-diversity windows.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
