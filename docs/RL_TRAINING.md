@@ -1160,6 +1160,37 @@ sequence rows, hold out whole seed windows and scene/line-length variants, then
 deploy only if accepted bad is zero and accepted good remains nonzero across
 multiple disjoint holdouts.
 
+Next disjoint scan `250-369` is a cautionary result:
+- Relaxed scan over 120 seeds found 10 outcome-changing seeds:
+  `251,273,274,289,294,311,335,361,363,365`. The raw PPO candidate was worse
+  on average: reward wins/losses/ties `2/7/111`, success wins/losses/ties
+  `1/3/116`, with success regressions on `251,274,335` and one strong
+  success win on `294`.
+- Targeted prefix mining of those 10 seeds produced 40 dense rows:
+  `8 good`, `31 bad`, `1 neutral`. Per prefix, there were two good rows and
+  seven or eight bad rows.
+- Train on `100-129 + targeted 130-249`, validate on targeted `250-369`:
+  both all-features and sequence/prefix feature gates accepted `0/0/0` on the
+  validation rows at all tested thresholds. Safety is fine, but useful recall
+  is zero.
+- Train on `100-129 + targeted 250-369`, validate on targeted `130-249`:
+  all-features gate also accepted `0/0/0` on validation. Adding the
+  negative-heavy `250-369` block makes the learned gate inert on an earlier
+  targeted positive block.
+- Train on all current sequence rows (`100-129`, targeted `130-249`,
+  targeted `250-369`) and validate on OOD/neutral canaries: line-length-3
+  holdout accepted `0/0/0` at threshold `0.90+`; neutral holdout accepted
+  `0/0/0` at every threshold.
+
+Assessment after `250-369`: targeted mining is the right data workflow, but the
+current PPO candidate is not a strong enough source of diverse positive
+rescues. More gate training mostly learns to reject everything once the
+negative-heavy window is included. Next best effort should shift toward better
+candidate generation and RL objective design: produce multiple PPO/BC
+candidates, mine changed-seed prefix labels per candidate, and only then train
+an ensemble/reranker. Continuing to tune one learned gate on this single PPO
+checkpoint is low expected value.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
