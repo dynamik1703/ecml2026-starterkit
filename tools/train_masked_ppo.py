@@ -256,12 +256,40 @@ def anchor_policy_kl(
     return F.kl_div(current_log_probs, anchor_probs, reduction="batchmean")
 
 
+def parse_seed_list(value: str | None) -> list[int]:
+    if not value:
+        return []
+    seeds = []
+    for item in value.split(","):
+        item = item.strip()
+        if item:
+            seeds.append(int(item))
+    return seeds
+
+
+def rollout_seed(
+    args: argparse.Namespace,
+    start_seed: int,
+    episode_index: int,
+    episode_seed_offset: int,
+) -> int:
+    training_seed_list = getattr(args, "training_seed_list", [])
+    if training_seed_list:
+        seed_index = (episode_seed_offset + episode_index) % len(training_seed_list)
+        return int(training_seed_list[seed_index])
+    return int(start_seed + episode_index)
+
+
 def collect_rollout(
     args: argparse.Namespace,
     policy: ActorCritic,
     start_seed: int,
+    episode_seed_offset: int = 0,
 ) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
-    env, observations, obs_builder = make_env(args, start_seed)
+    env, observations, obs_builder = make_env(
+        args,
+        rollout_seed(args, start_seed, 0, episode_seed_offset),
+    )
     handles = list(env.get_agent_handles())
     num_agents = len(handles)
     teacher_policy = (
@@ -378,7 +406,12 @@ def collect_rollout(
             episode_reward_values = []
             env, observations, obs_builder = make_env(
                 args,
-                start_seed + completed_episodes,
+                rollout_seed(
+                    args,
+                    start_seed,
+                    completed_episodes,
+                    episode_seed_offset,
+                ),
             )
             handles = list(env.get_agent_handles())
         else:
@@ -554,6 +587,13 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Collect complete episodes per PPO update. Disabled when 0.",
     )
+    parser.add_argument(
+        "--training-seeds",
+        help=(
+            "Comma-separated exact episode seeds for complete-episode PPO collection. "
+            "When set, updates cycle through this list instead of contiguous seed blocks."
+        ),
+    )
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
@@ -724,6 +764,10 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--use-trajectory-conflict-obs expects --obs-size "
             f"{TRAJECTORY_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
+
+    args.training_seed_list = parse_seed_list(args.training_seeds)
+    if args.training_seed_list and args.episodes_per_update <= 0:
+        raise ValueError("--training-seeds requires --episodes-per-update > 0")
     return args
 
 
@@ -742,7 +786,13 @@ def main() -> int:
         f"line_length={args.line_length} "
         f"updates={args.updates} "
         f"steps_per_update={args.steps_per_update} "
-        f"episodes_per_update={args.episodes_per_update}",
+        f"episodes_per_update={args.episodes_per_update}"
+        + (
+            " training_seeds="
+            + ",".join(str(seed) for seed in args.training_seed_list)
+            if args.training_seed_list
+            else ""
+        ),
         flush=True,
     )
 
@@ -770,7 +820,13 @@ def main() -> int:
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.learning_rate)
 
     for update in range(args.updates):
-        rollout, rollout_stats = collect_rollout(args, policy, args.seed + update * 1000)
+        episode_seed_offset = update * max(1, args.episodes_per_update)
+        rollout, rollout_stats = collect_rollout(
+            args,
+            policy,
+            args.seed + update * 1000,
+            episode_seed_offset=episode_seed_offset,
+        )
         loss_stats = ppo_update(args, policy, optimizer, rollout, anchor_policy)
         teacher_loss_text = (
             f" teacher_loss={loss_stats['teacher_loss']:.6g}"
