@@ -219,7 +219,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.same_edge_value_guard_min_value = self._env_float(
             "ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB",
-            -0.5,
+            -0.25,
         )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()

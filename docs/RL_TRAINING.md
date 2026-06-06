@@ -1816,7 +1816,7 @@ Sequence value/risk ensemble on targeted prefix rows:
   `SequenceSuccessPolicy` now also rejects same-edge-heavy candidates when
   `candidate_prefix_same_edge_conflicts >=
   ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_CONFLICTS=8` and
-  `value_lcb < ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB=-0.5`
+  `value_lcb < ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB=-0.25`
   (`min_conflicts=-1` disables this guard). With both guards, `660-709`
   improves to reward `1/0/49`, success `0/0/50`; known gains plus
   `631,660,671` pass with reward `5/0/5`, success `2/0/8`.
@@ -1825,6 +1825,15 @@ Sequence value/risk ensemble on targeted prefix rows:
   `0/0/100`, success `0/0/100`, and zero changed rows. This is good
   regression evidence for the current guards, but it also means the online
   Sequence-Gate did not find new gains in this block.
+- Broader holdout `810-909` exposed the next same-edge regression under the
+  older `-0.5` same-edge value threshold: seed `905` regressed by `-0.044209`
+  reward and `-0.166667` success from one accepted `MOVE_FORWARD -> MOVE_LEFT`
+  event with `candidate_prefix_same_edge_conflicts=30` and
+  `value_lcb=-0.314352`. Tightening the default same-edge value guard to
+  `-0.25` neutralized seed `905`; known gains plus `631,660,671,905` still
+  pass with reward `5/0/4`, success `2/0/7`. With the tighter default,
+  `810-909` becomes exactly neutral against rerank: reward `0/0/100`, success
+  `0/0/100`.
 - Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
   for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
   process startup and baseline episode cost. This is acceptable for the next
@@ -2006,6 +2015,18 @@ evidence.
   thresholds: binary at `0.99` accepts `3/3/0`, multiclass at `0.995` accepts
   `3/1/0`. This is useful diagnostic signal, but still too little accepted
   good action volume for an online learned gate.
+- Independent failure-focus mining from the stabilized `810-909` holdout
+  selected seeds `896,901,877,867,864,885,855,836,815,829,879,812` and
+  produced 87 rows: reward wins/losses/ties `17/3/67`, success
+  wins/losses/ties `9/2/76`, outcome categories good/neutral/bad `15/67/5`.
+  The block contains useful rescue rows, pure reward wins, hard negatives, and
+  reward-positive/success-negative traps. Combined split validation across all
+  four current mined datasets now has 345 rows but still leaks bad rows at all
+  tested thresholds. Explicit train-on-old+`660-709`+`710-809`, validate-on
+  `810-909` also leaks: binary validation at `0.99` accepts `5/4/3`, multiclass
+  at `0.995` accepts `4/4/2`. Conclusion remains unchanged: learned-gate
+  datasets are useful for diagnosis and future model design, but not yet for
+  online deployment.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
