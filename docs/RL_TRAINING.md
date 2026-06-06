@@ -1929,6 +1929,19 @@ positive helper-agent decisions for agent `4`, while the failed-only focus
 correctly sampled only baseline-failed agents `0,1,5`. Keep both data sources
 until the learned model shows which generalizes better.
 
+The full focused top-20 run produced 195 rows with reward wins/losses/ties
+`39/14/142` and success wins/losses/ties `20/2/173`; 17 of 20 seeds had at
+least one reward- or success-positive counterfactual. Outcome categories at
+`reward_epsilon=1e-6` were good/neutral/bad `41/142/12`. Feature contrasts show
+good versus bad rows differ most in route-prefix conflict-agent counts, policy
+logit deltas, deadline slack, crossing intersections, and divergence/rejoin
+features. A seed-split MLP gate is still not deployable at ordinary thresholds:
+at `0.90`, binary all-feature validation accepted good/neutral/bad `24/21/9`.
+At a very conservative `0.995`, all-feature binary validation reached zero bad
+while accepting only `4/3/0`; multiclass all-feature reached `4/6/0`. Treat
+this as a promising conservative learned-gate prototype, not as final online
+evidence.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
