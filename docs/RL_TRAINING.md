@@ -2043,6 +2043,30 @@ evidence.
   only clean at near-zero utility. Binary at `0.995` accepts `0/1/0`;
   multiclass at `0.99` accepts only `2/0/0`. This argues for a different
   learned objective or architecture, not for deploying the current gate.
+- The value/risk ensemble was also tested on the same newest split: train on
+  the previous four mined datasets, validate on `910-1009`. The Success-rescue
+  variant still leaked bad rows (`3/5/3` good/neutral/bad at
+  `min_utility=0.1,max_bad_probability=0.02,min_success_probability=0.9`).
+  A stricter no-Success variant with higher bad weights and stronger
+  uncertainty was safe only when useful accepts collapsed to zero
+  (`0/0/0` at `min_utility>=0.2,max_bad_probability<=0.02`). Semantic-feature
+  and no-prefix ablations did not fix this. The recurring leak was seed `946`,
+  where a reward-negative forced move (`reward_delta=-0.115741`, unchanged
+  success) was assigned positive utility LCB and near-zero bad probability.
+  Conclusion: the current one-step supervised utility model is not reliable
+  enough for online gating.
+- A new conservative 64-feature PPO candidate
+  `/private/tmp/ecml_ppo_trajectory_failurefocus_910_u4.pt` was trained on
+  known positives plus the newest failure targets with stronger teacher/anchor
+  regularization (`teacher_ce=0.45`, `anchor_kl=6.0`, `lr=1e-5`). Rollout
+  success stayed stable enough (`0.958, 0.875, 0.792, 0.833`), but raw
+  candidate validation on the fast suite failed because seed `335` regressed:
+  reward `6/4/8`, success `4/1/13`. Adding this checkpoint as an extra
+  Sequence-Gate candidate was safe but did not add coverage: default Sequence
+  and default-plus-new both scored reward `4/0/14`, success `2/0/16` on the
+  same 18-seed fast suite, accepting only the existing `207,280,529,589`
+  motifs. Do not promote this checkpoint; use it only as another hard-negative
+  diagnostic if needed.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
