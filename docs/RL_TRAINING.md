@@ -1807,6 +1807,34 @@ Sequence value/risk ensemble on targeted prefix rows:
   `XDG_CACHE_HOME`, and `PYTHONPYCACHEPREFIX` to writable `/tmp` locations
   reduced first-import smoke time from about `29.5s` with Matplotlib/font-cache
   warnings to about `2.4s`; the Dockerfile now sets these env vars.
+- `tools/policy_scoreboard.py` is the current steering tool for comparing
+  policies. Unlike the older sampled benchmark helper, it supports a distinct
+  observation builder per candidate and reports deltas, wins/losses/ties, and
+  CSV/JSON output against a named baseline candidate. Use it before promoting
+  any future PPO/gate change.
+- Starterkit-vs-current scoreboard on seeds `100-129`, 6 agents, line length 2:
+  starterkit PPO with `MyObservationBuilder` scored `0.907488 / 0.933333`;
+  both guarded rerank and current reward-oriented Sequence-Gate with
+  `MyTrajectoryConflictObservationBuilder` scored `0.936044 / 0.950000`.
+  Versus starterkit, reward wins/losses/ties were `13/2/15` and success
+  wins/losses/ties were `4/1/25`.
+- Sequence-vs-rerank scoreboard smoke on known gain seeds `207,280,589`:
+  rerank `0.788907 / 0.888889`, sequence `0.952637 / 1.000000`, reward
+  wins/losses/ties `3/0/0`, success `2/0/1`.
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl XDG_CACHE_HOME=/private/tmp/ecml_cache \
+  .venv/bin/python tools/policy_scoreboard.py \
+  --candidate starterkit=submission.my_policy.MyPolicy,obs=submission.my_observation_builder.MyObservationBuilder \
+  --candidate rerank=submission.rerank_policy.MyPolicy,obs=submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --candidate sequence=submission.sequence_success_policy.MyPolicy,obs=submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --baseline starterkit \
+  --blocks 100-129 \
+  --quiet \
+  --output-json /private/tmp/ecml_scoreboard_100_129.json \
+  --output-csv /private/tmp/ecml_scoreboard_100_129.csv \
+  --summary-csv /private/tmp/ecml_scoreboard_100_129_summary.csv
+```
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
