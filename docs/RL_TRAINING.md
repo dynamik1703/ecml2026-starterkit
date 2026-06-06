@@ -1820,6 +1820,11 @@ Sequence value/risk ensemble on targeted prefix rows:
   (`min_conflicts=-1` disables this guard). With both guards, `660-709`
   improves to reward `1/0/49`, success `0/0/50`; known gains plus
   `631,660,671` pass with reward `5/0/5`, success `2/0/8`.
+- Broader independent holdout scan `710-809` with both guards was exactly
+  neutral against rerank: `0.911634 / 0.921667` for both policies, reward
+  `0/0/100`, success `0/0/100`, and zero changed rows. This is good
+  regression evidence for the current guards, but it also means the online
+  Sequence-Gate did not find new gains in this block.
 - Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
   for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
   process startup and baseline episode cost. This is acceptable for the next
@@ -1990,6 +1995,17 @@ evidence.
   current MLP gate is still overfitting local mined cases. Keep using these
   datasets for feature learning and diagnostics, but do not deploy the learned
   counterfactual gate online yet.
+- Independent failure-focus mining from the neutral `710-809` holdout selected
+  seeds `723,742,763,754,744,715,716,803,722,725,758,761` and produced 108
+  rows: reward wins/losses/ties `23/7/78`, success wins/losses/ties `13/0/95`,
+  outcome categories good/neutral/bad `26/78/4`. The labels include useful
+  late rescue actions, reward-positive stop-to-move variants, and reward-vs-
+  success tradeoffs. Combined split validation over the earlier hard-case set,
+  `660-709`, and `710-809` still leaks bad rows at tested thresholds. Explicit
+  train-on-old+`660-709`, validate-on-`710-809` is safer only at extreme
+  thresholds: binary at `0.99` accepts `3/3/0`, multiclass at `0.995` accepts
+  `3/1/0`. This is useful diagnostic signal, but still too little accepted
+  good action volume for an online learned gate.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
