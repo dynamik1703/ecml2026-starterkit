@@ -784,14 +784,12 @@ def load_focus_failures(
         seed = int(row["seed"])
         env_time = int(row.get("env_time", 0))
         failed_agents = row.get("failed_agents", [])
-        handles = {
-            int(agent["agent_id"])
-            for agent in failed_agents
-            if "agent_id" in agent
-        }
+        handles = failed_agent_handles(row)
         if handles:
             focus[seed] = handles
         if window_before_deadline is None and window_before_stationary is None:
+            continue
+        if not isinstance(failed_agents, list):
             continue
         for agent in failed_agents:
             if "agent_id" not in agent:
@@ -814,6 +812,23 @@ def load_focus_failures(
                 max(0, last_progress_step + window_after_stationary),
             )
     return focus, windows
+
+
+def failed_agent_handles(row: dict[str, Any]) -> set[int]:
+    failed_agents = row.get("failed_agents", [])
+    if isinstance(failed_agents, list):
+        return {
+            int(agent["agent_id"])
+            for agent in failed_agents
+            if isinstance(agent, dict) and "agent_id" in agent
+        }
+    failed_ids = str(row.get("failed_agent_ids", ""))
+    handles = set()
+    for item in failed_ids.split(","):
+        item = item.strip()
+        if item:
+            handles.add(int(item))
+    return handles
 
 
 def merge_focus(

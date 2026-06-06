@@ -1901,6 +1901,34 @@ is a useful signal density for the next RL/gate dataset, especially because the
 same small batch contains positive rescues, harmful side effects, and neutral
 examples.
 
+Then run the focused top-20 pass using the selector JSON. The counterfactual
+tool accepts both detailed `mine_failure_seeds.py` records and compact
+`select_target_seeds.py` rows with `failed_agent_ids`, so this samples only
+agents that actually failed in the current Sequence-Gate rollout:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl XDG_CACHE_HOME=/private/tmp/ecml_cache \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --policy submission.sequence_success_policy.MyPolicy \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --focus-failures-json /private/tmp/ecml_targets_current_failures_100_609_top20.json \
+  --num-agents 6 \
+  --line-length 2 \
+  --forced-actions LEFT,FORWARD,RIGHT \
+  --max-decisions-per-seed 6 \
+  --max-alternatives-per-decision 2 \
+  --output-csv /private/tmp/ecml_counterfactual_current_failures_top20_focus.csv \
+  --output-json /private/tmp/ecml_counterfactual_current_failures_top20_focus.json
+```
+
+Focused top-5 smoke on the same seeds produced 54 rows with reward
+wins/losses/ties `11/4/39` and success wins/losses/ties `9/0/45`. The
+success-rescue signal is cleaner than the unfocused smoke, but failed-agent
+focus is not a full replacement: on seed `153`, the unfocused run found
+positive helper-agent decisions for agent `4`, while the failed-only focus
+correctly sampled only baseline-failed agents `0,1,5`. Keep both data sources
+until the learned model shows which generalizes better.
+
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
   .venv/bin/python tools/validate_policy_gate.py \
