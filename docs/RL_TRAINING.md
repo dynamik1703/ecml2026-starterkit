@@ -1794,6 +1794,18 @@ Sequence value/risk ensemble on targeted prefix rows:
   `119,207,280,529,589,264,578`: reward wins/losses/ties `4/0/3`, success
   `2/0/5`, gate pass. Seed `119` stayed neutral, while `207`, `280`, `529`,
   and `589` remained active.
+- Independent holdout scan `610-659` found one Sequence-Gate regression before
+  the head-on-prefix guard: rerank `0.932773 / 0.940000`, sequence
+  `0.932017 / 0.936667`, reward `0/1/49`, success `0/1/49`; seed `631`
+  regressed by `-0.037798` reward and `-0.166667` success. Trace showed one
+  accepted `MOVE_FORWARD -> MOVE_RIGHT` event with
+  `candidate_prefix_head_on_edge_conflicts=13`, while known positive accepted
+  events had `0,0,0,4`. `submission.sequence_success_policy.MyPolicy` now
+  rejects candidates above `ECML_SEQUENCE_MAX_HEAD_ON_EDGE_CONFLICTS=8` by
+  default (`-1` disables the guard). With the guard, `610-659` became exactly
+  neutral against rerank: reward `0/0/50`, success `0/0/50`. Known gains plus
+  seed `631` (`119,207,280,529,589,264,578,631`) still pass with reward
+  `4/0/4` and success `2/0/6`.
 - Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
   for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
   process startup and baseline episode cost. This is acceptable for the next

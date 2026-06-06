@@ -209,6 +209,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_REJECT_TRANSITIONS",
             default="MOVE_RIGHT->MOVE_FORWARD",
         )
+        self.max_head_on_edge_conflicts = self._env_int(
+            "ECML_SEQUENCE_MAX_HEAD_ON_EDGE_CONFLICTS",
+            8,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -459,6 +463,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             aggregate = aggregate_event_features(
                 [*self._accepted_event_details, detail]
             )
+            if self._too_many_head_on_edge_conflicts(detail):
+                if self.trace_all:
+                    self._trace_sequence_decision(
+                        env=env,
+                        handle=handle,
+                        baseline_action=baseline_action,
+                        candidate_action=candidate_action,
+                        candidate_policy=candidate_policy,
+                        accepted=False,
+                        scores={},
+                        detail=detail,
+                        aggregate=aggregate,
+                    )
+                return False
             accepted, scores = self.sequence_scorer.score(aggregate)
         except Exception:
             return False
@@ -478,6 +496,15 @@ class SequenceSuccessPolicy(RerankPolicy):
         if accepted:
             self._accepted_event_details.append(detail)
         return bool(accepted)
+
+    def _too_many_head_on_edge_conflicts(self, detail: dict[str, Any]) -> bool:
+        if self.max_head_on_edge_conflicts < 0:
+            return False
+        try:
+            conflicts = float(detail.get("candidate_prefix_head_on_edge_conflicts", 0.0))
+        except Exception:
+            return False
+        return conflicts > self.max_head_on_edge_conflicts
 
     def _trace_sequence_decision(
         self,
