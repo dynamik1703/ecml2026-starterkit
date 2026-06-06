@@ -1941,6 +1941,17 @@ At a very conservative `0.995`, all-feature binary validation reached zero bad
 while accepting only `4/3/0`; multiclass all-feature reached `4/6/0`. Treat
 this as a promising conservative learned-gate prototype, not as final online
 evidence.
+- Hard-case remine around the top-20 good/bad counterfactual windows with
+  `--focus-counterfactual-window-before 8 --focus-counterfactual-window-after 8`
+  produced 64 dense rows. Reward wins/losses/ties were `39/14/11`, success
+  wins/losses/ties were `20/2/42`, and tool outcome categories were
+  good/neutral/bad `41/11/12` because success-positive rows are treated as good
+  even when reward decreases. Seed-split gate validation improved as a
+  prototype but is still small: binary `without_prefix` at threshold `0.99`
+  accepted `4/0/0`, and multiclass `without_prefix` at `0.995` accepted
+  `4/0/0`. This is the best current learned-gate signal, but it is mined from
+  the same top-20 failure pool and needs an independent target-seed holdout
+  before online integration.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
