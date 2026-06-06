@@ -987,7 +987,11 @@ def main() -> int:
     if args.seeds:
         seeds = [int(item) for item in args.seeds.split(",") if item.strip()]
     elif (
-        (args.focus_counterfactual_csv or args.focus_action_diff_csv)
+        (
+            args.focus_failures_json
+            or args.focus_counterfactual_csv
+            or args.focus_action_diff_csv
+        )
         and args.focus_handles_by_seed
     ):
         seeds = sorted(args.focus_handles_by_seed)
