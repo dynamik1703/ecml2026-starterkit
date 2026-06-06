@@ -1821,6 +1821,18 @@ Sequence value/risk ensemble on targeted prefix rows:
 - Sequence-vs-rerank scoreboard smoke on known gain seeds `207,280,589`:
   rerank `0.788907 / 0.888889`, sequence `0.952637 / 1.000000`, reward
   wins/losses/ties `3/0/0`, success `2/0/1`.
+- `tools/select_target_seeds.py` turns scoreboard or `validate_policy_gate.py`
+  JSON rows into prioritized seed lists for the next mining/training loop.
+  Use `failures` first to find incomplete episodes and `full-success-low-reward`
+  second to find completed but inefficient episodes. For scoreboard JSONs with
+  multiple policies, pass `--candidate sequence` or the policy name being
+  mined. On the current
+  reward-oriented Sequence-Gate scan over seeds `100-609`, the top failure
+  targets were `452,153,239,556,403,184,345,466,504,343,137,294,321,215,328,
+  198,394,475,468,291`; the top full-success low-reward targets were
+  `281,322,109,136,573,605,164,241,310,146,274,335,478,361,441,297,244,158,
+  497,127`. Mine the failure list first because it has the clearest upside for
+  normalized reward and completion.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl XDG_CACHE_HOME=/private/tmp/ecml_cache \
@@ -1835,6 +1847,59 @@ env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/pri
   --output-csv /private/tmp/ecml_scoreboard_100_129.csv \
   --summary-csv /private/tmp/ecml_scoreboard_100_129_summary.csv
 ```
+
+```bash
+env PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
+  .venv/bin/python tools/select_target_seeds.py \
+  /private/tmp/ecml_sequence_success_reject_r2f_100_129.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_130_249.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_250_369.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_370_489.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_490_609.json \
+  --mode failures \
+  --success-threshold 0.834 \
+  --top-k 20 \
+  --output-csv /private/tmp/ecml_targets_current_failures_100_609_top20.csv \
+  --output-json /private/tmp/ecml_targets_current_failures_100_609_top20.json
+```
+
+```bash
+env PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache \
+  .venv/bin/python tools/select_target_seeds.py \
+  /private/tmp/ecml_sequence_success_reject_r2f_100_129.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_130_249.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_250_369.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_370_489.json \
+  /private/tmp/ecml_sequence_success_reject_r2f_490_609.json \
+  --mode full-success-low-reward \
+  --max-reward 0.85 \
+  --top-k 20 \
+  --output-csv /private/tmp/ecml_targets_current_full_success_low_reward_100_609_top20.csv \
+  --output-json /private/tmp/ecml_targets_current_full_success_low_reward_100_609_top20.json
+```
+
+Start the next counterfactual mining pass on the hardest current failure seeds:
+
+```bash
+env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl XDG_CACHE_HOME=/private/tmp/ecml_cache \
+  .venv/bin/python tools/counterfactual_decision_eval.py \
+  --policy submission.sequence_success_policy.MyPolicy \
+  --obs-builder submission.my_observation_builder.MyTrajectoryConflictObservationBuilder \
+  --seeds 452,153,239,556,403 \
+  --num-agents 6 \
+  --line-length 2 \
+  --forced-actions LEFT,FORWARD,RIGHT \
+  --max-decisions-per-seed 6 \
+  --max-alternatives-per-decision 2 \
+  --output-csv /private/tmp/ecml_counterfactual_current_failures_top5.csv \
+  --output-json /private/tmp/ecml_counterfactual_current_failures_top5.json
+```
+
+The initial top-5 smoke on seeds `452,153,239,556,403` produced 60 rows with
+reward wins/losses/ties `10/4/46` and success wins/losses/ties `8/1/51`. This
+is a useful signal density for the next RL/gate dataset, especially because the
+same small batch contains positive rescues, harmful side effects, and neutral
+examples.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
