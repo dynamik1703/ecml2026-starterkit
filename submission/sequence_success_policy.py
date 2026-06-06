@@ -213,6 +213,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_MAX_HEAD_ON_EDGE_CONFLICTS",
             8,
         )
+        self.same_edge_value_guard_min_conflicts = self._env_int(
+            "ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_CONFLICTS",
+            8,
+        )
+        self.same_edge_value_guard_min_value = self._env_float(
+            "ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB",
+            -0.5,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -478,6 +486,8 @@ class SequenceSuccessPolicy(RerankPolicy):
                     )
                 return False
             accepted, scores = self.sequence_scorer.score(aggregate)
+            if accepted and self._low_value_same_edge_candidate(detail, scores):
+                accepted = False
         except Exception:
             return False
 
@@ -505,6 +515,25 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return conflicts > self.max_head_on_edge_conflicts
+
+    def _low_value_same_edge_candidate(
+        self,
+        detail: dict[str, Any],
+        scores: dict[str, float],
+    ) -> bool:
+        if self.same_edge_value_guard_min_conflicts < 0:
+            return False
+        try:
+            conflicts = float(
+                detail.get("candidate_prefix_same_edge_conflicts", 0.0)
+            )
+            value_lcb = float(scores.get("value_lcb", 0.0))
+        except Exception:
+            return False
+        return (
+            conflicts >= self.same_edge_value_guard_min_conflicts
+            and value_lcb < self.same_edge_value_guard_min_value
+        )
 
     def _trace_sequence_decision(
         self,

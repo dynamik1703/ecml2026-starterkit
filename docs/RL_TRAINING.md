@@ -1806,6 +1806,20 @@ Sequence value/risk ensemble on targeted prefix rows:
   neutral against rerank: reward `0/0/50`, success `0/0/50`. Known gains plus
   seed `631` (`119,207,280,529,589,264,578,631`) still pass with reward
   `4/0/4` and success `2/0/6`.
+- Independent holdout scan `660-709` after the head-on guard passed but exposed
+  a reward-only regression: rerank `0.928673 / 0.936667`, sequence
+  `0.932205 / 0.936667`, reward `1/1/48`, success `0/0/50`. Seed `660`
+  regressed by `-0.066348` reward, while seed `671` gained `+0.242954`.
+  Trace showed seed `660` accepted a `MOVE_FORWARD -> MOVE_RIGHT` event with
+  `candidate_prefix_same_edge_conflicts=18` and `value_lcb=-0.849489`; seed
+  `671` remained a different high-confidence `MOVE_FORWARD -> MOVE_LEFT` gain.
+  `SequenceSuccessPolicy` now also rejects same-edge-heavy candidates when
+  `candidate_prefix_same_edge_conflicts >=
+  ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_CONFLICTS=8` and
+  `value_lcb < ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB=-0.5`
+  (`min_conflicts=-1` disables this guard). With both guards, `660-709`
+  improves to reward `1/0/49`, success `0/0/50`; known gains plus
+  `631,660,671` pass with reward `5/0/5`, success `2/0/8`.
 - Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
   for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
   process startup and baseline episode cost. This is acceptable for the next
@@ -1964,6 +1978,18 @@ evidence.
   `4/0/0`. This is the best current learned-gate signal, but it is mined from
   the same top-20 failure pool and needs an independent target-seed holdout
   before online integration.
+- Independent failure-focus mining from the guarded `660-709` holdout selected
+  seeds `667,663,706,700,696,701,688,661,662,682` and produced 86 rows:
+  reward wins/losses/ties `12/10/64`, success wins/losses/ties `10/1/75`,
+  outcome categories good/neutral/bad `17/64/5`. Combining this with the
+  earlier 64-row hard-case set breaks the apparent learned-gate safety: mixed
+  seed-split validation over 150 rows still leaks bad rows at all tested
+  thresholds. Explicit train-on-old, validate-on-`660-709` is worse: binary MLP
+  training is near-perfect on the old set (`40/0/0` accepted at threshold
+  `0.90`) but validates at only `7/42/2` good/neutral/bad. Conclusion: the
+  current MLP gate is still overfitting local mined cases. Keep using these
+  datasets for feature learning and diagnostics, but do not deploy the learned
+  counterfactual gate online yet.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
