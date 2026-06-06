@@ -26,9 +26,14 @@ except Exception:  # pragma: no cover - submission fallback for stripped package
     aggregate_event_features = None
 
 
-DEFAULT_SEQUENCE_MODEL_PATH = "/private/tmp/ecml_success_only_sequence_fasttrain.pt"
-DEFAULT_CANDIDATE_CHECKPOINT_PATH = (
-    "/private/tmp/ecml_ppo_trajectory_successdiv_seed610_u4.pt"
+SUBMISSION_DIR = Path(__file__).resolve().parent
+DEFAULT_SEQUENCE_MODEL_PATH = str(
+    SUBMISSION_DIR / "models" / "ecml_success_only_sequence_fasttrain.pt"
+)
+DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
+    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_successdiv_seed610_u4.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_terminal_stronger_u3.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_targeted_seed901_u4.pt"),
 )
 
 
@@ -166,7 +171,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         candidate_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
-            or DEFAULT_CANDIDATE_CHECKPOINT_PATH
+            or ",".join(DEFAULT_CANDIDATE_CHECKPOINT_PATHS)
         )
         candidate_checkpoint_paths = self._candidate_checkpoint_paths(
             candidate_checkpoint_path
@@ -211,8 +216,8 @@ class SequenceSuccessPolicy(RerankPolicy):
     @staticmethod
     def _candidate_checkpoint_paths(default_path: str) -> list[str]:
         value = os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINTS")
-        if not value:
-            return [default_path]
+        if value is None:
+            value = default_path
         return [
             item.strip()
             for item in value.split(",")

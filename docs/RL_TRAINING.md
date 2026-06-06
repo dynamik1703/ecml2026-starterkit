@@ -1782,6 +1782,31 @@ Sequence value/risk ensemble on targeted prefix rows:
   values completion more heavily than normalized reward, the unblocked mode
   remains available and keeps one extra success-positive seed (`119`) at a
   small reward cost.
+- Deployment packaging step: the exported Success-only sequence model and the
+  three PPO candidate checkpoints are now stored under `submission/models/`.
+  `submission.sequence_success_policy.MyPolicy` defaults to these repository
+  paths and the three-candidate reward-oriented configuration; no `/private/tmp`
+  model paths or env vars are required for the default behavior. The Dockerfile
+  now uses `submission.sequence_success_policy.MyPolicy`,
+  `MyTrajectoryConflictObservationBuilder`, and copies `tools/` into the image
+  because the online gate reuses the local prefix-feature extraction code.
+- Repo-default smoke without explicit model/candidate env vars on known seeds
+  `119,207,280,529,589,264,578`: reward wins/losses/ties `4/0/3`, success
+  `2/0/5`, gate pass. Seed `119` stayed neutral, while `207`, `280`, `529`,
+  and `589` remained active.
+- Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
+  for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
+  process startup and baseline episode cost. This is acceptable for the next
+  Docker smoke/build check but still needs full container/runtime validation
+  before treating the Sequence-Gate policy as final submission default.
+- Docker is not available in the current local shell, so the build could not
+  be executed here. A Docker-import simulator that copied only `submission/`
+  and `tools/` to `/private/tmp` successfully instantiated
+  `SequenceSuccessPolicy` with three candidate policies and the default
+  rejected transition `(MOVE_RIGHT, MOVE_FORWARD)`. Setting `MPLCONFIGDIR`,
+  `XDG_CACHE_HOME`, and `PYTHONPYCACHEPREFIX` to writable `/tmp` locations
+  reduced first-import smoke time from about `29.5s` with Matplotlib/font-cache
+  warnings to about `2.4s`; the Dockerfile now sets these env vars.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

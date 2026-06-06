@@ -23,8 +23,13 @@ See [STEP-BY-STEP_GUIDE](STEP-BY-STEP_GUIDE.md) contributed by <a href="https://
 * Add `pip` dependencies to `submission/requirements.txt`.
 * All resources under `submission/` are added to the Docker image (add checkpoints here and load from your policy).
 
-This fork currently sets the Docker submission entrypoint to
-`submission.rerank_policy.MyPolicy` in `Dockerfile`.
+This fork currently sets the Docker submission entrypoint to the experimental
+Sequence Success Gate policy, `submission.sequence_success_policy.MyPolicy`,
+with `submission.my_observation_builder.MyTrajectoryConflictObservationBuilder`.
+The learned sequence model and PPO candidate checkpoints are stored under
+`submission/models/`; `tools/` is copied into the Docker image because the
+online sequence gate reuses the same prefix-feature code as the local mining
+and audit scripts.
 
 ### Train your model using reinforcement learning
 
