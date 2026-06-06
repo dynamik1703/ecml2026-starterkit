@@ -2067,6 +2067,21 @@ evidence.
   same 18-seed fast suite, accepting only the existing `207,280,529,589`
   motifs. Do not promote this checkpoint; use it only as another hard-negative
   diagnostic if needed.
+- Next independent holdout `1010-1109` with the current default Sequence-Gate
+  passed and was slightly positive: baseline `0.916344 / 0.941667`, candidate
+  `0.916942 / 0.941667`, reward `1/0/99`, success `0/0/100`. The single online
+  reward win was seed `1051` (`+0.059829`, unchanged success); there were no
+  reward or success regressions. Failure targeting selected
+  `1049,1095,1064,1079,1040,1071,1031,1012,1011,1018,1105,1017`.
+- Focused counterfactual mining on those `1010-1109` failure seeds produced a
+  clean positive dataset: 67 rows with reward wins/losses/ties `10/0/57`,
+  success wins/losses/ties `6/0/61`, and no forced-action failures. Useful new
+  rescue seeds include `1095` (`+0.245` reward, `+0.166667` success), `1079`
+  (`+0.104918`, `+0.166667`), `1040` (`+0.078987`, `+0.166667`), and `1017`
+  (`+0.151515`, `+0.166667`); seed `1064` contributed reward-positive
+  unchanged-success rows. This is a better next training signal than the last
+  PPO checkpoint: it shows new rescue actions exist, but the current candidate
+  generators do not propose or pass them online yet.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
