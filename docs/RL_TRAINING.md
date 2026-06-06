@@ -1834,6 +1834,12 @@ Sequence value/risk ensemble on targeted prefix rows:
   pass with reward `5/0/4`, success `2/0/7`. With the tighter default,
   `810-909` becomes exactly neutral against rerank: reward `0/0/100`, success
   `0/0/100`.
+- Broader holdout `910-1009` with the tighter default was also exactly neutral
+  against rerank: both policies scored `0.944226 / 0.945000`, reward
+  `0/0/100`, success `0/0/100`, and zero changed rows. Together with `710-809`
+  and the stabilized `810-909`, this supports the current view that the
+  Sequence-Gate default is now conservative and regression-resistant, but also
+  too sparse to create broad gains by itself.
 - Runtime note: a one-seed local policy-gate comparison took roughly `9.4s`
   for Sequence-Gate candidate versus `7.4s` for rerank candidate, including
   process startup and baseline episode cost. This is acceptable for the next
@@ -2027,6 +2033,16 @@ evidence.
   at `0.995` accepts `4/4/2`. Conclusion remains unchanged: learned-gate
   datasets are useful for diagnosis and future model design, but not yet for
   online deployment.
+- Independent failure-focus mining from the neutral `910-1009` holdout selected
+  seeds `924,995,1006,970,915,923,938,979,976,946,1005,972` and produced 100
+  rows: reward wins/losses/ties `9/6/85`, success wins/losses/ties `7/0/93`,
+  outcome categories good/neutral/bad `11/85/4`. Adding this fifth mined
+  dataset brings the combined diagnostic pool to 445 rows, but the simple MLP
+  gate degrades further: mixed split validation still leaks bad rows at all
+  tested thresholds, and explicit train-on-previous, validate-on-`910-1009` is
+  only clean at near-zero utility. Binary at `0.995` accepts `0/1/0`;
+  multiclass at `0.99` accepts only `2/0/0`. This argues for a different
+  learned objective or architecture, not for deploying the current gate.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
