@@ -201,7 +201,8 @@ class SequenceSuccessPolicy(RerankPolicy):
             self._env_int("ECML_SEQUENCE_FIRST_DIFF_ONLY", 1)
         )
         self.rejected_transitions = self._env_transition_set(
-            "ECML_SEQUENCE_REJECT_TRANSITIONS"
+            "ECML_SEQUENCE_REJECT_TRANSITIONS",
+            default="MOVE_RIGHT->MOVE_FORWARD",
         )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
@@ -233,8 +234,12 @@ class SequenceSuccessPolicy(RerankPolicy):
             return default
 
     @classmethod
-    def _env_transition_set(cls, name: str) -> set[tuple[int, int]]:
-        value = os.environ.get(name, "")
+    def _env_transition_set(
+        cls,
+        name: str,
+        default: str = "",
+    ) -> set[tuple[int, int]]:
+        value = os.environ.get(name, default)
         transitions: set[tuple[int, int]] = set()
         for item in value.split(","):
             token = item.strip()
