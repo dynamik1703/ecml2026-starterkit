@@ -2446,3 +2446,25 @@ prefix conflicts had at least `95`. The online guard therefore rejects a
 candidate side detour only when the residual head-on pair deadline slack is
 below `90`, while retaining the broader deadline-conflict penalty as a score
 penalty for ETA-near conflicts.
+
+Rescue PPO continuation after the 1910-2209 holdout check:
+- `tools/train_masked_ppo.py` was run from
+  `submission/models/ecml_rescue_bc_1010_v1.pt` with trajectory conflict
+  observations, the curated positive rescue seeds plus hard negatives, 6 PPO
+  updates, 4 full episodes per update, low learning rate `1e-5`, teacher CE
+  `0.45`, and anchor KL `6.0`.
+- The run was numerically stable and stayed close to the rescue BC anchor:
+  update success ranged from `0.875` to `1.0`, and anchor KL stayed around
+  `1e-5..7e-5`. The temporary checkpoint is
+  `/private/tmp/ecml_ppo_rescue_candidate_seed2401_u6.pt`.
+- Adding this checkpoint as a fifth Sequence-Gate candidate did not create new
+  accepted wins on the targeted validation set
+  `207,589,1079,1185,1438,1509,1740,1929,2046,1442,1463,1671,1814,660,946,1160,335,529`.
+  The result was identical to the current default Sequence-Gate: reward
+  wins/losses/ties `9/0/9`, success wins/losses/ties `3/0/15`, mean reward
+  delta `+0.060039`, and mean success delta `+0.027778` versus guarded rerank.
+- Conclusion: the PPO continuation is stable but too conservative to promote.
+  The next RL step should change the training signal or data distribution, for
+  example by mining raw policy differences for new rescue prefixes or by
+  training directly on counterfactual rescue actions instead of only staying
+  close to the existing rescue BC policy.
