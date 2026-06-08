@@ -2082,6 +2082,29 @@ evidence.
   unchanged-success rows. This is a better next training signal than the last
   PPO checkpoint: it shows new rescue actions exist, but the current candidate
   generators do not propose or pass them online yet.
+- `tools/train_rescue_behavior_clone.py` now trains a checkpoint-compatible
+  64-feature `ActorCritic` candidate directly from positive counterfactual
+  rescue rows. It replays the baseline policy on each labelled seed, collects
+  the exact real observation at each labelled `(seed, env_time, agent)` event,
+  trains the `forced_action` with high weight, and mixes in low-weight baseline
+  anchor samples so the candidate stays close to the default policy.
+- First Rescue-BC candidate `/private/tmp/ecml_rescue_bc_1010_v1.pt` used all
+  current mined counterfactual CSVs as positive labels. Collection reproduced
+  all labels exactly: `120/120` rescue hits, zero misses, zero invalid actions,
+  zero baseline mismatches, plus `45477` anchor samples. Raw validation on the
+  extended fast suite found new useful behaviour but was not safe:
+  reward `13/3/7`, success `7/1/15`, with a success regression on seed `529`.
+  Through the current Sequence-Gate it became safe but added no accepted
+  coverage: default Sequence and default-plus-Rescue-BC both scored reward
+  `4/0/19`, success `2/0/21`, accepting only `207,280,529,589`.
+- Trace on the new Rescue-BC-only positive seeds `1017,1079,1095` showed the
+  blocker is the learned Sequence scorer rather than the action generator:
+  the Rescue-BC checkpoint proposes plausible `MOVE_FORWARD -> MOVE_RIGHT`
+  diffs, but the current sequence model assigns very high bad-risk UCB
+  (`~1.3-1.6`) despite zero prefix conflicts and low or positive success LCB.
+  Next step: retrain or redesign the Sequence Success/Risk scorer with these
+  new positive motifs and matching hard negatives; do not relax the bad-risk
+  threshold by hand.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
