@@ -222,6 +222,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_SAME_EDGE_VALUE_GUARD_MIN_VALUE_LCB",
             -0.25,
         )
+        self.right_detour_min_value = self._env_float(
+            "ECML_SEQUENCE_RIGHT_DETOUR_MIN_VALUE_LCB",
+            -0.4,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -489,6 +493,12 @@ class SequenceSuccessPolicy(RerankPolicy):
             accepted, scores = self.sequence_scorer.score(aggregate)
             if accepted and self._low_value_same_edge_candidate(detail, scores):
                 accepted = False
+            if accepted and self._low_value_right_detour(
+                baseline_action,
+                candidate_action,
+                scores,
+            ):
+                accepted = False
         except Exception:
             return False
 
@@ -535,6 +545,25 @@ class SequenceSuccessPolicy(RerankPolicy):
             conflicts >= self.same_edge_value_guard_min_conflicts
             and value_lcb < self.same_edge_value_guard_min_value
         )
+
+    def _low_value_right_detour(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        scores: dict[str, float],
+    ) -> bool:
+        if not np.isfinite(self.right_detour_min_value):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action != ReservationPolicy.MOVE_RIGHT
+        ):
+            return False
+        try:
+            value_lcb = float(scores.get("value_lcb", 0.0))
+        except Exception:
+            return False
+        return value_lcb < self.right_detour_min_value
 
     def _trace_sequence_decision(
         self,

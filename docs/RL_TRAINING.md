@@ -2139,6 +2139,23 @@ evidence.
     promote p06 because `1160-1209` exposed the small seed `1160` reward leak.
   This is a net RL/gate improvement with lower action coverage than p06; do
   not lower the Success threshold without adding the new hard negatives.
+- Broader post-promotion holdout showed the remaining weak point of Rescue-BC
+  right detours. Blocks `1210-1309` and `1310-1409` were fully neutral
+  (`0/0/100` reward and success in each block). Block `1410-1509` before the
+  extra value guard had reward `2/2/96`, success `0/1/99`; wins were `1438`
+  (`+0.144698`) and `1509` (`+0.105219`), but seed `1442` lost Success
+  (`-0.029656` reward, `-0.166667` Success) and seed `1463` lost reward
+  (`-0.075620`). Both bad accepts were `MOVE_FORWARD -> MOVE_RIGHT` from the
+  Rescue-BC checkpoint with very low bad UCB and high Success LCB; a pure
+  Success-threshold increase would not catch seed `1463`.
+- `SequenceSuccessPolicy` now adds `ECML_SEQUENCE_RIGHT_DETOUR_MIN_VALUE_LCB`
+  with default `-0.4`, applied only to `MOVE_FORWARD -> MOVE_RIGHT` accepts.
+  This blocks low-value right-detour accepts without touching `MOVE_LEFT` or
+  `MOVE_LEFT -> MOVE_FORWARD` rescues. Targeted validation on
+  `207,589,1079,1185,1438,1442,1463,1509` kept all six known wins and
+  neutralized `1442/1463` (`6/0/2` reward, `3/0/5` Success). Re-running
+  `1410-1509` after the guard produced reward `2/0/98`, success `0/0/100`,
+  with only `1438` and `1509` changed.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
