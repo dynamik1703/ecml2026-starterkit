@@ -2179,6 +2179,13 @@ evidence.
   neutralized `1814` (`7/0/1` reward, `3/0/5` Success). Re-running
   `1810-1909` after the guard was fully neutral (`0/0/100` reward and
   Success).
+- Follow-up holdouts `1910-2209` were clean with the current committed default.
+  `1910-2009` had reward `1/0/99`, success `0/0/100`, changing only seed
+  `1929` (`+0.073486`, unchanged Success). `2010-2109` had reward `1/0/99`,
+  success `0/0/100`, changing only seed `2046` (`+0.106838`, unchanged
+  Success). `2110-2209` was fully neutral (`0/0/100` reward and Success).
+  The policy remains sparse but has now passed the independent post-guard
+  range `1910-2209` without regressions.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
