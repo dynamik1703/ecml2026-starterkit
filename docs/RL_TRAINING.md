@@ -2468,3 +2468,41 @@ Rescue PPO continuation after the 1910-2209 holdout check:
   example by mining raw policy differences for new rescue prefixes or by
   training directly on counterfactual rescue actions instead of only staying
   close to the existing rescue BC policy.
+
+Follow-up diff-prefix mining for the same Rescue-PPO checkpoint:
+- `tools/mine_diff_prefix_dataset.py` mined the checkpoint as a raw candidate
+  on targeted positive and hard-negative seeds
+  `207,589,1079,1185,1438,1509,1740,1929,2046,1442,1463,1671,1814,660,946,1160,335,529`
+  with prefix lengths `1,2,3`. This produced 54 sequence rows: `20 good`,
+  `24 neutral`, and `10 bad`.
+- Prefix outcomes were useful but mixed. Prefix `1` had reward
+  wins/losses/ties `5/1/12` and success `1/0/17`; prefix `2` had reward
+  `7/4/7` and success `3/0/15`; prefix `3` had reward `8/5/5` and success
+  `4/0/14`. The new candidate therefore adds dense training signal, but it is
+  still unsafe as a raw policy.
+- Almost all deviations were `MOVE_FORWARD -> MOVE_RIGHT`; good rows also
+  included a few `MOVE_LEFT -> MOVE_FORWARD` corrections. Important hard
+  negatives include seed `1814` (`-0.075758` reward), seed `946`
+  (`-0.115741` reward), seed `660` (`-0.066348` reward), and the
+  prefix-length trap on seed `1463` where prefix `2` is bad but prefix `3`
+  becomes good.
+- Offline scoring with the current packaged Sequence-Success model and the
+  current online thresholds (`min_utility=999`, `max_bad_probability=0.0025`,
+  `min_success_probability=0.75`, `bad_std_coef=2`,
+  `success_std_coef=0`) accepted `6/0/0` good/neutral/bad rows from this new
+  CSV. Accepted seeds were `207`, `1079`, and `1509`; no bad rows were
+  accepted. A looser old offline Success threshold `0.02` would accept one bad
+  row, seed `1814` prefix `3`, so the current high Success threshold is doing
+  real safety work.
+- Retraining the Sequence-Success/Risk ensemble by simply adding these 54 rows
+  to the current training pool was not safe. On the disjoint
+  success-diversity `130-249` validation CSV, the retrained model accepted
+  `2/0/8` good/neutral/bad at the current online thresholds, whereas the
+  currently packaged model accepted `0/0/0`. Increasing bad weights and bad
+  uncertainty did not remove this leak.
+- Conclusion: keep `/private/tmp/ecml_diff_prefix_rescue_ppo_seed2401_targeted.csv`
+  as diagnostic/training data, but do not promote the new PPO checkpoint or a
+  retrained sequence model from this batch. The useful next RL direction is a
+  candidate generator that creates genuinely new success-positive motifs, not
+  another conservative fine-tune of Rescue-BC or a naive append-only scorer
+  retrain.
