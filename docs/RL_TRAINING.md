@@ -2168,6 +2168,17 @@ evidence.
   `1610-1709` after the guard was fully neutral; `1710-1809` was positive
   with reward `1/0/99`, success `0/0/100`, changing only seed `1740`
   (`+0.093214`, unchanged Success).
+- Holdout `1810-1909` found a reward-only regression on seed `1814`
+  (`-0.075758`, unchanged Success). The accepted event was again a Rescue-BC
+  `MOVE_FORWARD -> MOVE_RIGHT`, but unlike the known good right-detours it had
+  high observed route-intersection load (`obs_route_intersection_count=0.667`;
+  known kept wins `207,1185,1438,1509` were `0.0..0.333`). The policy now adds
+  `ECML_SEQUENCE_RIGHT_DETOUR_MAX_OBS_INTERSECTIONS=0.5`, only for
+  `MOVE_FORWARD -> MOVE_RIGHT`. Targeted validation on
+  `207,589,1079,1185,1438,1509,1740,1814` kept all seven known wins and
+  neutralized `1814` (`7/0/1` reward, `3/0/5` Success). Re-running
+  `1810-1909` after the guard was fully neutral (`0/0/100` reward and
+  Success).
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \
