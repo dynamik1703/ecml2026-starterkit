@@ -2156,6 +2156,18 @@ evidence.
   neutralized `1442/1463` (`6/0/2` reward, `3/0/5` Success). Re-running
   `1410-1509` after the guard produced reward `2/0/98`, success `0/0/100`,
   with only `1438` and `1509` changed.
+- Next holdouts found one more Success regression pattern. `1510-1609` was
+  fully neutral. Before the added left-to-forward confidence guard, `1610-1709`
+  had seed `1671` lose reward `-0.039872` and Success `-0.166667`; the accepted
+  event was a Rescue-BC `MOVE_LEFT -> MOVE_FORWARD` with high Success LCB but
+  weak raw candidate margin (`0.202`). The known good `1079` rescue uses the
+  same transition but has much stronger margin (`1.428`). The policy now adds
+  `ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN=0.5` for this transition only.
+  Targeted validation kept known wins `207,589,1079,1185,1438,1509` and
+  neutralized `1671` (`6/0/1` reward, `3/0/4` Success). Re-running
+  `1610-1709` after the guard was fully neutral; `1710-1809` was positive
+  with reward `1/0/99`, success `0/0/100`, changing only seed `1740`
+  (`+0.093214`, unchanged Success).
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

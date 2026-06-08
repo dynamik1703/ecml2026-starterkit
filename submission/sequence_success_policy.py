@@ -226,6 +226,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_RIGHT_DETOUR_MIN_VALUE_LCB",
             -0.4,
         )
+        self.left_to_forward_min_margin = self._env_float(
+            "ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN",
+            0.5,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -499,6 +503,12 @@ class SequenceSuccessPolicy(RerankPolicy):
                 scores,
             ):
                 accepted = False
+            if accepted and self._low_confidence_left_to_forward(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
         except Exception:
             return False
 
@@ -564,6 +574,25 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return value_lcb < self.right_detour_min_value
+
+    def _low_confidence_left_to_forward(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.left_to_forward_min_margin):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_LEFT
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            margin = float(detail.get("candidate_raw_top_logit_margin", 0.0))
+        except Exception:
+            return False
+        return margin < self.left_to_forward_min_margin
 
     def _trace_sequence_decision(
         self,
