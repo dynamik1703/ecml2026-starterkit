@@ -39,8 +39,14 @@ DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
 
 
 class SequenceValueRiskMLP(nn.Module):
-    def __init__(self, input_dim: int, hidden_size: int):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_size: int,
+        include_success_regression_head: bool = False,
+    ):
         super().__init__()
+        self.include_success_regression_head = include_success_regression_head
         if hidden_size <= 0:
             self.shared = nn.Identity()
             shared_dim = input_dim
@@ -55,16 +61,24 @@ class SequenceValueRiskMLP(nn.Module):
         self.value_head = nn.Linear(shared_dim, 1)
         self.bad_head = nn.Linear(shared_dim, 1)
         self.success_head = nn.Linear(shared_dim, 1)
+        if include_success_regression_head:
+            self.success_regression_head = nn.Linear(shared_dim, 1)
 
     def forward(
         self,
         features: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         hidden = self.shared(features)
+        value_pred = self.value_head(hidden).squeeze(-1)
+        if self.include_success_regression_head:
+            success_regression_logits = self.success_regression_head(hidden).squeeze(-1)
+        else:
+            success_regression_logits = torch.full_like(value_pred, 20.0)
         return (
-            self.value_head(hidden).squeeze(-1),
+            value_pred,
             self.bad_head(hidden).squeeze(-1),
             self.success_head(hidden).squeeze(-1),
+            success_regression_logits,
         )
 
 
@@ -78,22 +92,32 @@ class SequenceEnsembleScorer:
         value_std_coef: float,
         bad_std_coef: float,
         success_std_coef: float,
+        max_success_regression_probability: float,
+        success_regression_std_coef: float,
     ):
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
         self.feature_columns = list(checkpoint["feature_columns"])
         self.feature_mean = checkpoint["feature_mean"].detach().cpu().numpy()
         self.feature_std = checkpoint["feature_std"].detach().cpu().numpy()
+        self.include_success_regression_head = bool(
+            checkpoint.get("include_success_regression_head", False)
+        )
         self.min_utility = float(min_utility)
         self.max_bad_probability = float(max_bad_probability)
         self.min_success_probability = float(min_success_probability)
         self.value_std_coef = float(value_std_coef)
         self.bad_std_coef = float(bad_std_coef)
         self.success_std_coef = float(success_std_coef)
+        self.max_success_regression_probability = float(
+            max_success_regression_probability
+        )
+        self.success_regression_std_coef = float(success_regression_std_coef)
         self.models = []
         for state_dict in checkpoint["model_state_dicts"]:
             model = SequenceValueRiskMLP(
                 input_dim=int(checkpoint["input_dim"]),
                 hidden_size=int(checkpoint["hidden_size"]),
+                include_success_regression_head=self.include_success_regression_head,
             )
             model.load_state_dict(state_dict)
             model.eval()
@@ -123,12 +147,21 @@ class SequenceEnsembleScorer:
         values = []
         bad_probs = []
         success_probs = []
+        success_regression_probs = []
         with torch.no_grad():
             for model in self.models:
-                value_pred, bad_logits, success_logits = model(features)
+                (
+                    value_pred,
+                    bad_logits,
+                    success_logits,
+                    success_regression_logits,
+                ) = model(features)
                 values.append(float(value_pred.item()))
                 bad_probs.append(float(torch.sigmoid(bad_logits).item()))
                 success_probs.append(float(torch.sigmoid(success_logits).item()))
+                success_regression_probs.append(
+                    float(torch.sigmoid(success_regression_logits).item())
+                )
 
         value_mean = float(np.mean(values))
         value_std = float(np.std(values))
@@ -136,11 +169,22 @@ class SequenceEnsembleScorer:
         bad_std = float(np.std(bad_probs))
         success_mean = float(np.mean(success_probs))
         success_std = float(np.std(success_probs))
+        success_regression_mean = float(np.mean(success_regression_probs))
+        success_regression_std = float(np.std(success_regression_probs))
         value_lcb = value_mean - self.value_std_coef * value_std
         bad_ucb = bad_mean + self.bad_std_coef * bad_std
         success_lcb = success_mean - self.success_std_coef * success_std
+        success_regression_ucb = (
+            success_regression_mean
+            + self.success_regression_std_coef * success_regression_std
+        )
+        success_regression_ok = (
+            not np.isfinite(self.max_success_regression_probability)
+            or success_regression_ucb <= self.max_success_regression_probability
+        )
         accepted = (
             bad_ucb <= self.max_bad_probability
+            and success_regression_ok
             and (
                 value_lcb >= self.min_utility
                 or success_lcb >= self.min_success_probability
@@ -150,6 +194,7 @@ class SequenceEnsembleScorer:
             "value_lcb": value_lcb,
             "bad_ucb": bad_ucb,
             "success_lcb": success_lcb,
+            "success_regression_ucb": success_regression_ucb,
         }
 
 
@@ -314,6 +359,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             value_std_coef=self._env_float("ECML_SEQUENCE_VALUE_STD_COEF", 2.0),
             bad_std_coef=self._env_float("ECML_SEQUENCE_BAD_STD_COEF", 2.0),
             success_std_coef=self._env_float("ECML_SEQUENCE_SUCCESS_STD_COEF", 0.0),
+            max_success_regression_probability=self._env_float(
+                "ECML_SEQUENCE_MAX_SUCCESS_REGRESSION_PROBABILITY",
+                float("inf"),
+            ),
+            success_regression_std_coef=self._env_float(
+                "ECML_SEQUENCE_SUCCESS_REGRESSION_STD_COEF",
+                1.0,
+            ),
         )
 
     def _reset_episode_state_if_needed(self, step: int | None) -> None:
@@ -652,6 +705,9 @@ class SequenceSuccessPolicy(RerankPolicy):
             "value_lcb": float(scores.get("value_lcb", 0.0)),
             "bad_ucb": float(scores.get("bad_ucb", 0.0)),
             "success_lcb": float(scores.get("success_lcb", 0.0)),
+            "success_regression_ucb": float(
+                scores.get("success_regression_ucb", 0.0)
+            ),
             "accepted_event_count_before": len(self._accepted_event_details),
         }
         for key in (

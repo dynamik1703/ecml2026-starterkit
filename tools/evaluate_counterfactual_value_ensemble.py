@@ -25,8 +25,14 @@ from tools.train_counterfactual_gate import (
 
 
 class ValueRiskMLP(nn.Module):
-    def __init__(self, input_dim: int, hidden_size: int):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_size: int,
+        include_success_regression_head: bool = False,
+    ):
         super().__init__()
+        self.include_success_regression_head = include_success_regression_head
         if hidden_size <= 0:
             self.shared = nn.Identity()
             shared_dim = input_dim
@@ -41,16 +47,24 @@ class ValueRiskMLP(nn.Module):
         self.value_head = nn.Linear(shared_dim, 1)
         self.bad_head = nn.Linear(shared_dim, 1)
         self.success_head = nn.Linear(shared_dim, 1)
+        if include_success_regression_head:
+            self.success_regression_head = nn.Linear(shared_dim, 1)
 
     def forward(
         self,
         features: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         hidden = self.shared(features)
+        value_pred = self.value_head(hidden).squeeze(-1)
+        if self.include_success_regression_head:
+            success_regression_logits = self.success_regression_head(hidden).squeeze(-1)
+        else:
+            success_regression_logits = torch.full_like(value_pred, 20.0)
         return (
-            self.value_head(hidden).squeeze(-1),
+            value_pred,
             self.bad_head(hidden).squeeze(-1),
             self.success_head(hidden).squeeze(-1),
+            success_regression_logits,
         )
 
 
@@ -87,12 +101,25 @@ def success_sample_weight(success_label: float, category: str, args: argparse.Na
     return args.success_negative_weight
 
 
+def success_regression_sample_weight(
+    success_regression_label: float,
+    category: str,
+    args: argparse.Namespace,
+) -> float:
+    if success_regression_label > 0.5:
+        return args.success_regression_positive_weight
+    if category == "bad":
+        return args.success_regression_bad_weight
+    return args.success_regression_negative_weight
+
+
 def train_member(
     seed: int,
     train_x: np.ndarray,
     train_value: np.ndarray,
     train_bad: np.ndarray,
     train_success: np.ndarray,
+    train_success_regression: np.ndarray,
     train_categories: list[str],
     args: argparse.Namespace,
 ) -> ValueRiskMLP:
@@ -106,6 +133,10 @@ def train_member(
     value = torch.as_tensor(train_value[sample_indices], dtype=torch.float32)
     bad = torch.as_tensor(train_bad[sample_indices], dtype=torch.float32)
     success = torch.as_tensor(train_success[sample_indices], dtype=torch.float32)
+    success_regression = torch.as_tensor(
+        train_success_regression[sample_indices],
+        dtype=torch.float32,
+    )
     weights = torch.as_tensor(
         [sample_weight(train_categories[index], args) for index in sample_indices],
         dtype=torch.float32,
@@ -121,9 +152,24 @@ def train_member(
         ],
         dtype=torch.float32,
     )
+    success_regression_weights = torch.as_tensor(
+        [
+            success_regression_sample_weight(
+                float(train_success_regression[index]),
+                train_categories[index],
+                args,
+            )
+            for index in sample_indices
+        ],
+        dtype=torch.float32,
+    )
 
     torch.manual_seed(seed)
-    model = ValueRiskMLP(input_dim=train_x.shape[1], hidden_size=args.hidden_size)
+    model = ValueRiskMLP(
+        input_dim=train_x.shape[1],
+        hidden_size=args.hidden_size,
+        include_success_regression_head=args.success_regression_loss_weight > 0.0,
+    )
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=args.learning_rate,
@@ -135,14 +181,25 @@ def train_member(
     for _ in range(args.epochs):
         model.train()
         optimizer.zero_grad()
-        value_pred, bad_logits, success_logits = model(x)
+        (
+            value_pred,
+            bad_logits,
+            success_logits,
+            success_regression_logits,
+        ) = model(x)
         value_loss = value_loss_fn(value_pred, value)
         bad_loss = bad_loss_fn(bad_logits, bad)
         success_loss = bad_loss_fn(success_logits, success)
+        success_regression_loss = bad_loss_fn(
+            success_regression_logits,
+            success_regression,
+        )
         loss = (
             (value_loss * weights).sum()
             + args.bad_loss_weight * (bad_loss * weights).sum()
             + args.success_loss_weight * (success_loss * success_weights).sum()
+            + args.success_regression_loss_weight
+            * (success_regression_loss * success_regression_weights).sum()
         ) / weights.sum().clamp_min(1.0)
         loss.backward()
         optimizer.step()
@@ -153,23 +210,42 @@ def train_member(
 def predict_ensemble(
     models: list[ValueRiskMLP],
     x: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     if len(x) == 0:
         empty = np.asarray([], dtype=np.float64)
-        return empty, empty, empty, empty, empty, empty
+        return empty, empty, empty, empty, empty, empty, empty, empty
     tensor = torch.as_tensor(x, dtype=torch.float32)
     values = []
     bad_probs = []
     success_probs = []
+    success_regression_probs = []
     with torch.no_grad():
         for model in models:
-            value_pred, bad_logits, success_logits = model(tensor)
+            (
+                value_pred,
+                bad_logits,
+                success_logits,
+                success_regression_logits,
+            ) = model(tensor)
             values.append(value_pred.cpu().numpy())
             bad_probs.append(torch.sigmoid(bad_logits).cpu().numpy())
             success_probs.append(torch.sigmoid(success_logits).cpu().numpy())
+            success_regression_probs.append(
+                torch.sigmoid(success_regression_logits).cpu().numpy()
+            )
     value_stack = np.stack(values, axis=0)
     bad_stack = np.stack(bad_probs, axis=0)
     success_stack = np.stack(success_probs, axis=0)
+    success_regression_stack = np.stack(success_regression_probs, axis=0)
     return (
         value_stack.mean(axis=0),
         value_stack.std(axis=0),
@@ -177,6 +253,8 @@ def predict_ensemble(
         bad_stack.std(axis=0),
         success_stack.mean(axis=0),
         success_stack.std(axis=0),
+        success_regression_stack.mean(axis=0),
+        success_regression_stack.std(axis=0),
     )
 
 
@@ -190,36 +268,48 @@ def metric_row(
     min_utility: float,
     max_bad_probability: float,
     min_success_probability: float | None = None,
+    max_success_regression_probability: float | None = None,
 ) -> dict[str, Any]:
     good = categories == "good"
     neutral = categories == "neutral"
     bad = categories == "bad"
     success_positive = success_delta > 1e-9
+    success_negative = success_delta < -1e-9
     accepted_good = int(np.logical_and(accepted, good).sum())
     accepted_neutral = int(np.logical_and(accepted, neutral).sum())
     accepted_bad = int(np.logical_and(accepted, bad).sum())
     accepted_success_positive = int(np.logical_and(accepted, success_positive).sum())
+    accepted_success_negative = int(np.logical_and(accepted, success_negative).sum())
     total_good = int(good.sum())
     total_bad = int(bad.sum())
     total_success_positive = int(success_positive.sum())
+    total_success_negative = int(success_negative.sum())
     return {
         "min_utility": float(min_utility),
         "max_bad_probability": float(max_bad_probability),
         "min_success_probability": min_success_probability,
+        "max_success_regression_probability": max_success_regression_probability,
         "accepted": int(accepted.sum()),
         "accepted_good": accepted_good,
         "accepted_neutral": accepted_neutral,
         "accepted_bad": accepted_bad,
         "accepted_success_positive": accepted_success_positive,
+        "accepted_success_negative": accepted_success_negative,
         "rejected_good": total_good - accepted_good,
         "rejected_neutral": int(neutral.sum()) - accepted_neutral,
         "rejected_bad": total_bad - accepted_bad,
         "rejected_success_positive": total_success_positive - accepted_success_positive,
+        "rejected_success_negative": total_success_negative - accepted_success_negative,
         "good_recall": accepted_good / total_good if total_good else 0.0,
         "bad_leak_rate": accepted_bad / total_bad if total_bad else 0.0,
         "success_positive_recall": (
             accepted_success_positive / total_success_positive
             if total_success_positive
+            else 0.0
+        ),
+        "success_negative_leak_rate": (
+            accepted_success_negative / total_success_negative
+            if total_success_negative
             else 0.0
         ),
         "accepted_utility_sum": float(utility[accepted].sum()),
@@ -233,20 +323,35 @@ def success_thresholds(args: argparse.Namespace) -> list[float | None]:
     return list(args.min_success_probability) if args.min_success_probability else [None]
 
 
+def success_regression_thresholds(args: argparse.Namespace) -> list[float | None]:
+    thresholds = getattr(args, "max_success_regression_probability", [])
+    return list(thresholds) if thresholds else [None]
+
+
 def acceptance_mask(
     value_lcb: np.ndarray,
     bad_ucb: np.ndarray,
     success_lcb: np.ndarray,
+    success_regression_ucb: np.ndarray | None,
     min_utility: float,
     max_bad_probability: float,
     min_success_probability: float | None,
+    max_success_regression_probability: float | None = None,
 ) -> np.ndarray:
     utility_accept = value_lcb >= min_utility
     if min_success_probability is None:
         rescue_accept = np.zeros_like(utility_accept, dtype=bool)
     else:
         rescue_accept = success_lcb >= min_success_probability
-    return (bad_ucb <= max_bad_probability) & (utility_accept | rescue_accept)
+    risk_accept = bad_ucb <= max_bad_probability
+    if (
+        max_success_regression_probability is not None
+        and success_regression_ucb is not None
+    ):
+        risk_accept = risk_accept & (
+            success_regression_ucb <= max_success_regression_probability
+        )
+    return risk_accept & (utility_accept | rescue_accept)
 
 
 def split_metrics(
@@ -277,6 +382,7 @@ def split_metrics(
     categories = np.asarray(categories_list, dtype=object)
     bad_labels = np.asarray([category == "bad" for category in categories_list], dtype=np.float32)
     success_labels = (success_delta > 1e-9).astype(np.float32)
+    success_regression_labels = (success_delta < -1e-9).astype(np.float32)
     train_mask, val_mask = seed_split(
         rows,
         args.val_fraction,
@@ -294,47 +400,73 @@ def split_metrics(
             train_value=utility[train_mask],
             train_bad=bad_labels[train_mask],
             train_success=success_labels[train_mask],
+            train_success_regression=success_regression_labels[train_mask],
             train_categories=train_categories,
             args=args,
         )
         for member in range(args.ensemble_size)
     ]
-    value_mean, value_std, bad_mean, bad_std, success_mean, success_std = (
-        predict_ensemble(models, x[val_mask])
-    )
+    (
+        value_mean,
+        value_std,
+        bad_mean,
+        bad_std,
+        success_mean,
+        success_std,
+        success_regression_mean,
+        success_regression_std,
+    ) = predict_ensemble(models, x[val_mask])
     value_lcb = value_mean - args.value_std_coef * value_std
     bad_ucb = bad_mean + args.bad_std_coef * bad_std
     success_lcb = success_mean - args.success_std_coef * success_std
+    success_regression_ucb = (
+        success_regression_mean
+        + args.success_regression_std_coef * success_regression_std
+    )
 
     split_results = []
     for min_utility in args.min_utility:
         for max_bad_probability in args.max_bad_probability:
             for min_success_probability in success_thresholds(args):
-                accepted = acceptance_mask(
-                    value_lcb=value_lcb,
-                    bad_ucb=bad_ucb,
-                    success_lcb=success_lcb,
-                    min_utility=min_utility,
-                    max_bad_probability=max_bad_probability,
-                    min_success_probability=min_success_probability,
-                )
-                row = metric_row(
-                    categories=categories[val_mask],
-                    utility=utility[val_mask],
-                    reward_delta=reward_delta[val_mask],
-                    success_delta=success_delta[val_mask],
-                    failed_delta=failed_delta[val_mask],
-                    accepted=accepted,
-                    min_utility=min_utility,
-                    max_bad_probability=max_bad_probability,
-                    min_success_probability=min_success_probability,
-                )
-                row["split_seed"] = split_seed
-                row["val_rows"] = int(val_mask.sum())
-                row["val_seeds"] = sorted(
-                    {int(float(row["seed"])) for row, is_val in zip(rows, val_mask) if is_val}
-                )
-                split_results.append(row)
+                for max_success_regression_probability in success_regression_thresholds(
+                    args
+                ):
+                    accepted = acceptance_mask(
+                        value_lcb=value_lcb,
+                        bad_ucb=bad_ucb,
+                        success_lcb=success_lcb,
+                        success_regression_ucb=success_regression_ucb,
+                        min_utility=min_utility,
+                        max_bad_probability=max_bad_probability,
+                        min_success_probability=min_success_probability,
+                        max_success_regression_probability=(
+                            max_success_regression_probability
+                        ),
+                    )
+                    row = metric_row(
+                        categories=categories[val_mask],
+                        utility=utility[val_mask],
+                        reward_delta=reward_delta[val_mask],
+                        success_delta=success_delta[val_mask],
+                        failed_delta=failed_delta[val_mask],
+                        accepted=accepted,
+                        min_utility=min_utility,
+                        max_bad_probability=max_bad_probability,
+                        min_success_probability=min_success_probability,
+                        max_success_regression_probability=(
+                            max_success_regression_probability
+                        ),
+                    )
+                    row["split_seed"] = split_seed
+                    row["val_rows"] = int(val_mask.sum())
+                    row["val_seeds"] = sorted(
+                        {
+                            int(float(row["seed"]))
+                            for row, is_val in zip(rows, val_mask)
+                            if is_val
+                        }
+                    )
+                    split_results.append(row)
     return split_results
 
 
@@ -348,6 +480,7 @@ def row_arrays(
     np.ndarray,
     np.ndarray,
     list[str],
+    np.ndarray,
     np.ndarray,
     np.ndarray,
 ]:
@@ -370,6 +503,7 @@ def row_arrays(
     categories = [outcome_category(row, args.reward_epsilon) for row in rows]
     bad_labels = np.asarray([category == "bad" for category in categories], dtype=np.float32)
     success_labels = (success_delta > 1e-9).astype(np.float32)
+    success_regression_labels = (success_delta < -1e-9).astype(np.float32)
     return (
         utility,
         reward_delta,
@@ -379,6 +513,7 @@ def row_arrays(
         categories,
         bad_labels,
         success_labels,
+        success_regression_labels,
     )
 
 
@@ -400,6 +535,7 @@ def explicit_validation_metrics(
         train_categories,
         train_bad_labels,
         train_success_labels,
+        train_success_regression_labels,
     ) = row_arrays(train_rows, args)
     (
         validation_utility,
@@ -407,6 +543,7 @@ def explicit_validation_metrics(
         validation_success_delta,
         validation_failed_delta,
         validation_categories,
+        _,
         _,
         _,
         _,
@@ -423,45 +560,69 @@ def explicit_validation_metrics(
             train_value=train_utility,
             train_bad=train_bad_labels,
             train_success=train_success_labels,
+            train_success_regression=train_success_regression_labels,
             train_categories=train_categories,
             args=args,
         )
         for member in range(args.ensemble_size)
     ]
-    value_mean, value_std, bad_mean, bad_std, success_mean, success_std = (
-        predict_ensemble(models, validation_x)
-    )
+    (
+        value_mean,
+        value_std,
+        bad_mean,
+        bad_std,
+        success_mean,
+        success_std,
+        success_regression_mean,
+        success_regression_std,
+    ) = predict_ensemble(models, validation_x)
     value_lcb = value_mean - args.value_std_coef * value_std
     bad_ucb = bad_mean + args.bad_std_coef * bad_std
     success_lcb = success_mean - args.success_std_coef * success_std
+    success_regression_ucb = (
+        success_regression_mean
+        + args.success_regression_std_coef * success_regression_std
+    )
 
     split_results = []
     for min_utility in args.min_utility:
         for max_bad_probability in args.max_bad_probability:
             for min_success_probability in success_thresholds(args):
-                accepted = acceptance_mask(
-                    value_lcb=value_lcb,
-                    bad_ucb=bad_ucb,
-                    success_lcb=success_lcb,
-                    min_utility=min_utility,
-                    max_bad_probability=max_bad_probability,
-                    min_success_probability=min_success_probability,
-                )
-                row = metric_row(
-                    categories=validation_categories,
-                    utility=validation_utility,
-                    reward_delta=validation_reward_delta,
-                    success_delta=validation_success_delta,
-                    failed_delta=validation_failed_delta,
-                    accepted=accepted,
-                    min_utility=min_utility,
-                    max_bad_probability=max_bad_probability,
-                    min_success_probability=min_success_probability,
-                )
-                row["split_seed"] = split_seed
-                row["val_rows"] = len(validation_rows)
-                row["val_seeds"] = sorted({int(float(row["seed"])) for row in validation_rows})
-                split_results.append(row)
+                for max_success_regression_probability in success_regression_thresholds(
+                    args
+                ):
+                    accepted = acceptance_mask(
+                        value_lcb=value_lcb,
+                        bad_ucb=bad_ucb,
+                        success_lcb=success_lcb,
+                        success_regression_ucb=success_regression_ucb,
+                        min_utility=min_utility,
+                        max_bad_probability=max_bad_probability,
+                        min_success_probability=min_success_probability,
+                        max_success_regression_probability=(
+                            max_success_regression_probability
+                        ),
+                    )
+                    row = metric_row(
+                        categories=validation_categories,
+                        utility=validation_utility,
+                        reward_delta=validation_reward_delta,
+                        success_delta=validation_success_delta,
+                        failed_delta=validation_failed_delta,
+                        accepted=accepted,
+                        min_utility=min_utility,
+                        max_bad_probability=max_bad_probability,
+                        min_success_probability=min_success_probability,
+                        max_success_regression_probability=(
+                            max_success_regression_probability
+                        ),
+                    )
+                    row["split_seed"] = split_seed
+                    row["val_rows"] = len(validation_rows)
+                    row["val_seeds"] = sorted(
+                        {int(float(row["seed"])) for row in validation_rows}
+                    )
+                    split_results.append(row)
     return split_results
 
 
@@ -483,6 +644,7 @@ def validation_audit_rows(
         train_categories,
         train_bad_labels,
         train_success_labels,
+        train_success_regression_labels,
     ) = row_arrays(train_rows, args)
     (
         validation_utility,
@@ -490,6 +652,7 @@ def validation_audit_rows(
         validation_success_delta,
         validation_failed_delta,
         validation_categories,
+        _,
         _,
         _,
         _,
@@ -505,17 +668,29 @@ def validation_audit_rows(
             train_value=train_utility,
             train_bad=train_bad_labels,
             train_success=train_success_labels,
+            train_success_regression=train_success_regression_labels,
             train_categories=train_categories,
             args=args,
         )
         for member in range(args.ensemble_size)
     ]
-    value_mean, value_std, bad_mean, bad_std, success_mean, success_std = (
-        predict_ensemble(models, validation_x)
-    )
+    (
+        value_mean,
+        value_std,
+        bad_mean,
+        bad_std,
+        success_mean,
+        success_std,
+        success_regression_mean,
+        success_regression_std,
+    ) = predict_ensemble(models, validation_x)
     value_lcb = value_mean - args.value_std_coef * value_std
     bad_ucb = bad_mean + args.bad_std_coef * bad_std
     success_lcb = success_mean - args.success_std_coef * success_std
+    success_regression_ucb = (
+        success_regression_mean
+        + args.success_regression_std_coef * success_regression_std
+    )
 
     audit_rows: list[dict[str, Any]] = []
     for row_index, row in enumerate(validation_rows):
@@ -539,28 +714,49 @@ def validation_audit_rows(
             "success_probability_mean": float(success_mean[row_index]),
             "success_probability_std": float(success_std[row_index]),
             "success_probability_lcb": float(success_lcb[row_index]),
+            "success_regression_probability_mean": float(
+                success_regression_mean[row_index]
+            ),
+            "success_regression_probability_std": float(
+                success_regression_std[row_index]
+            ),
+            "success_regression_probability_ucb": float(
+                success_regression_ucb[row_index]
+            ),
             "events": row.get("events", ""),
         }
         for min_utility in args.min_utility:
             for max_bad_probability in args.max_bad_probability:
                 for min_success_probability in success_thresholds(args):
-                    accepted = acceptance_mask(
-                        value_lcb=value_lcb[row_index : row_index + 1],
-                        bad_ucb=bad_ucb[row_index : row_index + 1],
-                        success_lcb=success_lcb[row_index : row_index + 1],
-                        min_utility=min_utility,
-                        max_bad_probability=max_bad_probability,
-                        min_success_probability=min_success_probability,
-                    )[0]
-                    audit_rows.append(
-                        {
-                            **base,
-                            "min_utility": min_utility,
-                            "max_bad_probability": max_bad_probability,
-                            "min_success_probability": min_success_probability,
-                            "accepted": int(accepted),
-                        }
-                    )
+                    for max_success_regression_probability in (
+                        success_regression_thresholds(args)
+                    ):
+                        accepted = acceptance_mask(
+                            value_lcb=value_lcb[row_index : row_index + 1],
+                            bad_ucb=bad_ucb[row_index : row_index + 1],
+                            success_lcb=success_lcb[row_index : row_index + 1],
+                            success_regression_ucb=success_regression_ucb[
+                                row_index : row_index + 1
+                            ],
+                            min_utility=min_utility,
+                            max_bad_probability=max_bad_probability,
+                            min_success_probability=min_success_probability,
+                            max_success_regression_probability=(
+                                max_success_regression_probability
+                            ),
+                        )[0]
+                        audit_rows.append(
+                            {
+                                **base,
+                                "min_utility": min_utility,
+                                "max_bad_probability": max_bad_probability,
+                                "min_success_probability": min_success_probability,
+                                "max_success_regression_probability": (
+                                    max_success_regression_probability
+                                ),
+                                "accepted": int(accepted),
+                            }
+                        )
     return audit_rows
 
 
@@ -579,6 +775,7 @@ def train_export_ensemble(
         train_categories,
         train_bad_labels,
         train_success_labels,
+        train_success_regression_labels,
     ) = row_arrays(train_rows, args)
     _, mean, std = standardize(train_x_raw, train_x_raw)
     train_x = (train_x_raw - mean) / std
@@ -593,6 +790,7 @@ def train_export_ensemble(
                     train_value=train_utility,
                     train_bad=train_bad_labels,
                     train_success=train_success_labels,
+                    train_success_regression=train_success_regression_labels,
                     train_categories=train_categories,
                     args=args,
                 )
@@ -627,6 +825,9 @@ def write_model_checkpoint(
     torch.save(
         {
             "model_class": "ValueRiskMLP",
+            "include_success_regression_head": (
+                args.success_regression_loss_weight > 0.0
+            ),
             "model_state_dicts": [model.state_dict() for model in models],
             "feature_columns": feature_columns,
             "feature_mean": torch.as_tensor(mean, dtype=torch.float32),
@@ -647,17 +848,19 @@ def write_model_checkpoint(
 
 
 def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    buckets: dict[tuple[float, float, float | None], dict[str, Any]] = {}
+    buckets: dict[tuple[float, float, float | None, float | None], dict[str, Any]] = {}
     summed_keys = [
         "accepted",
         "accepted_good",
         "accepted_neutral",
         "accepted_bad",
         "accepted_success_positive",
+        "accepted_success_negative",
         "rejected_good",
         "rejected_neutral",
         "rejected_bad",
         "rejected_success_positive",
+        "rejected_success_negative",
         "accepted_utility_sum",
         "accepted_reward_delta_sum",
         "accepted_success_delta_sum",
@@ -669,6 +872,7 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["min_utility"],
             row["max_bad_probability"],
             row.get("min_success_probability"),
+            row.get("max_success_regression_probability"),
         )
         bucket = buckets.setdefault(
             key,
@@ -676,6 +880,9 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "min_utility": row["min_utility"],
                 "max_bad_probability": row["max_bad_probability"],
                 "min_success_probability": row.get("min_success_probability"),
+                "max_success_regression_probability": row.get(
+                    "max_success_regression_probability"
+                ),
                 "splits": 0,
             },
         )
@@ -691,6 +898,10 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             bucket["accepted_success_positive"]
             + bucket["rejected_success_positive"]
         )
+        total_success_negative = (
+            bucket["accepted_success_negative"]
+            + bucket["rejected_success_negative"]
+        )
         bucket["good_recall"] = (
             bucket["accepted_good"] / total_good if total_good else 0.0
         )
@@ -700,6 +911,11 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bucket["success_positive_recall"] = (
             bucket["accepted_success_positive"] / total_success_positive
             if total_success_positive
+            else 0.0
+        )
+        bucket["success_negative_leak_rate"] = (
+            bucket["accepted_success_negative"] / total_success_negative
+            if total_success_negative
             else 0.0
         )
         aggregate.append(bucket)
@@ -725,13 +941,16 @@ def print_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
         "min_utility",
         "max_bad_probability",
         "min_success_probability",
+        "max_success_regression_probability",
         "accepted_good",
         "accepted_neutral",
         "accepted_bad",
         "accepted_success_positive",
+        "accepted_success_negative",
         "good_recall",
         "bad_leak_rate",
         "success_positive_recall",
+        "success_negative_leak_rate",
         "accepted_utility_sum",
         "accepted_reward_delta_sum",
         "accepted_success_delta_sum",
@@ -818,6 +1037,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-std-coef", type=float, default=1.0)
     parser.add_argument("--bad-std-coef", type=float, default=1.0)
     parser.add_argument("--success-std-coef", type=float, default=1.0)
+    parser.add_argument("--success-regression-std-coef", type=float, default=1.0)
     parser.add_argument(
         "--success-loss-weight",
         type=float,
@@ -829,6 +1049,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--success-positive-weight", type=float, default=12.0)
     parser.add_argument("--success-negative-weight", type=float, default=1.0)
     parser.add_argument("--success-bad-weight", type=float, default=8.0)
+    parser.add_argument(
+        "--success-regression-loss-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight for the auxiliary success-regression classifier "
+            "(success_delta < 0)."
+        ),
+    )
+    parser.add_argument(
+        "--success-regression-positive-weight",
+        type=float,
+        default=12.0,
+    )
+    parser.add_argument(
+        "--success-regression-negative-weight",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument("--success-regression-bad-weight", type=float, default=8.0)
     parser.add_argument(
         "--min-utility",
         nargs="+",
@@ -850,6 +1090,16 @@ def parse_args() -> argparse.Namespace:
             "Optional Success-rescue probability LCB thresholds. When set, "
             "rows are accepted if either utility LCB or success probability LCB "
             "passes while the bad-risk UCB remains below the bad threshold."
+        ),
+    )
+    parser.add_argument(
+        "--max-success-regression-probability",
+        nargs="+",
+        type=float,
+        default=[],
+        help=(
+            "Optional Success-regression probability UCB thresholds. When set, "
+            "accepted rows must stay below this predicted success-loss risk."
         ),
     )
     parser.add_argument("--top-k", type=int, default=25)

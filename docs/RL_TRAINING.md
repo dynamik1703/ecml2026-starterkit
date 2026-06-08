@@ -2541,3 +2541,54 @@ Second post-check PPO candidate-generation test:
   objective that directly optimizes for currently blocked, verified-safe
   motifs such as seed `120`/`184`-style rescues without opening `905`-style
   failures.
+
+Success-regression risk head prototype:
+- The raw `ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt` changed 16 seeds on
+  the known positive/hard-negative suite, so
+  `tools/mine_diff_prefix_dataset.py` mined these seeds with prefix lengths
+  `1,2,3,5`:
+  `119,120,184,207,280,589,1509,2046,258,311,335,392,452,477,660,905`.
+  The resulting CSV
+  `/private/tmp/ecml_diff_prefix_successdiv_rescue_mix2501_known_changed.csv`
+  has 64 rows: `42 good`, `3 neutral`, and `19 bad`; 20 rows are
+  Success-positive and 4 rows are Success-negative.
+- This dataset exposes the scoring problem cleanly. Useful new positives
+  include seed `120` (`+0.167380` reward, `+0.166667` Success), seed `184`
+  (`+0.028539`, `+0.166667`), and reward-only positives `258/335/392`.
+  Hard negatives include immediate reward losses on `311/477/660`,
+  prefix-length traps on `452`, and seed `905`, where prefix `1` is
+  reward-positive but Success-negative and longer prefixes remain
+  Success-negative.
+- `tools/evaluate_counterfactual_value_ensemble.py`,
+  `tools/score_counterfactual_value_ensemble.py`, and
+  `submission.sequence_success_policy.MyPolicy` now support an optional
+  Success-regression head (`success_delta < 0`) with a separate UCB threshold.
+  This is disabled for existing checkpoints/defaults unless a model was
+  exported with `include_success_regression_head=True` and
+  `ECML_SEQUENCE_MAX_SUCCESS_REGRESSION_PROBABILITY` is set.
+- Training the current sequence pool with this extra head, without adding the
+  new mix2501 rows to training, and validating on the mix2501 prefix CSV gave
+  a clean split result: at `min_utility=999`,
+  `max_bad_probability=0.0025`, `min_success_probability=0.75`, and
+  `max_success_regression_probability=0.02..0.5`, aggregate validation over
+  split seeds `1,3,5` accepted `35/0/0` good/neutral/bad and
+  `35` Success-positive rows, with zero Success-negative leakage. The exported
+  model `/private/tmp/ecml_success_sequence_with_success_regression_head.pt`
+  scored the same mix2501 CSV at `12/0/0`, accepting only seeds `119`, `120`,
+  and `589`, and blocking the previously accepted bad seed `905` prefix `2`.
+- Extra offline scoring with that exported model stayed clean on checked
+  datasets: Rescue-PPO2401 `6/0/0`, Rescue-BC1010 `6/0/0`, terminal
+  `490-609` `4/0/0`, seed901 fast suite `0/0/0`, hitemp `130-249` `0/0/0`,
+  and successdiv `130-249` `0/0/0`.
+- Online integration is not yet promotable. With the new model and new PPO
+  candidate but the existing safety guards, a compact online screen
+  `119,120,184,207,280,589,905,311,452,477,660` stayed safe but unchanged
+  versus current default: only seeds `207` and `589` changed. Trace on seed
+  `120` showed the blocked positive comes from the older
+  `MOVE_FORWARD -> MOVE_LEFT` slack guard before the scorer can accept it.
+- Disabling that left-slack guard (`ECML_SEQUENCE_LEFT_MAX_SLACK=1000000`)
+  opened seed `120`, but also reopened the known seed `578` Success regression
+  (`-0.063615` reward, `-0.166667` Success). Therefore the new head improves
+  offline risk modeling but is not yet sufficient to replace the slack guard.
+  Keep the optional model/head support, but do not change the packaged default
+  model or default guard thresholds yet.

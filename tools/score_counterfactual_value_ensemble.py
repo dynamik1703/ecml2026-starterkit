@@ -32,10 +32,14 @@ def first_config_value(config: dict[str, Any], key: str, default: float) -> floa
 
 def load_models(checkpoint: dict[str, Any]) -> list[ValueRiskMLP]:
     models = []
+    include_success_regression_head = bool(
+        checkpoint.get("include_success_regression_head", False)
+    )
     for state_dict in checkpoint["model_state_dicts"]:
         model = ValueRiskMLP(
             input_dim=int(checkpoint["input_dim"]),
             hidden_size=int(checkpoint["hidden_size"]),
+            include_success_regression_head=include_success_regression_head,
         )
         model.load_state_dict(state_dict)
         model.eval()
@@ -66,6 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-std-coef", type=float)
     parser.add_argument("--bad-std-coef", type=float)
     parser.add_argument("--success-std-coef", type=float)
+    parser.add_argument("--success-regression-std-coef", type=float)
+    parser.add_argument("--max-success-regression-probability", type=float)
     parser.add_argument("--reward-epsilon", type=float)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-csv", type=Path)
@@ -104,12 +110,20 @@ def main() -> int:
         _,
         _,
         _,
+        _,
     ) = row_arrays(rows, scoring_args)
 
     models = load_models(checkpoint)
-    value_mean, value_std, bad_mean, bad_std, success_mean, success_std = (
-        predict_ensemble(models, x)
-    )
+    (
+        value_mean,
+        value_std,
+        bad_mean,
+        bad_std,
+        success_mean,
+        success_std,
+        success_regression_mean,
+        success_regression_std,
+    ) = predict_ensemble(models, x)
     value_std_coef = (
         args.value_std_coef
         if args.value_std_coef is not None
@@ -124,6 +138,11 @@ def main() -> int:
         args.success_std_coef
         if args.success_std_coef is not None
         else first_config_value(config, "success_std_coef", 1.0)
+    )
+    success_regression_std_coef = (
+        args.success_regression_std_coef
+        if args.success_regression_std_coef is not None
+        else first_config_value(config, "success_regression_std_coef", 1.0)
     )
     min_utility = (
         args.min_utility
@@ -142,17 +161,34 @@ def main() -> int:
     )
     if not np.isfinite(min_success_probability):
         min_success_probability = None
+    max_success_regression_probability = (
+        args.max_success_regression_probability
+        if args.max_success_regression_probability is not None
+        else first_config_value(
+            config,
+            "max_success_regression_probability",
+            float("nan"),
+        )
+    )
+    if not np.isfinite(max_success_regression_probability):
+        max_success_regression_probability = None
 
     value_lcb = value_mean - value_std_coef * value_std
     bad_ucb = bad_mean + bad_std_coef * bad_std
     success_lcb = success_mean - success_std_coef * success_std
+    success_regression_ucb = (
+        success_regression_mean
+        + success_regression_std_coef * success_regression_std
+    )
     accepted = acceptance_mask(
         value_lcb=value_lcb,
         bad_ucb=bad_ucb,
         success_lcb=success_lcb,
+        success_regression_ucb=success_regression_ucb,
         min_utility=min_utility,
         max_bad_probability=max_bad_probability,
         min_success_probability=min_success_probability,
+        max_success_regression_probability=max_success_regression_probability,
     )
 
     summary = metric_row(
@@ -165,6 +201,7 @@ def main() -> int:
         min_utility=min_utility,
         max_bad_probability=max_bad_probability,
         min_success_probability=min_success_probability,
+        max_success_regression_probability=max_success_regression_probability,
     )
     audit_rows = []
     for row_index, row in enumerate(rows):
@@ -188,6 +225,15 @@ def main() -> int:
                 "success_probability_mean": float(success_mean[row_index]),
                 "success_probability_std": float(success_std[row_index]),
                 "success_probability_lcb": float(success_lcb[row_index]),
+                "success_regression_probability_mean": float(
+                    success_regression_mean[row_index]
+                ),
+                "success_regression_probability_std": float(
+                    success_regression_std[row_index]
+                ),
+                "success_regression_probability_ucb": float(
+                    success_regression_ucb[row_index]
+                ),
                 "events": row.get("events", ""),
             }
         )
@@ -198,8 +244,9 @@ def main() -> int:
         f"good/neutral/bad={summary['accepted_good']}/"
         f"{summary['accepted_neutral']}/{summary['accepted_bad']} "
         f"success_positive={summary['accepted_success_positive']} "
+        f"success_negative={summary['accepted_success_negative']} "
         f"thresholds={min_utility}/{max_bad_probability}/"
-        f"{min_success_probability}"
+        f"{min_success_probability}/{max_success_regression_probability}"
     )
     if args.output_csv is not None:
         write_csv(args.output_csv, audit_rows)
