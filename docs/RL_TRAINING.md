@@ -2105,6 +2105,40 @@ evidence.
   Next step: retrain or redesign the Sequence Success/Risk scorer with these
   new positive motifs and matching hard negatives; do not relax the bad-risk
   threshold by hand.
+- Retrained the Success/Risk sequence ensemble with the Rescue-BC diff-prefix
+  rows added to the old sequence dataset. Offline scoring of the exported
+  model accepted `14/3/0` good/neutral/bad Rescue-BC prefix rows at the online
+  bad-risk threshold, accepted `4/0/0` success-diversity holdout rows, and
+  accepted no hitemp holdout rows. Online validation showed why the old
+  `FIRST_DIFF_ONLY=1` default was too restrictive for this candidate family:
+  Rescue-BC needs later accepted diffs to realize new rescues.
+- With `FIRST_DIFF_ONLY=0`, the first rescue-scored default leaked reward on
+  seed `660`; raising `ECML_SEQUENCE_MIN_SUCCESS_PROBABILITY` to `0.5` blocked
+  that but leaked seed `946`. The accepted `946` event had
+  `success_lcb=0.556`, while the genuine `1079` rescue had
+  `success_lcb=0.956`. A stricter `0.6` threshold fixed those and gave fast
+  suite reward/success `5/0/18` and `3/0/20`, but a second new holdout
+  `1160-1209` found a small reward-only loss on seed `1160`
+  (`-0.002146`). That loss accepted at `success_lcb=0.666`; the useful
+  holdout win on seed `1185` accepted at `0.791`.
+- The promoted conservative Rescue-Sequence default therefore uses the new
+  model `submission/models/ecml_success_only_sequence_with_rescue.pt`, adds
+  `submission/models/ecml_rescue_bc_1010_v1.pt` as the fourth candidate,
+  defaults `ECML_SEQUENCE_FIRST_DIFF_ONLY=0`, and defaults
+  `ECML_SEQUENCE_MIN_SUCCESS_PROBABILITY=0.75`. Validation versus guarded
+  rerank:
+  - Extended fast suite
+    `119,120,184,207,280,529,589,258,264,311,335,343,392,452,477,660,905,946,1017,1040,1064,1079,1095`:
+    reward `3/0/20`, success `3/0/20`, mean reward delta `+0.020130`.
+    Changed seeds were `207`, `589`, and `1079`; all three were Success wins.
+  - New holdout `1110-1209`: reward `1/0/99`, success `0/0/100`, mean reward
+    delta `+0.000943`. The only changed seed was `1185` with reward
+    `+0.094268`, unchanged Success.
+  - Current default Sequence on `1110-1159` was fully neutral (`0/0/50`), while
+    the p06 ablation found one additional reward win on `1112`. We did not
+    promote p06 because `1160-1209` exposed the small seed `1160` reward leak.
+  This is a net RL/gate improvement with lower action coverage than p06; do
+  not lower the Success threshold without adding the new hard negatives.
 
 ```bash
 env PYTHONPATH=. PYTHONPYCACHEPREFIX=/private/tmp/ecml_pycache MPLCONFIGDIR=/private/tmp/ecml_mpl \

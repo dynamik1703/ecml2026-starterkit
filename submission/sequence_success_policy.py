@@ -28,12 +28,13 @@ except Exception:  # pragma: no cover - submission fallback for stripped package
 
 SUBMISSION_DIR = Path(__file__).resolve().parent
 DEFAULT_SEQUENCE_MODEL_PATH = str(
-    SUBMISSION_DIR / "models" / "ecml_success_only_sequence_fasttrain.pt"
+    SUBMISSION_DIR / "models" / "ecml_success_only_sequence_with_rescue.pt"
 )
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_successdiv_seed610_u4.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_terminal_stronger_u3.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_targeted_seed901_u4.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_rescue_bc_1010_v1.pt"),
 )
 
 
@@ -203,7 +204,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.trace_path = os.environ.get("ECML_SEQUENCE_TRACE_PATH", "").strip()
         self.trace_all = bool(self._env_int("ECML_SEQUENCE_TRACE_ALL", 0))
         self.first_diff_only = bool(
-            self._env_int("ECML_SEQUENCE_FIRST_DIFF_ONLY", 1)
+            self._env_int("ECML_SEQUENCE_FIRST_DIFF_ONLY", 0)
         )
         self.rejected_transitions = self._env_transition_set(
             "ECML_SEQUENCE_REJECT_TRANSITIONS",
@@ -296,7 +297,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             ),
             min_success_probability=self._env_float(
                 "ECML_SEQUENCE_MIN_SUCCESS_PROBABILITY",
-                0.02,
+                0.75,
             ),
             value_std_coef=self._env_float("ECML_SEQUENCE_VALUE_STD_COEF", 2.0),
             bad_std_coef=self._env_float("ECML_SEQUENCE_BAD_STD_COEF", 2.0),
