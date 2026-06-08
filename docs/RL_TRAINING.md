@@ -2506,3 +2506,38 @@ Follow-up diff-prefix mining for the same Rescue-PPO checkpoint:
   candidate generator that creates genuinely new success-positive motifs, not
   another conservative fine-tune of Rescue-BC or a naive append-only scorer
   retrain.
+
+Second post-check PPO candidate-generation test:
+- Trained `/private/tmp/ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt` from
+  `submission/models/ecml_ppo_trajectory_successdiv_seed610_u4.pt` instead of
+  Rescue-BC. The curated training seeds mixed known success-positive motifs
+  (`119,184,207,280,529,589`), newer Rescue-BC wins
+  (`1017,1040,1079,1095,1185,1438,1509,1740,1929,2046`), and hard negatives
+  (`198,205,211,264,335,578,631,660,905,946,1442,1463,1671,1814`).
+  Hyperparameters were still conservative: 6 PPO updates x 4 episodes, low
+  learning rate `1.2e-5`, teacher CE `0.30`, anchor KL `4.5`, rollout
+  temperature `1.08`, conflict/slack shaping, and stronger terminal team
+  success/failure shaping.
+- The run stayed numerically controlled: update success ranged from `0.833333`
+  to `0.958333`, and anchor KL stayed around `7e-6..3.7e-5`. This is stable
+  enough for candidate generation, but not a raw-policy deployment signal.
+- Raw checkpoint screening on 33 known positive/hard-negative seeds versus
+  guarded rerank was mixed but more diverse than the previous Rescue-PPO:
+  reward wins/losses/ties `10/6/17`, success wins/losses/ties `5/1/27`, mean
+  deltas `+0.019923` reward and `+0.015152` success. It recovered positives
+  on seeds `120`, `184`, `258`, `335`, and `392`, but also regressed reward on
+  `119`, `311`, `452`, `477`, `660`, and `905`; seed `905` was a success
+  regression. The raw checkpoint is therefore unsafe.
+- Adding this checkpoint as a fifth Sequence-Gate candidate produced exactly
+  the same online result as the current default on the same 33-seed suite:
+  both had reward wins/losses/ties `9/0/24`, success wins/losses/ties
+  `3/0/30`, and changed exactly seeds
+  `207,589,1079,1185,1438,1509,1740,1929,2046`. The new checkpoint adds no
+  online coverage under the current Sequence-Success/Risk gate and guards.
+- Conclusion: the diversified PPO run confirms that candidate generation can
+  create more raw positive motifs, but the current online gate already filters
+  it down to the existing accepted set. More short PPO variants are likely low
+  value unless paired with a better learned risk/scoring model or a targeted
+  objective that directly optimizes for currently blocked, verified-safe
+  motifs such as seed `120`/`184`-style rescues without opening `905`-style
+  failures.
