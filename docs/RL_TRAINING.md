@@ -2876,3 +2876,33 @@ Multi-candidate raw screen for Success-diversity:
   move the objective from binary row classification toward seed-level
   candidate ranking or imitation of the best counterfactual prefix, with
   evaluation on held-out fresh seeds before any online integration.
+- Added `tools/evaluate_sequence_rescue_ranker.py` for that next objective.
+  It reuses the sequence/static feature pipeline, but trains a RankNet-style
+  pairwise objective within each seed group: prefixes with higher target value
+  should score above weaker prefixes from the same seed. The target value is
+  Success-first but still reward-aware:
+  `success_weight * success_delta + reward_weight * reward_delta -
+  reward_loss_penalty * max(-reward_delta, 0) -
+  success_loss_penalty * max(-success_delta, 0) -
+  failure_penalty * max(failed_delta, 0)`. A small pointwise MSE term keeps
+  scores roughly calibrated so a threshold can choose "no rescue".
+- On the 394-row combined pool, the ranker is the first offline model that
+  clearly improves over the binary planner/classifier direction. With
+  `reward_loss_penalty=3.0`, `pointwise_weight=0.25`, five split seeds, and a
+  5-member ensemble, the high-threshold region selected useful rescues with
+  no Success-negative leakage: at `score_threshold=1.25` it selected
+  `6/0/3` good/neutral/bad rows, with `5` Success-positive, `0`
+  Success-negative, reward delta `+0.455534`, Success delta `+0.833333`, and
+  failed-agent delta `-5`; at `score_threshold=1.5` it selected `5/0/2`,
+  with `4` Success-positive, `0` Success-negative, reward delta `+0.271882`,
+  and Success delta `+0.666667`.
+- The remaining blocker is still bad-leak calibration. The top selected
+  audit rows include reward-negative traps such as seed `2446`, which can
+  score above true rescues in some validation splits despite the reward-loss
+  penalty. Increasing `pointwise_weight` to `1.0` reduced some high-threshold
+  leakage but also reduced recall too much (`score_threshold=1.25` only
+  selected `2/0/1`, with `2` Success-positive and `0` Success-negative).
+  This suggests the rank objective is better aligned, but the model still
+  needs either more hard negatives around these trap patterns, an explicit
+  no-op/baseline candidate in each seed group, or a second calibrated safety
+  head before online integration.
