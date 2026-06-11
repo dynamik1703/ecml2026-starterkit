@@ -3179,3 +3179,39 @@ Multi-candidate raw screen for Success-diversity:
   Success regression. This is exactly the signal the current offline
   ranker/risk stack needs: positive rescues plus nearby traps from the same
   action-conflict generator.
+- Fresh scorer A/B on a disjoint held-out slice `2860..2879` was used to
+  avoid evaluating on the same seeds that produced the action-conflict rescue
+  prefix rows. The filtered validation pool had 200 rows: 23 good, 154
+  neutral, 23 bad; Success `+14/-4`, reward `+23/-23`.
+- Naively appending
+  `/private/tmp/ecml_diff_prefix_action_rescue_bc_v1_2840_2859_changed.json`
+  to the group-ranker training pool was negative. With candidate-source
+  features excluded and the same `2860..2879` validation slice, high ranker
+  margins selected no useful rescues: margin `1.5` selected `0/5/4`
+  good/neutral/bad, reward `-0.416667`; margin `1.25` selected `0/5/6`,
+  reward `-0.564947`; margin `1.0` selected `0/6/7`, reward `-0.669113`.
+  Lowering to `0.75` recovered two good rows but still leaked eight bad rows.
+  Conclusion: action-conflict rescue rows are not safe ranker training data in
+  their current small, biased form.
+- The same action-conflict rows are safer as risk-head data if the baseline
+  source-ablated group ranker stays unchanged. With matching split seeds,
+  `ranker_score_threshold=1.0..1.5` and
+  `veto_max_risk_probability=0.0005` still accepted exactly the same clean
+  rescue as the previous baseline stack: `1/0/0` good/neutral/bad, Success
+  `+0.5`, reward `+0.431373`, failed-agent delta `-3`. At margin `0.75` the
+  action-augmented risk head leaked one bad row, so the strict high-margin
+  regime remains the only acceptable setting.
+- Standalone, the action-augmented risk head became more permissive on the
+  fresh slice: at `max_risk_probability=0.0005` it accepted
+  `70/247/8` good/neutral/bad across the five validation splits versus the
+  previous baseline risk head's `41/165/7`, with risk recall dropping slightly
+  from `0.939130` to `0.930435`. This is not a deployment improvement; it is
+  only evidence that the extra rows do not break the strict ranker+veto stack
+  when the ranker is kept fixed.
+- Current decision: do not train the ranker directly on the first
+  action-conflict rescue batch. Keep those rows as diagnostics and possible
+  risk-head/hard-negative material. The next step toward a higher-recall,
+  less heuristic solution should be to enlarge the action-conflict data on
+  disjoint seeds and train a source-specific action-conflict scorer or policy,
+  instead of mixing this small generator-specific batch into the shared
+  ranker.
