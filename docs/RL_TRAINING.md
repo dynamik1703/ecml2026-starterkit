@@ -2670,3 +2670,39 @@ Pair-rescue opportunity screen after guarded-open promotion:
   rescue recognizer, or to redesign online gating so it can evaluate short
   candidate plans before accepting the first neutral-looking action. Greedy
   one-event acceptance cannot recover these rescues safely.
+
+Fresh pair-prefix follow-up:
+- A raw `mix2501` versus guarded rerank screen on seeds `2460-2559` produced a
+  mixed but useful mining set: reward `2/2/96`, success `0/1/99`, mean reward
+  delta `+0.000235`, mean Success delta `-0.001667`. Raw positives were
+  reward-only seeds `2497` (`+0.066047`) and `2532` (`+0.088095`); raw
+  negatives were seed `2496` (`-0.063371` reward, `-0.166667` Success) and
+  seed `2520` (`-0.067313` reward).
+- Prefix mining on those changed seeds confirmed a second neutral-then-good
+  sequence: seed `2497` prefix 1 was neutral, but prefix 2 became reward-good
+  after `MOVE_FORWARD -> MOVE_LEFT` followed by `STOP_MOVING -> MOVE_LEFT`.
+  Seed `2532` was already reward-good at prefix 1. Seeds `2496` and `2520`
+  were bad from prefix 1 onward or after the same two forced events.
+- Scoring those 16 fresh prefix rows with the packaged
+  `ecml_success_only_sequence_with_rescue.pt` accepted only one row, and it was
+  the Success-negative bad seed `2496` prefix 1. The accepted row had
+  `success_probability_lcb=0.772876` and `bad_probability_ucb=0.000740`
+  despite true `success_delta=-0.166667`. The good reward-only rows were
+  rejected, which is expected for the current Success-only acceptance path, but
+  the bad acceptance shows the old checkpoint lacks a useful Success-regression
+  risk head for these pair-prefix motifs.
+- Training the value/risk ensemble with a Success-regression head on the old
+  prefix pool plus `2446/2457`, then validating on `2496/2497/2520/2532`,
+  accepted nothing at the deployed conservative thresholds
+  (`min_utility=999`, `max_bad_probability<=0.05`,
+  `min_success_probability>=0.5`). The reverse holdout, training with
+  `2496/2497/2520/2532` and validating on `2446/2457`, also accepted nothing
+  at those conservative thresholds.
+- Lowering the pair Success threshold can recover `2457`: on the
+  `2446/2457` holdout, thresholds around `success_lcb>=0.15`,
+  `bad_ucb<=0.02`, and Success-regression UCB <= `0.03..0.1` accepted one
+  Success-positive good row and no bad rows. However, the same low-threshold
+  area leaked bad rows under five-seed cross-validation on the combined
+  206-row prefix pool; even `success_lcb>=0.5` and `bad_ucb<=0.01` accepted
+  `8` good and `4` bad rows. Do not promote a lower threshold without a much
+  larger, pair-specific dataset and a cleaner risk head.
