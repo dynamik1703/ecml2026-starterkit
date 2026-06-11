@@ -3010,3 +3010,42 @@ Multi-candidate raw screen for Success-diversity:
   is small and partly built from known traps; next step is fresh held-out
   validation/mining specifically for this two-stage design before any online
   integration.
+- Fresh held-out validation on seeds `2840..2879` was mined with the trajectory
+  conflict observation builder and the same three candidate families. The
+  candidate pool is broad enough to be informative but still not a true
+  competition-distribution test because the candidate generators and scenario
+  settings are the same as before. Summary: `mix2501` produced 120 rows
+  (`20` good, `91` neutral, `9` bad, Success `+10/-0`), `rescuebc` produced
+  200 rows (`29` good, `144` neutral, `27` bad, Success `+22/-9`), and
+  `targeted901` produced 65 rows (`5` good, `56` neutral, `4` bad, no Success
+  changes). Combined validation pool: 385 rows, `54` good, `291` neutral,
+  `40` bad, Success `+32/-9`, reward `+49/-45`.
+- The hard-negative-trained sequence ranker did not hold up on this fresh
+  held-out block. Conservative thresholds avoided Success-negative leaks but
+  failed to find useful rescues: at `score_threshold=1.25` it selected
+  `0/18/4` good/neutral/bad, reward delta `-0.111330`, Success delta `0.0`;
+  at `1.5` it selected `0/5/1`, reward delta `-0.012397`, Success delta
+  `0.0`. Lowering to `0.75` recovered some value (`11/42/13`,
+  reward `+0.801694`, Success `+2.500000`, failed-agent delta `-15`) but
+  with too many bad leaks for a safe online controller.
+- The standalone reward-risk head is useful as a broad risk detector on this
+  held-out block, but not as a rescue selector. At
+  `max_risk_probability=0.0005` it kept `48/279/16` good/neutral/bad with
+  reward `+7.389159`, Success `+11.666667`, and no Success-negative accepted,
+  while still accepting 16 bad rows. This says the risk signal has coverage,
+  but it is too imprecise to replace ranking.
+- Combining the held-out ranker with the strict risk veto did not rescue the
+  two-stage architecture. Because the ranker placed no good rows above the
+  conservative thresholds, the veto mostly filtered neutral/bad candidates:
+  `ranker_score_threshold=1.25` and `veto_max_risk_probability=0.0005`
+  accepted only `0/0/1`, reward `-0.074140`, Success `0.0`; at
+  `ranker_score_threshold=1.0` and the same veto it accepted `0/2/2`, reward
+  `-0.148280`, Success `0.0`. Relaxing the veto recovers at most the raw
+  ranker's weak held-out behavior.
+- Current conclusion after fresh held-out: the bottleneck is no longer the
+  veto; it is ranking/generalization. The previous trap-seed improvement was
+  real on known hard negatives, but it overstates deployment readiness. The
+  next high-value work should shift from threshold tuning to changing the
+  learning problem: train on seed-level decisions with explicit baseline/no-op
+  competition, add richer conflict-horizon/global occupancy features, and
+  evaluate on unseen seed blocks before accepting any online integration.
