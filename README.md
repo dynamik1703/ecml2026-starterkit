@@ -25,7 +25,7 @@ See [STEP-BY-STEP_GUIDE](STEP-BY-STEP_GUIDE.md) contributed by <a href="https://
 
 This fork currently sets the Docker submission entrypoint to the experimental
 Sequence Success Gate policy, `submission.sequence_success_policy.MyPolicy`,
-with `submission.my_observation_builder.MyTrajectoryConflictObservationBuilder`.
+with `submission.my_observation_builder.MyActionConflictObservationBuilder`.
 The learned sequence model and PPO candidate checkpoints are stored under
 `submission/models/`; `tools/` is copied into the Docker image because the
 online sequence gate reuses the same prefix-feature code as the local mining

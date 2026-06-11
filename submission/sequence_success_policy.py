@@ -38,6 +38,7 @@ DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_targeted_seed901_u4.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_rescue_bc_1010_v1.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3600_u6.pt"),
 )
 
 

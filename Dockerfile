@@ -7,7 +7,7 @@ COPY submission/ submission/
 COPY tools/ tools/
 
 ENV POLICY=submission.sequence_success_policy.MyPolicy
-ENV OBS_BUILDER=submission.my_observation_builder.MyTrajectoryConflictObservationBuilder
+ENV OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV XDG_CACHE_HOME=/tmp/xdg-cache
 ENV PYTHONPYCACHEPREFIX=/tmp/pycache

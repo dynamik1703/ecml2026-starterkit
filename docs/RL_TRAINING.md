@@ -3427,3 +3427,19 @@ Multi-candidate raw screen for Success-diversity:
   promotion step should be broader stress validation before copying the
   checkpoint into `submission/models/` and adding it to the default candidate
   list.
+- Broader gated stress validation added two further fresh 40-seed blocks.
+  On `3000..3039`, Sequence-Gate with Action-Conflict obs and default
+  candidates scored `0.928094 / 0.925000`; adding PPO3600 was exactly
+  unchanged. On `3040..3079`, default scored `0.857512 / 0.900000`; adding
+  PPO3600 was again unchanged. Aggregated over `2920..3079` (160 episodes),
+  PPO3600 under the gate improves reward mean from `0.900729` to `0.902488`
+  with identical Success `0.914583`: reward wins/losses/ties `3/0/157`,
+  Success `0/0/160`. Changed seeds are only `2941`, `2944`, and `2964`.
+- Current promotion decision: PPO3600 has passed the first broad gated
+  regression screen. Promotion requires two code/config changes: copy the
+  checkpoint into `submission/models/`, add it to the default sequence
+  candidate list, and switch the Docker `OBS_BUILDER` from the 64-feature
+  trajectory builder to the 79-feature Action-Conflict builder. Existing
+  64-feature checkpoints remain compatible because their `ActorCritic`
+  instances read only their configured prefix of the longer observation and
+  still use the appended 5-action mask.
