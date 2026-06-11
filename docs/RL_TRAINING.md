@@ -3049,3 +3049,37 @@ Multi-candidate raw screen for Success-diversity:
   learning problem: train on seed-level decisions with explicit baseline/no-op
   competition, add richer conflict-horizon/global occupancy features, and
   evaluate on unseen seed blocks before accepting any online integration.
+- Added `tools/evaluate_group_rescue_ranker.py`, a listwise seed-level
+  selector. It trains each seed group as a candidate list with an explicit
+  synthetic baseline/no-op candidate, then evaluates by selecting the best
+  non-baseline candidate only if its conservative score margin beats the
+  baseline by a configurable threshold. This removes the previous dependency
+  on an absolute utility score and makes the offline objective closer to the
+  deployment decision: "intervene or do nothing".
+- On the same fresh `2840..2879` held-out block, the group ranker with all
+  features did not solve the problem. At margin `0.0` it selected `8/24/12`
+  good/neutral/bad, with reward `-0.043356`, Success `+1.333333`, and two
+  Success-negative leaks. Higher margins reduced recall but still left
+  bad rows; lower margins increased reward but also leaks. Conclusion:
+  listwise training alone is not enough.
+- Removing candidate-source features helped generalization slightly. With
+  `--exclude-feature-regex candidate_source` and
+  `--exclude-event-feature-regex candidate_source`, high margins
+  `1.0..1.5` selected `2/7-11/5` good/neutral/bad, no Success-negative
+  leaks, reward `+0.072384`, Success `+0.666667`, failed-agent delta `-4`.
+  This suggests source tags were contributing to overfit, but removing them
+  does not create enough signal by itself.
+- Combining the source-ablated group ranker with the existing strict
+  reward-risk veto is the safest fresh-heldout configuration so far, but it
+  has low recall. With ranker margin thresholds `0.75..1.5` and
+  `veto_max_risk_probability=0.0005`, it accepted `1` good, `0` bad,
+  `3-5` neutral rows depending on margin, reward `+0.431373`, Success
+  `+0.5`, failed-agent delta `-3`, and no Success-negative leaks. This is a
+  useful conservative rescue filter, not yet a high-impact winning policy.
+- Current conclusion after the group-ranker experiment: the right direction
+  is to keep the conservative "intervene only when strongly justified" stack
+  as a safety baseline, but the main research work should move to richer
+  conflict-horizon/global occupancy features and/or actual policy training
+  that sees those features online. The offline candidate ranker can now find
+  one clean held-out rescue, but it is too low-recall to close the gap to a
+  winning competition solution by itself.
