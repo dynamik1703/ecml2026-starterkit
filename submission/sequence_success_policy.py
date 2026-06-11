@@ -39,6 +39,11 @@ DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_rescue_bc_1010_v1.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3600_u6.pt"),
+    str(
+        SUBMISSION_DIR
+        / "models"
+        / "ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt"
+    ),
 )
 
 
@@ -299,6 +304,29 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
             0.0,
         )
+        self.extra_candidate_stems = self._env_string_set(
+            "ECML_SEQUENCE_EXTRA_CANDIDATE_STEMS",
+            default="ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10",
+        )
+        self.extra_candidate_max_accepted_events = self._env_int(
+            "ECML_SEQUENCE_EXTRA_CANDIDATE_MAX_ACCEPTED_EVENTS",
+            2,
+        )
+        self.extra_candidate_require_existing_event = bool(
+            self._env_int("ECML_SEQUENCE_EXTRA_CANDIDATE_REQUIRE_EXISTING_EVENT", 1)
+        )
+        self.extra_candidate_min_success_probability = self._env_float(
+            "ECML_SEQUENCE_EXTRA_CANDIDATE_MIN_SUCCESS_PROBABILITY",
+            0.15,
+        )
+        self.extra_candidate_right_detour_min_value = self._env_float(
+            "ECML_SEQUENCE_EXTRA_CANDIDATE_RIGHT_DETOUR_MIN_VALUE_LCB",
+            -0.50,
+        )
+        self.extra_candidate_right_detour_low_conflict_min_value = self._env_float(
+            "ECML_SEQUENCE_EXTRA_CANDIDATE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
+            -0.30,
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -327,6 +355,11 @@ class SequenceSuccessPolicy(RerankPolicy):
             return int(os.environ.get(name, default))
         except Exception:
             return default
+
+    @staticmethod
+    def _env_string_set(name: str, default: str = "") -> set[str]:
+        value = os.environ.get(name, default)
+        return {item.strip() for item in value.split(",") if item.strip()}
 
     @classmethod
     def _env_transition_set(
@@ -399,6 +432,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             self._accepted_event_details = []
             self._seen_candidate_diff_policy_ids = set()
         self._last_step = step
+
+    def _candidate_checkpoint_path(self, candidate_policy: RerankPolicy) -> str:
+        return self.candidate_policy_paths.get(id(candidate_policy), "")
+
+    def _is_extra_candidate(
+        self,
+        candidate_policy: RerankPolicy,
+        require_existing_event: bool = False,
+    ) -> bool:
+        if require_existing_event and not self._accepted_event_details:
+            return False
+        path = Path(self._candidate_checkpoint_path(candidate_policy))
+        stem = path.stem
+        return bool(stem and stem in self.extra_candidate_stems)
 
     def act_many(
         self,
@@ -514,11 +561,21 @@ class SequenceSuccessPolicy(RerankPolicy):
         candidate_policy: RerankPolicy,
         reserved_targets: set[tuple[int, int]],
     ) -> bool:
+        extra_candidate = self._is_extra_candidate(
+            candidate_policy,
+            require_existing_event=self.extra_candidate_require_existing_event,
+        )
         if (
             self.max_accepted_events >= 0
             and len(self._accepted_event_details) >= self.max_accepted_events
         ):
-            return False
+            if (
+                not extra_candidate
+                or self.extra_candidate_max_accepted_events < 0
+                or len(self._accepted_event_details)
+                >= self.extra_candidate_max_accepted_events
+            ):
+                return False
         if candidate_action not in (
             ReservationPolicy.MOVE_LEFT,
             ReservationPolicy.MOVE_FORWARD,
@@ -560,7 +617,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             detail.update(
                 candidate_source_features(
                     candidate_policy.__class__.__name__,
-                    self.candidate_policy_paths.get(candidate_policy),
+                    self._candidate_checkpoint_path(candidate_policy),
                 )
             )
             detail = add_delta_features(detail)
@@ -571,7 +628,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             aggregate.update(
                 candidate_source_features(
                     candidate_policy.__class__.__name__,
-                    self.candidate_policy_paths.get(candidate_policy),
+                    self._candidate_checkpoint_path(candidate_policy),
                 )
             )
             if self._too_many_head_on_edge_conflicts(detail):
@@ -588,6 +645,54 @@ class SequenceSuccessPolicy(RerankPolicy):
                         aggregate=aggregate,
                     )
                 return False
+            accepted, scores = self._score_and_guard_candidate(
+                aggregate=aggregate,
+                detail=detail,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+                extra_candidate=extra_candidate,
+            )
+        except Exception:
+            return False
+
+        if accepted or self.trace_all:
+            self._trace_sequence_decision(
+                env=env,
+                handle=handle,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+                candidate_policy=candidate_policy,
+                accepted=accepted,
+                scores=scores,
+                detail=detail,
+                aggregate=aggregate,
+            )
+        if accepted:
+            self._accepted_event_details.append(detail)
+        return bool(accepted)
+
+    def _score_and_guard_candidate(
+        self,
+        aggregate: dict[str, Any],
+        detail: dict[str, Any],
+        baseline_action: int,
+        candidate_action: int,
+        extra_candidate: bool,
+    ) -> tuple[bool, dict[str, float]]:
+        old_min_success = self.sequence_scorer.min_success_probability
+        old_right_value = self.right_detour_min_value
+        old_low_conflict_right_value = self.right_detour_low_conflict_min_value
+        try:
+            if extra_candidate:
+                self.sequence_scorer.min_success_probability = (
+                    self.extra_candidate_min_success_probability
+                )
+                self.right_detour_min_value = (
+                    self.extra_candidate_right_detour_min_value
+                )
+                self.right_detour_low_conflict_min_value = (
+                    self.extra_candidate_right_detour_low_conflict_min_value
+                )
             accepted, scores = self.sequence_scorer.score(aggregate)
             if accepted and self._low_value_same_edge_candidate(detail, scores):
                 accepted = False
@@ -622,24 +727,11 @@ class SequenceSuccessPolicy(RerankPolicy):
                 scores,
             ):
                 accepted = False
-        except Exception:
-            return False
-
-        if accepted or self.trace_all:
-            self._trace_sequence_decision(
-                env=env,
-                handle=handle,
-                baseline_action=baseline_action,
-                candidate_action=candidate_action,
-                candidate_policy=candidate_policy,
-                accepted=accepted,
-                scores=scores,
-                detail=detail,
-                aggregate=aggregate,
-            )
-        if accepted:
-            self._accepted_event_details.append(detail)
-        return bool(accepted)
+            return accepted, scores
+        finally:
+            self.sequence_scorer.min_success_probability = old_min_success
+            self.right_detour_min_value = old_right_value
+            self.right_detour_low_conflict_min_value = old_low_conflict_right_value
 
     def _too_many_head_on_edge_conflicts(self, detail: dict[str, Any]) -> bool:
         if self.max_head_on_edge_conflicts < 0:

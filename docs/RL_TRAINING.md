@@ -3443,3 +3443,34 @@ Multi-candidate raw screen for Success-diversity:
   64-feature checkpoints remain compatible because their `ActorCritic`
   instances read only their configured prefix of the longer observation and
   still use the appended 5-action mask.
+- PPO3800 follow-up: a second action-conflict PPO checkpoint
+  `/private/tmp/ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt`
+  was trained from the success-diversity/rescue mix checkpoint. Raw PPO3800 is
+  still not deployable on `3080..3119` (`0.886727 / 0.925000` versus promoted
+  Sequence default `0.902456 / 0.933333`), but it contains real rescue
+  opportunities. Prefix mining on six focus seeds showed `3107` needs a
+  two-event PPO prefix for full rescue, `3088` is rescued by the first PPO3800
+  right-detour, while `3101` and `3108` contain clear bad prefixes.
+- A broad gate relaxation was unsafe. Lowering the Sequence Success threshold
+  and right-detour value guard globally opened `3088`
+  (`+0.139924` reward, `+0.166667` Success) and was clean on `3080..3119`,
+  but failed on the independent `3120..3159` block with reward wins/losses
+  `2/3/35` and Success wins/losses `0/2/38`. The regressions came from older
+  candidates also benefiting from the global relaxation, not from PPO3800
+  itself.
+- The promoted-safe PPO3800 variant is therefore candidate-specific: PPO3800
+  is added as an extra default candidate, but the relaxed thresholds apply only
+  to that checkpoint and only after the normal Sequence gate has already
+  accepted one event. The extra candidate is capped at two total accepted
+  events per episode. Validation:
+  - `3080..3119`: `0.902456 / 0.933333` to `0.905954 / 0.937500`,
+    reward and Success wins/losses/ties `1/0/39`.
+  - `3120..3159`: unchanged `0.932636 / 0.920833`, wins/losses/ties
+    `0/0/40`.
+  - `3160..3199`: unchanged `0.906829 / 0.908333`, wins/losses/ties
+    `0/0/40`.
+- Assessment after PPO3800 candidate-specific gating: this is a safe RL
+  deployment improvement, but still not the "large jump." It confirms the
+  route to better RL performance: train policies that create more low-risk
+  first-extra actions like `3088`, and separately build a sequence-level
+  planner for multi-event rescues like `3107`.
