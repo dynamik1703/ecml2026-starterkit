@@ -87,6 +87,25 @@ def column_slug(value: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in value).strip("_")
 
 
+def candidate_source_name(policy: Any, checkpoint: Path | str | None = None) -> str:
+    if checkpoint is not None:
+        source = Path(checkpoint).stem
+    else:
+        source = str(policy).rsplit(".", maxsplit=1)[-1]
+    return column_slug(source).lower() or "unknown"
+
+
+def candidate_source_features(
+    policy: Any,
+    checkpoint: Path | str | None = None,
+) -> dict[str, float]:
+    source = candidate_source_name(policy, checkpoint)
+    return {
+        "candidate_source_known": 1.0,
+        f"candidate_source_{source}": 1.0,
+    }
+
+
 def safe_float(value: Any) -> float:
     if value in (None, ""):
         return float("nan")
@@ -239,6 +258,12 @@ def run_diff_prefix_episode(
                 baseline_actions,
                 candidate_actions,
             )
+            detail.update(
+                candidate_source_features(
+                    args.candidate_policy,
+                    args.candidate_checkpoint,
+                )
+            )
             detail = add_delta_features(detail)
             detail["prefix_index"] = len(events) + 1
             event_details.append(detail)
@@ -282,6 +307,10 @@ def compare_row(
 ) -> dict[str, Any]:
     baseline_failed = len(baseline["failed_agents"])
     forced_failed = len(forced["failed_agents"])
+    source_features = candidate_source_features(
+        args.candidate_policy,
+        args.candidate_checkpoint,
+    )
     row = {
         "seed": seed,
         "scene": args.scene or "scene_5",
@@ -310,6 +339,7 @@ def compare_row(
         "candidate_success_delta": candidate["success_rate"] - baseline["success_rate"],
         "candidate_failed_agent_ids": candidate["failed_agent_ids"],
         "events": compact_events(forced["events"]),
+        **source_features,
         **aggregate_event_features(forced["event_details"]),
     }
     row["outcome_category"] = outcome_category(row, args.reward_epsilon)

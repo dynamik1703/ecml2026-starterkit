@@ -19,11 +19,13 @@ try:
     from tools.mine_diff_prefix_dataset import (
         add_delta_features,
         aggregate_event_features,
+        candidate_source_features,
     )
 except Exception:  # pragma: no cover - submission fallback for stripped packages.
     diff_row = None
     add_delta_features = None
     aggregate_event_features = None
+    candidate_source_features = None
 
 
 SUBMISSION_DIR = Path(__file__).resolve().parent
@@ -406,7 +408,12 @@ class SequenceSuccessPolicy(RerankPolicy):
         baseline_actions = super().act_many(handles, observations, **kwargs)
         if not self.candidate_policies or self.sequence_scorer is None:
             return baseline_actions
-        if diff_row is None or add_delta_features is None or aggregate_event_features is None:
+        if (
+            diff_row is None
+            or add_delta_features is None
+            or aggregate_event_features is None
+            or candidate_source_features is None
+        ):
             return baseline_actions
 
         candidate_batches = [
@@ -549,10 +556,22 @@ class SequenceSuccessPolicy(RerankPolicy):
                 baseline_actions,
                 candidate_actions,
             )
+            detail.update(
+                candidate_source_features(
+                    candidate_policy.__class__.__name__,
+                    self.candidate_policy_paths.get(candidate_policy),
+                )
+            )
             detail = add_delta_features(detail)
             detail["prefix_index"] = len(self._accepted_event_details) + 1
             aggregate = aggregate_event_features(
                 [*self._accepted_event_details, detail]
+            )
+            aggregate.update(
+                candidate_source_features(
+                    candidate_policy.__class__.__name__,
+                    self.candidate_policy_paths.get(candidate_policy),
+                )
             )
             if self._too_many_head_on_edge_conflicts(detail):
                 if self.trace_all:

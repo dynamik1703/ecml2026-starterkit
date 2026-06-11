@@ -2811,3 +2811,13 @@ Multi-candidate raw screen for Success-diversity:
   candidate/source and plan-prefix context as explicit features and evaluate a
   short-sequence planner/classifier that scores full candidate prefixes, not a
   greedy accepted-event stream.
+- Candidate-source feature support was added to the diff-prefix mining and
+  online sequence-scoring path. New mined rows now include stable one-hot
+  features derived from the checkpoint stem, for example
+  `candidate_source_ecml_ppo_trajectory_targeted_seed901_u4` and aggregated
+  `event_candidate_source_*` features. The online Sequence policy sets the
+  same features from its candidate checkpoint path before scoring. This is
+  backwards compatible with the current packaged model because unknown feature
+  columns are ignored; it only affects future models trained with these new
+  columns. Smoke mining on `targeted901` seed `2797` produced the expected
+  source columns, and a one-episode online smoke on seed `2797` still ran.
