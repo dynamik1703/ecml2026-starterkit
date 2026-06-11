@@ -2744,3 +2744,23 @@ Broader raw-mix screen for additional rescue data:
   trained with Success-positive labels, Success-negative labels, and
   reward-only positives kept as separate "value-only" examples instead of
   sharing the same gate acceptance path.
+- Added `tools/evaluate_success_rescue_classifier.py` as an offline prototype
+  for that separation. It trains two independent bootstrap MLP ensembles:
+  one binary classifier for `success_delta > 0` and one unsafe classifier for
+  `success_delta < 0`, reward-negative rows, or additional failed agents.
+  Acceptance is `success_lcb >= threshold` and `unsafe_ucb <= threshold`.
+- On the same 274-row combined pool, this separated classifier improved the
+  safety side but not the Success-recall side. With normal thresholds
+  (`min_success_probability=0.5..0.95`,
+  `max_unsafe_probability=0.001..0.005`) five-seed cross-validation accepted
+  zero bad rows in the strict region, but accepted only reward-positive rows
+  and `0` Success-positive rows. Lowering the Success threshold as far as
+  `0.001..0.3` recovered at most `1-2` Success-positive rows, but immediately
+  introduced bad and/or Success-negative leakage. Audit examples show the
+  failure modes: `2457` prefix `2` can get high Success score but high Unsafe
+  score, while `2686` gets low Unsafe score but near-zero Success score.
+- This narrows the next step: the issue is no longer just gate thresholding.
+  We need better Success-rescue representation or data construction, likely
+  by training on planned sequence/state context where reward-only positives
+  are explicitly excluded from the Success head, and by mining more
+  Success-positive patterns from additional candidate policies.
