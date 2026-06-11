@@ -3379,3 +3379,32 @@ Multi-candidate raw screen for Success-diversity:
   PPO candidate on curated hard seeds with these selected-action penalties,
   then compare both final score and the new conflict-action metrics against
   the unpenalized action-conflict PPO baseline.
+- First selected-action-penalty PPO candidate:
+  `/private/tmp/ecml_action_conflict_penalty_ppo_seed3600_u6.pt` was trained
+  from `/private/tmp/ecml_action_conflict_rescue_bc_v1.pt` on known
+  `2840..2919` positive/hard-negative action-conflict seeds plus a few anchor
+  seeds. It used 6 updates x 4 complete episodes, `lr=1e-5`, teacher CE
+  `0.25`, anchor KL `4.0`, rollout temperature `1.08`, terminal team
+  success/failure shaping, and action penalties
+  `0.02/0.08/0.04` for conflict/head-on/opposing. Training stayed controlled:
+  update Success ended at `0.958333`, anchor KL stayed below `0.0006`, and
+  `action_conflict_risky` fell from `0.156` in update 1 to `0.0864` in update
+  6.
+- Held-out raw-policy scoreboard on `2920..2959` against the current packaged
+  Sequence-Gate default: current `0.922640 / 0.925000`; raw Action-BC v1
+  `0.906950 / 0.945833` (`reward_delta=-0.015690`, Success `+0.020833`);
+  penalty-PPO3600 `0.907912 / 0.945833`
+  (`reward_delta=-0.014728`, Success `+0.020833`). PPO3600 is a small reward
+  improvement over raw Action-BC with unchanged Success, but still not safe
+  enough to deploy raw.
+- Seed-level diagnosis: PPO3600 improves over Action-BC on `2944` and removes
+  BC changes on `2925`; it also removes the BC win on `2958` and worsens
+  `2936`. Against current, the best PPO3600 gains are `2935`, `2930`,
+  `2934`, `2941`, `2940`, `2945`, and `2949`, but the largest regressions
+  remain `2924`, `2922`, `2955`, `2936`, `2937`, `2956`, and `2944`.
+- Current assessment after PPO3600: selected-action conflict shaping is useful
+  training instrumentation and nudges the raw policy in the intended
+  direction, but it does not solve the main bottleneck. The winning path still
+  needs either a stronger learned action-value/risk model or an online
+  sequence gate that can accept PPO3600's safe wins while blocking the same
+  recurring traps.
