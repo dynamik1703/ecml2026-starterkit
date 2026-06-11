@@ -2706,3 +2706,41 @@ Fresh pair-prefix follow-up:
   206-row prefix pool; even `success_lcb>=0.5` and `bad_ucb<=0.01` accepted
   `8` good and `4` bad rows. Do not promote a lower threshold without a much
   larger, pair-specific dataset and a cleaner risk head.
+
+Broader raw-mix screen for additional rescue data:
+- Raw `mix2501` versus guarded rerank on fresh seeds `2560-2759` was net
+  positive but mixed: reward `13/4/183`, Success `1/1/198`, mean reward delta
+  `+0.003875`, mean Success delta `0`. The one new Success-positive seed was
+  `2686` (`0.572531/0.666667 -> 0.739198/0.833333`), while the hard
+  Success-negative seed was `2573`
+  (`0.841486/0.833333 -> 0.674819/0.666667`).
+- Prefix mining on the 17 changed seeds produced 68 rows. Prefix `3` had the
+  best Success safety in this small set: reward `12/4/1`, Success `1/0/16`.
+  Prefix `5` maximized reward (`13/4/0`) but reintroduced the Success loss
+  (`1/1/15`). The new Success seed `2686` is not a pair rescue; prefix `1`
+  already applies the only needed `MOVE_FORWARD -> MOVE_LEFT` action and is
+  Success-positive. Several reward-only wins are true sequence effects:
+  `2572` is bad at prefix `2` but good at prefix `3`, `2631` is bad at prefix
+  `1` but good at prefix `2`, `2709` is neutral at prefix `1` and good at
+  prefix `2`, and `2737` is only good at prefix `5`.
+- The packaged `ecml_success_only_sequence_with_rescue.pt` does not recognize
+  the new rescue. On the 68 rows it accepted only one neutral row
+  (`2665` prefix `2`) and accepted no good rows. For `2686`, all prefixes had
+  `success_lcb=0.000622`, `bad_ucb=0.978459`, and `value_lcb=-0.589401`.
+- Adding these 68 rows to the value/risk ensemble pool and retraining with a
+  Success-regression head did not produce a deployable model. Five-seed
+  cross-validation at conservative thresholds still leaked bad rows and
+  accepted mostly reward-only rows through the Success head; the best sorted
+  strict setting shown (`max_bad_probability=0.0025`,
+  `min_success_probability>=0.6`) accepted `5` good, `1` neutral, and `5` bad
+  rows, with `0` accepted Success-positive rows. Stronger Success/Risk
+  weighting reduced but did not remove leakage (`4/1/1` good/neutral/bad at
+  very strict `max_bad_probability=0.0005`, `min_success_probability>=0.85`),
+  again with `0` accepted Success-positive rows.
+- Conclusion: the current value/risk ensemble is not the right final shape for
+  new Success rescues. It confuses reward-good rows with Success-rescue rows
+  and does not generalize to `2686`/`2457` safely. The next modeling step
+  should be a dedicated Success-rescue classifier or pair/sequence planner
+  trained with Success-positive labels, Success-negative labels, and
+  reward-only positives kept as separate "value-only" examples instead of
+  sharing the same gate acceptance path.
