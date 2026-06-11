@@ -2842,3 +2842,37 @@ Multi-candidate raw screen for Success-diversity:
   bad rows. The issue is therefore not just source identity or this unsafe
   label definition; the next model needs richer plan-state representation or
   a different sequence objective.
+- Added `tools/evaluate_sequence_rescue_planner.py` as the first offline
+  short-sequence prototype. It reads the JSON prefix rows, keeps the ordered
+  `event_details`, encodes them with a small GRU, and trains separate
+  Success-positive and Unsafe heads. By default it drops the flattened
+  top-level `event_*` aggregate features so we can test whether ordered event
+  context alone carries signal. It also reports a best-by-seed planner metric:
+  for each validation seed it selects at most one prefix by
+  `success_lcb - unsafe_weight * unsafe_ucb`, which is closer to the intended
+  rescue decision than accepting every row above a threshold.
+- Pure ordered-event input is not enough yet. On the 394-row combined pool
+  (`--reward-negative-unsafe-mode non_success`, 5 split seeds, 5-member
+  ensemble, 350 epochs), threshold acceptance found `0` Success-positive
+  rows and leaked bad rows. A separate score audit showed the Success head can
+  assign high scores to some positive rows, but the Unsafe head is poorly
+  calibrated and blocks them; relaxing Unsafe thresholds recovers positives
+  only together with too much bad/Success-negative leakage.
+- Adding the flattened aggregate features back (`--no-drop-aggregate-event-features`)
+  improves the planner-style signal but still is not deployment-safe. The
+  best-by-seed planner metric produced positive net Success in several
+  regions, for example `unsafe_weight=0.25`, `score_threshold=0.0` selected
+  `18/15/9` good/neutral/bad rows with `7` Success-positive and `1`
+  Success-negative, reward delta `+0.801671`, and Success delta `+1.0`.
+  Stricter no-Success-negative regions exist, for example
+  `unsafe_weight=0.1`, `score_threshold=0.25` selected `11/4/7` with `3`
+  Success-positive, `0` Success-negative, reward delta `+0.154851`, and
+  Success delta `+0.5`, but still leaked too many bad rows for online use.
+- Current conclusion: the direction is useful for diagnosis but not yet a
+  winning submission component. The important insight is that per-seed
+  prefix selection is much better aligned with the problem than greedy
+  row-thresholding, but the labels and features still do not separate
+  Success rescues from reward-bad traps reliably. Next high-value step is to
+  move the objective from binary row classification toward seed-level
+  candidate ranking or imitation of the best counterfactual prefix, with
+  evaluation on held-out fresh seeds before any online integration.
