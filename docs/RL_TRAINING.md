@@ -2592,3 +2592,45 @@ Success-regression risk head prototype:
   offline risk modeling but is not yet sufficient to replace the slack guard.
   Keep the optional model/head support, but do not change the packaged default
   model or default guard thresholds yet.
+
+Detour value guard follow-up:
+- Added configurable online guards in `submission.sequence_success_policy`:
+  `ECML_SEQUENCE_LEFT_DETOUR_MIN_VALUE_LCB` for `MOVE_FORWARD -> MOVE_LEFT`
+  detours, and a low-conflict right-detour guard controlled by
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MAX_CELLS`,
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_SLACK`, and
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB`. Defaults leave the
+  committed submission behavior unchanged.
+- Trace diagnosis with the success-regression model showed that seed `120`
+  and the known bad seed `578` both pass the Success/Risk heads as
+  `MOVE_FORWARD -> MOVE_LEFT`, but differ strongly in value:
+  seed `120` has `value_lcb=-0.035726`, while seed `578` has
+  `value_lcb=-0.702727`. A left-detour value guard at `-0.4` keeps `120` and
+  blocks `578`.
+- Opening the left slack guard with only that left value guard produced a
+  positive but unsafe 33-seed screen: reward `10/3/20`, success `4/1/28`.
+  It recovered `120` and `392`, but reopened reward regressions on `1814`,
+  `1442`, and `1463`, including a Success loss on `1442`.
+- The regression traces were all low-conflict `MOVE_FORWARD -> MOVE_RIGHT`
+  detours from `ecml_rescue_bc_1010_v1.pt`. A stricter low-conflict right
+  guard with `cells<=1`, `slack<140`, and `value_lcb<0` neutralized those
+  regressions while keeping useful right-detours such as `207`, `1438`, and
+  `1509`.
+- Best tested variant so far keeps the current packaged sequence model, adds
+  the mix2501 PPO checkpoint as a fifth candidate, opens the left slack guard,
+  and enables the two new guards:
+  `ECML_SEQUENCE_LEFT_MAX_SLACK=1000000`,
+  `ECML_SEQUENCE_LEFT_DETOUR_MIN_VALUE_LCB=-0.4`,
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MAX_CELLS=1`,
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_SLACK=140`, and
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB=0.0`.
+  On the 33 known positive/hard-negative seeds it achieved reward `8/0/25`,
+  success `4/0/29`, with reward-delta sum `+1.081390`. Current default on the
+  same suite is reward `9/0/24`, success `3/0/30`, reward-delta sum
+  `+1.080710`; the new variant trades some reward-only coverage for one more
+  Success rescue.
+- Fresh holdout `2210-2309` for this guarded-open variant was clean and sparse:
+  reward `1/0/99`, success `0/0/100`, changing only seed `2211`
+  (`+0.103135` reward, unchanged Success). This is a promotion candidate, but
+  its edge is very small; run at least one more disjoint 100-seed holdout
+  before changing packaged defaults.
