@@ -2643,3 +2643,30 @@ Detour value guard follow-up:
   default submission from the previous sparse rescue set to the guarded-open
   variant; the edge is still small, so future work should keep validating
   disjoint windows before adding more candidate policies.
+
+Pair-rescue opportunity screen after guarded-open promotion:
+- Scoreboard on fresh seeds `2410-2459` compared guarded rerank, promoted
+  sequence default, and raw `mix2501` as a single-checkpoint
+  `RerankPolicy`. Promoted sequence was fully neutral versus rerank:
+  reward `0/0/50`, success `0/0/50`. Raw `mix2501` was mixed:
+  reward `1/1/48`, success `1/0/49`, mean deltas `-0.000754` reward and
+  `+0.003333` Success.
+- The useful raw opportunity was seed `2457`: raw `mix2501` improved
+  `0.633271/0.5 -> 0.666667/0.666667`. The matching hard negative was seed
+  `2446`: raw `mix2501` regressed reward
+  `0.616325/0.5 -> 0.545222/0.5`.
+- Prefix mining with lengths `1,2,3,5` showed the important credit-assignment
+  pattern. Seed `2457` is not a good one-step action: prefix 1 is neutral, but
+  prefix 2 and longer are good (`+0.033396` reward, `+0.166667` Success). The
+  first two events are early `MOVE_FORWARD -> MOVE_RIGHT` deviations at
+  times `46` and `48`. Seed `2446` is bad from prefix 1 onward and consists
+  of repeated `MOVE_FORWARD -> MOVE_LEFT` same-edge detours.
+- Current sequence model scoring confirms this is not a threshold tweak:
+  `2457` prefix 2 has `success_lcb=0.128794`, `bad_ucb=0.069158`, and
+  `value_lcb=-1.038975`, so it is far outside the deployed acceptance region.
+  The model has not learned this pair-rescue motif.
+- Implication: the next high-value RL/MARL direction is to mine more
+  neutral-then-good multi-event prefixes and train a dedicated pair/prefix
+  rescue recognizer, or to redesign online gating so it can evaluate short
+  candidate plans before accepting the first neutral-looking action. Greedy
+  one-event acceptance cannot recover these rescues safely.
