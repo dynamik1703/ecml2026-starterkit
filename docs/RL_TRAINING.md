@@ -3408,3 +3408,22 @@ Multi-candidate raw screen for Success-diversity:
   needs either a stronger learned action-value/risk model or an online
   sequence gate that can accept PPO3600's safe wins while blocking the same
   recurring traps.
+- Sequence-Gate integration screen for PPO3600: because PPO3600 is a
+  79-feature checkpoint, the online gate must run with
+  `MyActionConflictObservationBuilder` if this checkpoint is included as a
+  candidate. On `2920..2959`, Sequence-Gate with Action-Conflict obs but the
+  default candidate list was exactly identical to the packaged current score:
+  `0.922640 / 0.925000`. Adding PPO3600 as a sixth candidate raised the score
+  to `0.927412 / 0.925000`, with reward wins on seeds `2941` and `2944`, no
+  reward losses, and no Success changes.
+- Fresh follow-up block `2960..2999`: Sequence-Gate with Action-Conflict obs
+  and default candidates scored `0.894669 / 0.908333`; adding PPO3600 scored
+  `0.896933 / 0.908333`, again with no regressions. The only changed seed was
+  `2964` (`+0.090580` reward, Success unchanged).
+- Current assessment after 80 gated validation seeds (`2920..2999`): PPO3600
+  is not useful as a raw policy, but it is useful as an additional candidate
+  under the existing strict Sequence-Success/Risk gate: 3 reward wins, 0 reward
+  losses, 0 Success changes across these two disjoint 40-seed blocks. Next
+  promotion step should be broader stress validation before copying the
+  checkpoint into `submission/models/` and adding it to the default candidate
+  list.
