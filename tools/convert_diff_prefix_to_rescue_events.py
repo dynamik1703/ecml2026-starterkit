@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+from typing import Any
+
+from tools.evaluate_sequence_rescue_planner import read_json_rows
+from tools.train_counterfactual_gate import safe_float
+
+
+ACTION_NAME_TO_ID = {
+    "DO_NOTHING": 0,
+    "MOVE_LEFT": 1,
+    "MOVE_FORWARD": 2,
+    "MOVE_RIGHT": 3,
+    "STOP_MOVING": 4,
+}
+
+
+def action_id(value: Any, name: Any) -> int:
+    numeric = safe_float(value)
+    if numeric == numeric:
+        return int(numeric)
+    return ACTION_NAME_TO_ID.get(str(name), -1)
+
+
+def positive_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
+    reward_delta = safe_float(row.get("reward_delta"))
+    success_delta = safe_float(row.get("success_delta"))
+    failed_delta = safe_float(row.get("failed_agents_delta"))
+    reward_delta = reward_delta if reward_delta == reward_delta else 0.0
+    success_delta = success_delta if success_delta == success_delta else 0.0
+    failed_delta = failed_delta if failed_delta == failed_delta else 0.0
+    if success_delta < -1e-9 or failed_delta > 0:
+        return False
+    return success_delta > 1e-9 or reward_delta > reward_epsilon
+
+
+def source_columns(rows: list[dict[str, Any]]) -> list[str]:
+    columns = sorted(
+        {
+            key
+            for row in rows
+            for key in row
+            if key.startswith("candidate_source_")
+        }
+    )
+    return columns
+
+
+def event_rows(
+    rows: list[dict[str, Any]],
+    reward_epsilon: float,
+) -> list[dict[str, Any]]:
+    sources = source_columns(rows)
+    output = []
+    seen = set()
+    for row in rows:
+        if not positive_prefix(row, reward_epsilon):
+            continue
+        details = row.get("event_details") or []
+        if not isinstance(details, list):
+            continue
+        reward_delta = safe_float(row.get("reward_delta"))
+        success_delta = safe_float(row.get("success_delta"))
+        failed_delta = safe_float(row.get("failed_agents_delta"))
+        utility = (
+            (reward_delta if reward_delta == reward_delta else 0.0)
+            + 2.0 * (success_delta if success_delta == success_delta else 0.0)
+            - 0.75 * max(0.0, failed_delta if failed_delta == failed_delta else 0.0)
+        )
+        for index, event in enumerate(details):
+            if not isinstance(event, dict):
+                continue
+            forced_action = action_id(
+                event.get("candidate_action"),
+                event.get("candidate_action_name"),
+            )
+            baseline_action = action_id(
+                event.get("baseline_action"),
+                event.get("baseline_action_name"),
+            )
+            if forced_action < 0 or baseline_action < 0:
+                continue
+            key = (
+                int(float(row.get("seed", event.get("seed", -1)))),
+                int(float(event.get("env_time", -1))),
+                int(float(event.get("agent_id", -1))),
+                forced_action,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            record = {
+                "seed": key[0],
+                "env_time": key[1],
+                "agent_id": key[2],
+                "baseline_action": baseline_action,
+                "baseline_action_name": event.get("baseline_action_name", ""),
+                "forced_action": forced_action,
+                "forced_action_name": event.get("candidate_action_name", ""),
+                "forced_applied": True,
+                "reward_delta": reward_delta if reward_delta == reward_delta else 0.0,
+                "success_delta": success_delta if success_delta == success_delta else 0.0,
+                "failed_agents_delta": (
+                    failed_delta if failed_delta == failed_delta else 0.0
+                ),
+                "prefix_len": row.get("prefix_len", len(details)),
+                "prefix_event_index": index + 1,
+                "prefix_event_count": len(details),
+                "utility": utility,
+                "events": row.get("events", ""),
+            }
+            for source in sources:
+                record[source] = row.get(source, 0.0)
+            output.append(record)
+    return output
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({key for row in rows for key in row})
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Convert positive diff-prefix JSON rows into event-level rescue "
+            "labels for train_rescue_behavior_clone.py."
+        )
+    )
+    parser.add_argument("json", nargs="+", type=Path)
+    parser.add_argument("--output-csv", required=True, type=Path)
+    parser.add_argument("--output-json", type=Path)
+    parser.add_argument("--reward-epsilon", type=float, default=1e-6)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    rows = read_json_rows(args.json)
+    converted = event_rows(rows, args.reward_epsilon)
+    write_csv(args.output_csv, converted)
+    summary = {
+        "input_rows": len(rows),
+        "event_rows": len(converted),
+        "unique_seeds": len({row["seed"] for row in converted}),
+    }
+    if args.output_json is not None:
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        with args.output_json.open("w") as handle:
+            json.dump(summary, handle, indent=2)
+            handle.write("\n")
+    print(
+        "converted "
+        f"input_rows={summary['input_rows']} "
+        f"event_rows={summary['event_rows']} "
+        f"unique_seeds={summary['unique_seeds']} "
+        f"output_csv={args.output_csv}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

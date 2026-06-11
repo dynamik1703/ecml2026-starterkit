@@ -3111,3 +3111,46 @@ Multi-candidate raw screen for Success-diversity:
   evidence of a stronger policy. The next test should be a controlled
   BC-warmstart plus PPO run on unseen seeds, compared against the current
   trajectory-conflict PPO/rescue stack and starterkit baseline.
+- Controlled action-conflict BC warmstart:
+  `/private/tmp/ecml_action_conflict_bc_8ep.pt` trained 8 episodes on seeds
+  `3200..3207` with `MyActionConflictObservationBuilder`, class-balanced CE,
+  and `submission.rerank_policy.MyPolicy` as teacher. Collection had 22587
+  valid teacher samples, only 3 teacher/reference disagreements, and training
+  accuracy around `0.997`. Held-out scoreboard on `2840..2859` versus current
+  default was negative: current `0.897936 / 0.925000`, action-BC
+  `0.855028 / 0.908333`, reward delta `-0.042909`, Success delta
+  `-0.016667`, reward W/L/T `2/9/9`, Success W/L/T `1/2/17`. Conclusion:
+  pure imitation of the current teacher does not exploit the new features.
+- Conservative PPO fine-tune from that BC checkpoint
+  `/private/tmp/ecml_action_conflict_ppo_3200_u4.pt` was numerically stable
+  but did not change the deterministic policy on the held-out screen.
+  Hyperparameters were deliberately conservative: 4 updates x 3 complete
+  episodes, `lr=1e-5`, `teacher_ce=0.35`, `anchor_kl=6.0`, small slack/global
+  shaping and conflict-priority penalty. Anchor KL stayed tiny
+  (`~1e-6..2.6e-5`), rollout Success ranged `0.777778..1.0`, and the external
+  `2840..2859` scoreboard was identical to action-BC. Conclusion: this PPO
+  setup is stable but too anchored to create useful new actions.
+- Added `tools/convert_diff_prefix_to_rescue_events.py` to convert positive
+  diff-prefix JSON rows into event-level labels usable by
+  `tools/train_rescue_behavior_clone.py`. This is an approximation: prefix
+  success may require a sequence of actions, but the converter emits each
+  positive prefix event as an individual supervised rescue label. Converting
+  the current positive/diagnostic JSON pool produced 191 event labels over
+  53 seeds in `/private/tmp/ecml_diff_prefix_positive_rescue_events.csv`.
+- Action-conflict Rescue-BC from converted prefix labels:
+  `/private/tmp/ecml_action_conflict_rescue_bc_v1.pt` trained from the 191
+  converted labels plus anchor seeds `3200..3215`. Collection replay hit
+  `167` labels, had `0` misses, `24` invalid labels, and `18` baseline
+  mismatches; it collected 46912 anchor samples. Held-out `2840..2859`
+  remained unsafe as a raw policy: `0.856323 / 0.900000`, reward delta
+  `-0.041613`, Success delta `-0.025000`, reward W/L/T `3/6/11`, Success
+  W/L/T `1/2/17` versus current default. It found useful wins on seeds
+  `2842` (`+0.112309` reward) and `2854` (`+0.166667` Success), but leaked
+  large losses on `2847`, `2845`, `2852`, `2855`, `2846`, and `2859`.
+- Current conclusion after the first action-conflict learning cycle: the new
+  observation is technically sound and raw learned policies can generate new
+  positive actions, but raw BC/PPO is still not safe. The best next use is as
+  candidate-generation data for the offline sequence/risk stack: mine
+  first-diff/prefix outcomes from `ecml_action_conflict_rescue_bc_v1.pt`,
+  add its wins and hard negatives to the ranker/risk datasets, and only deploy
+  through a strict scorer/veto.
