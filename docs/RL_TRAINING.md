@@ -3083,3 +3083,31 @@ Multi-candidate raw screen for Success-diversity:
   that sees those features online. The offline candidate ranker can now find
   one clean held-out rescue, but it is too low-recall to close the gap to a
   winning competition solution by itself.
+- Added an opt-in action-conflict observation builder:
+  `submission.my_observation_builder.MyActionConflictObservationBuilder`.
+  It keeps the existing 64-dimensional trajectory-conflict observation intact
+  and appends 15 per-action features for `LEFT/FORWARD/RIGHT`: local validity,
+  target-distance delta, route-prefix conflict count, head-on edge conflicts,
+  and opposing-direction intersections. The resulting feature size is `79`
+  (`84` values including the appended 5-action mask). Existing checkpoints and
+  builders are unchanged.
+- Wired the new observation into the trainable paths with
+  `--use-action-conflict-obs`: `tools/train_masked_ppo.py`,
+  `tools/train_behavior_clone.py`, and `tools/train_rescue_behavior_clone.py`.
+  This gives us a cleaner path toward learned action selection: first warmstart
+  a 79-dim policy by BC, then run PPO on the same online features. The features
+  are intentionally not a hard rule or gate; they expose action-specific
+  medium-term conflict consequences to the policy.
+- Smoke tests passed. A reset on seed `2840`, `scene_5`, 6 agents produced
+  feature length `79` and total observation length `84` for all agents. A
+  one-update PPO smoke run completed with
+  `obs_builder=MyActionConflictObservationBuilder`, `obs_size=79`, and saved
+  `/private/tmp/ecml_action_conflict_smoke.pt`. A one-episode BC smoke run also
+  completed and saved `/private/tmp/ecml_action_conflict_bc_smoke.pt`; the
+  collection had 3213 valid teacher samples and 155 teacher/reference
+  disagreements.
+- Current conclusion after adding action-conflict obs: this is the right
+  infrastructure step toward less heuristic policy learning, but it is not yet
+  evidence of a stronger policy. The next test should be a controlled
+  BC-warmstart plus PPO run on unseen seeds, compared against the current
+  trajectory-conflict PPO/rescue stack and starterkit baseline.

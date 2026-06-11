@@ -28,9 +28,13 @@ from tools.evaluate_sampled import (
 DEFAULT_TRAJECTORY_CONFLICT_OBS_BUILDER = (
     "submission.my_observation_builder.MyTrajectoryConflictObservationBuilder"
 )
+DEFAULT_ACTION_CONFLICT_OBS_BUILDER = (
+    "submission.my_observation_builder.MyActionConflictObservationBuilder"
+)
 DEFAULT_BASELINE_POLICY = "submission.sequence_success_policy.MyPolicy"
 BASE_OBS_SIZE = 36
 TRAJECTORY_CONFLICT_OBS_SIZE = 64
+ACTION_CONFLICT_OBS_SIZE = 79
 ACTION_COUNT = 5
 
 
@@ -337,13 +341,32 @@ def train_policy(
 
 
 def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
-    if args.use_trajectory_conflict_obs:
+    if args.use_action_conflict_obs:
+        if args.obs_builder == DEFAULT_OBS_BUILDER:
+            args.obs_builder = DEFAULT_ACTION_CONFLICT_OBS_BUILDER
+        if args.obs_size is None:
+            args.obs_size = ACTION_CONFLICT_OBS_SIZE
+    elif args.use_trajectory_conflict_obs:
         if args.obs_builder == DEFAULT_OBS_BUILDER:
             args.obs_builder = DEFAULT_TRAJECTORY_CONFLICT_OBS_BUILDER
         if args.obs_size is None:
             args.obs_size = TRAJECTORY_CONFLICT_OBS_SIZE
     elif args.obs_size is None:
         args.obs_size = BASE_OBS_SIZE
+    if (
+        args.use_trajectory_conflict_obs
+        and not args.use_action_conflict_obs
+        and args.obs_size != TRAJECTORY_CONFLICT_OBS_SIZE
+    ):
+        raise ValueError(
+            "--use-trajectory-conflict-obs expects --obs-size "
+            f"{TRAJECTORY_CONFLICT_OBS_SIZE}, got {args.obs_size}."
+        )
+    if args.use_action_conflict_obs and args.obs_size != ACTION_CONFLICT_OBS_SIZE:
+        raise ValueError(
+            "--use-action-conflict-obs expects --obs-size "
+            f"{ACTION_CONFLICT_OBS_SIZE}, got {args.obs_size}."
+        )
     args.anchor_seed_list = parse_seed_list(args.anchor_seeds)
     return args
 
@@ -389,6 +412,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--num-hidden-layers", type=int, default=3)
     parser.add_argument("--use-trajectory-conflict-obs", action="store_true")
+    parser.add_argument(
+        "--use-action-conflict-obs",
+        action="store_true",
+        help=(
+            "Use MyActionConflictObservationBuilder and obs_size=79. "
+            "Includes trajectory-conflict plus per-action conflict features."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=2e-5)

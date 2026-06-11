@@ -24,6 +24,7 @@ class FastTreeObsBuilder(ObservationBuilder):
         ROUTE_OCCUPANCY_FEATURE_DIM + ROUTE_INTERSECTION_FEATURE_DIM
     )
     TRAJECTORY_PRIORITY_FEATURE_DIM = 12
+    ACTION_CONFLICT_FEATURE_DIM = 15
     ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
     SIDE_DETOUR_MARGIN = 4.0
     NEAR_TARGET_PRIORITY_DISTANCE = 20.0
@@ -45,9 +46,10 @@ class FastTreeObsBuilder(ObservationBuilder):
         with_action_mask=True,
         with_route_conflict_features=False,
         with_trajectory_priority_features=False,
+        with_action_conflict_features=False,
     ):
         self.max_depth = max_depth
-        if with_trajectory_priority_features:
+        if with_trajectory_priority_features or with_action_conflict_features:
             with_route_conflict_features = True
         # Append an action mask after the feature block. Useful at inference
         # (no env access in the policy); training computes its own mask from
@@ -55,6 +57,7 @@ class FastTreeObsBuilder(ObservationBuilder):
         self.with_action_mask = with_action_mask
         self.with_route_conflict_features = with_route_conflict_features
         self.with_trajectory_priority_features = with_trajectory_priority_features
+        self.with_action_conflict_features = with_action_conflict_features
         self.feature_dim = self.BASE_OBSERVATION_DIM + (
             self.ROUTE_CONFLICT_FEATURE_DIM
             if with_route_conflict_features
@@ -62,6 +65,10 @@ class FastTreeObsBuilder(ObservationBuilder):
         ) + (
             self.TRAJECTORY_PRIORITY_FEATURE_DIM
             if with_trajectory_priority_features
+            else 0
+        ) + (
+            self.ACTION_CONFLICT_FEATURE_DIM
+            if with_action_conflict_features
             else 0
         )
         # handle -> index into agent.waypoints of last stop visited
@@ -879,6 +886,52 @@ class FastTreeObsBuilder(ObservationBuilder):
         )
         return features
 
+    def _action_conflict_features(self, handle):
+        """Per-action medium-term conflict features for LEFT/FORWARD/RIGHT.
+
+        Repeated layout per action:
+          0  action is valid under the local mask
+          1  target-distance delta versus current position, 0.5 neutral
+          2  route-prefix conflict count, clipped to 3
+          3  route-prefix head-on edge conflicts, clipped to 3
+          4  route-prefix opposing-direction intersections, clipped to 3
+        """
+        features = np.zeros(self.ACTION_CONFLICT_FEATURE_DIM, dtype=np.float32)
+        try:
+            current_distance = float(self._current_distance_to_waypoint(handle))
+        except Exception:
+            current_distance = np.inf
+
+        for action_offset, action in enumerate(
+            (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT)
+        ):
+            base = action_offset * 5
+            if not self._local_action_valid(handle, action):
+                continue
+
+            prefix = self._route_prefix_for_action(action, handle)
+            if not prefix:
+                continue
+
+            features[base] = 1.0
+            target_distance = self._target_distance(handle, action)
+            if np.isfinite(target_distance) and np.isfinite(current_distance):
+                distance_delta = target_distance - current_distance
+                features[base + 1] = 0.5 + 0.5 * np.clip(
+                    distance_delta / max(1.0, self.SIDE_DETOUR_MARGIN * 2.0),
+                    -1.0,
+                    1.0,
+                )
+            else:
+                features[base + 1] = 1.0
+
+            summary = self._prefix_conflict_summary(prefix, handle)
+            features[base + 2] = min(summary["conflict_count"], 3) / 3.0
+            features[base + 3] = min(summary["head_on_count"], 3) / 3.0
+            features[base + 4] = min(summary["opposing_count"], 3) / 3.0
+
+        return features
+
     def _route_prefix_for_action(self, action, handle):
         if action not in (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT):
             return []
@@ -1385,6 +1438,11 @@ class FastTreeObsBuilder(ObservationBuilder):
         # 61      best side detour conflict-count delta versus forward
         # 62      best side detour head-on-conflict delta versus forward
         # 63      best side detour opposing-intersection delta versus forward
+        #
+        # Optional action-conflict layout when with_action_conflict_features=True:
+        # 64..68  LEFT: valid, distance-delta, conflicts, head-on, opposing
+        # 69..73  FORWARD: valid, distance-delta, conflicts, head-on, opposing
+        # 74..78  RIGHT: valid, distance-delta, conflicts, head-on, opposing
 
         observation = np.zeros(self.BASE_OBSERVATION_DIM, dtype=np.float32)
         visited = []
@@ -1549,6 +1607,14 @@ class FastTreeObsBuilder(ObservationBuilder):
                 ]
             )
 
+        if self.with_action_conflict_features:
+            observation = np.concatenate(
+                [
+                    observation,
+                    self._action_conflict_features(handle),
+                ]
+            )
+
         if not self.with_action_mask:
             return observation
 
@@ -1596,3 +1662,24 @@ class TrajectoryConflictObsBuilder(FastTreeObsBuilder):
 
 
 MyTrajectoryConflictObservationBuilder = TrajectoryConflictObsBuilder
+
+
+class ActionConflictObsBuilder(FastTreeObsBuilder):
+    OBSERVATION_DIM = (
+        FastTreeObsBuilder.BASE_OBSERVATION_DIM
+        + FastTreeObsBuilder.ROUTE_CONFLICT_FEATURE_DIM
+        + FastTreeObsBuilder.TRAJECTORY_PRIORITY_FEATURE_DIM
+        + FastTreeObsBuilder.ACTION_CONFLICT_FEATURE_DIM
+    )
+
+    def __init__(self, max_depth=3, with_action_mask=True):
+        super().__init__(
+            max_depth=max_depth,
+            with_action_mask=with_action_mask,
+            with_route_conflict_features=True,
+            with_trajectory_priority_features=True,
+            with_action_conflict_features=True,
+        )
+
+
+MyActionConflictObservationBuilder = ActionConflictObsBuilder

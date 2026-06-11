@@ -25,10 +25,14 @@ DEFAULT_ROUTE_CONFLICT_OBS_BUILDER = (
 DEFAULT_TRAJECTORY_CONFLICT_OBS_BUILDER = (
     "submission.my_observation_builder.MyTrajectoryConflictObservationBuilder"
 )
+DEFAULT_ACTION_CONFLICT_OBS_BUILDER = (
+    "submission.my_observation_builder.MyActionConflictObservationBuilder"
+)
 DEFAULT_TEACHER_POLICY = "submission.rerank_policy.MyPolicy"
 BASE_OBS_SIZE = 36
 ROUTE_CONFLICT_OBS_SIZE = 52
 TRAJECTORY_CONFLICT_OBS_SIZE = 64
+ACTION_CONFLICT_OBS_SIZE = 79
 DISTANCE_FEATURE_INDEX = 30
 MOVE_FORWARD_ACTION = 2
 ROUTE_CONFLICT_DISTANCE_INDEX = 36
@@ -614,6 +618,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--use-action-conflict-obs",
+        action="store_true",
+        help=(
+            "Use MyActionConflictObservationBuilder and obs_size=79. "
+            "Includes trajectory-conflict plus per-action conflict features."
+        ),
+    )
+    parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
@@ -726,7 +738,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
-    if args.use_trajectory_conflict_obs:
+    if args.use_action_conflict_obs:
+        if args.obs_builder == DEFAULT_OBS_BUILDER:
+            args.obs_builder = DEFAULT_ACTION_CONFLICT_OBS_BUILDER
+        if args.obs_size is None:
+            args.obs_size = ACTION_CONFLICT_OBS_SIZE
+    elif args.use_trajectory_conflict_obs:
         if args.obs_builder == DEFAULT_OBS_BUILDER:
             args.obs_builder = DEFAULT_TRAJECTORY_CONFLICT_OBS_BUILDER
         if args.obs_size is None:
@@ -745,7 +762,8 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     ):
         raise ValueError(
             "--conflict-priority-penalty-coef requires route-conflict features. "
-            "Pass --use-route-conflict-obs or --use-trajectory-conflict-obs, "
+            "Pass --use-route-conflict-obs, --use-trajectory-conflict-obs, "
+            "or --use-action-conflict-obs, "
             "or set --obs-builder "
             f"{DEFAULT_ROUTE_CONFLICT_OBS_BUILDER} --obs-size {ROUTE_CONFLICT_OBS_SIZE}."
         )
@@ -753,16 +771,26 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     if (
         args.use_route_conflict_obs
         and not args.use_trajectory_conflict_obs
+        and not args.use_action_conflict_obs
         and args.obs_size != ROUTE_CONFLICT_OBS_SIZE
     ):
         raise ValueError(
             "--use-route-conflict-obs expects --obs-size "
             f"{ROUTE_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
-    if args.use_trajectory_conflict_obs and args.obs_size != TRAJECTORY_CONFLICT_OBS_SIZE:
+    if (
+        args.use_trajectory_conflict_obs
+        and not args.use_action_conflict_obs
+        and args.obs_size != TRAJECTORY_CONFLICT_OBS_SIZE
+    ):
         raise ValueError(
             "--use-trajectory-conflict-obs expects --obs-size "
             f"{TRAJECTORY_CONFLICT_OBS_SIZE}, got {args.obs_size}."
+        )
+    if args.use_action_conflict_obs and args.obs_size != ACTION_CONFLICT_OBS_SIZE:
+        raise ValueError(
+            "--use-action-conflict-obs expects --obs-size "
+            f"{ACTION_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
 
     args.training_seed_list = parse_seed_list(args.training_seeds)
