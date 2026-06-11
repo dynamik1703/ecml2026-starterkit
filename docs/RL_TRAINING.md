@@ -3328,3 +3328,31 @@ Multi-candidate raw screen for Success-diversity:
   another plain BC pass. It should either optimize an online objective with
   counterfactual/RL feedback, or add a learned online value/risk head that
   scores the candidate action before the ActorCritic commits to it.
+- Added `tools/evaluate_action_event_head.py` as the first online-action-head
+  prototype. It flattens prefix-diff JSON rows into individual candidate-action
+  events, trains two bootstrap MLP ensembles (`good` and `risk`), and evaluates
+  thresholded acceptance on unique seed/time/agent/action candidates. This is
+  closer to the deployment interface than the previous prefix-row rankers
+  because it asks: "should this candidate action be allowed now?"
+- First held-out event-head run trained on the fair action-conflict blocks
+  `2840..2859` and `2880..2919`, then validated on `2920..2959` with
+  `--reward-loss-mode non_success`, five split seeds, five ensemble members,
+  and thresholds over `min_good_probability` and `max_risk_probability`.
+  The data contained 734 train events (`120` good, `530` neutral, `84` bad)
+  and 600 validation events (`99` good, `447` neutral, `54` bad) over 133
+  numeric features.
+- The event head finds signal but is not deployable yet. Example aggregate
+  settings:
+  `min_good=0.9,max_risk=0.5` accepted 7 unique good, 50 unique neutral, and
+  10 unique bad candidates, with unique reward `-0.306849` and Success
+  `+0.666667`; `min_good=0.8,max_risk=0.5` accepted 9/62/12 unique
+  good/neutral/bad with reward `-0.265936` and Success `+0.666667`;
+  `min_good=0.7,max_risk=0.5` accepted 13/74/13 with reward `-0.057172` and
+  Success `+1.000000`. The positive Success signal is real, but the bad-action
+  leakage is too high for an online guard.
+- Current conclusion after the event-head prototype: the right interface is an
+  online action-value/risk decision, but supervised labels from prefix
+  counterfactuals are still too coarse. The next high-value step should be
+  rollout-aware learning: either train this action head with an online RL-style
+  objective/TD target, or use it as a critic/risk auxiliary during PPO-style
+  training instead of deploying a thresholded event classifier directly.
