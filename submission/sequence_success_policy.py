@@ -271,6 +271,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_RIGHT_DETOUR_MIN_VALUE_LCB",
             -0.4,
         )
+        self.left_detour_min_value = self._env_float(
+            "ECML_SEQUENCE_LEFT_DETOUR_MIN_VALUE_LCB",
+            float("-inf"),
+        )
         self.left_to_forward_min_margin = self._env_float(
             "ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN",
             0.5,
@@ -278,6 +282,18 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.right_detour_max_obs_intersections = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_MAX_OBS_INTERSECTIONS",
             0.5,
+        )
+        self.right_detour_low_conflict_max_cells = self._env_float(
+            "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MAX_CELLS",
+            float("-inf"),
+        )
+        self.right_detour_low_conflict_min_slack = self._env_float(
+            "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_SLACK",
+            float("-inf"),
+        )
+        self.right_detour_low_conflict_min_value = self._env_float(
+            "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
+            float("-inf"),
         )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
@@ -560,6 +576,12 @@ class SequenceSuccessPolicy(RerankPolicy):
                 scores,
             ):
                 accepted = False
+            if accepted and self._low_value_left_detour(
+                baseline_action,
+                candidate_action,
+                scores,
+            ):
+                accepted = False
             if accepted and self._low_confidence_left_to_forward(
                 baseline_action,
                 candidate_action,
@@ -570,6 +592,13 @@ class SequenceSuccessPolicy(RerankPolicy):
                 baseline_action,
                 candidate_action,
                 detail,
+            ):
+                accepted = False
+            if accepted and self._low_conflict_right_detour(
+                baseline_action,
+                candidate_action,
+                detail,
+                scores,
             ):
                 accepted = False
         except Exception:
@@ -638,6 +667,25 @@ class SequenceSuccessPolicy(RerankPolicy):
             return False
         return value_lcb < self.right_detour_min_value
 
+    def _low_value_left_detour(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        scores: dict[str, float],
+    ) -> bool:
+        if not np.isfinite(self.left_detour_min_value):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action != ReservationPolicy.MOVE_LEFT
+        ):
+            return False
+        try:
+            value_lcb = float(scores.get("value_lcb", 0.0))
+        except Exception:
+            return False
+        return value_lcb < self.left_detour_min_value
+
     def _low_confidence_left_to_forward(
         self,
         baseline_action: int,
@@ -675,6 +723,32 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return intersections > self.right_detour_max_obs_intersections
+
+    def _low_conflict_right_detour(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+        scores: dict[str, float],
+    ) -> bool:
+        if not np.isfinite(self.right_detour_low_conflict_max_cells):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action != ReservationPolicy.MOVE_RIGHT
+        ):
+            return False
+        try:
+            cells = float(detail.get("candidate_prefix_cell_intersections", 0.0))
+            slack = float(detail.get("slack", 0.0))
+            value_lcb = float(scores.get("value_lcb", 0.0))
+        except Exception:
+            return False
+        return (
+            cells <= self.right_detour_low_conflict_max_cells
+            and slack < self.right_detour_low_conflict_min_slack
+            and value_lcb < self.right_detour_low_conflict_min_value
+        )
 
     def _trace_sequence_decision(
         self,
