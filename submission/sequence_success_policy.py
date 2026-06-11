@@ -35,6 +35,7 @@ DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_terminal_stronger_u3.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_targeted_seed901_u4.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_rescue_bc_1010_v1.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt"),
 )
 
 
@@ -244,7 +245,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.left_max_slack = self._env_float(
             "ECML_SEQUENCE_LEFT_MAX_SLACK",
-            self.FUTURE_RERANK_LEFT_MAX_SLACK,
+            float("inf"),
         )
         self.trace_path = os.environ.get("ECML_SEQUENCE_TRACE_PATH", "").strip()
         self.trace_all = bool(self._env_int("ECML_SEQUENCE_TRACE_ALL", 0))
@@ -273,7 +274,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.left_detour_min_value = self._env_float(
             "ECML_SEQUENCE_LEFT_DETOUR_MIN_VALUE_LCB",
-            float("-inf"),
+            -0.4,
         )
         self.left_to_forward_min_margin = self._env_float(
             "ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN",
@@ -285,15 +286,15 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.right_detour_low_conflict_max_cells = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MAX_CELLS",
-            float("-inf"),
+            1.0,
         )
         self.right_detour_low_conflict_min_slack = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_SLACK",
-            float("-inf"),
+            140.0,
         )
         self.right_detour_low_conflict_min_value = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
-            float("-inf"),
+            0.0,
         )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()

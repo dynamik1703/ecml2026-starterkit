@@ -2599,8 +2599,8 @@ Detour value guard follow-up:
   detours, and a low-conflict right-detour guard controlled by
   `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MAX_CELLS`,
   `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_SLACK`, and
-  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB`. Defaults leave the
-  committed submission behavior unchanged.
+  `ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB`. These guards were
+  first added as disabled knobs, then promoted after the holdout checks below.
 - Trace diagnosis with the success-regression model showed that seed `120`
   and the known bad seed `578` both pass the Success/Risk heads as
   `MOVE_FORWARD -> MOVE_LEFT`, but differ strongly in value:
@@ -2631,6 +2631,15 @@ Detour value guard follow-up:
   Success rescue.
 - Fresh holdout `2210-2309` for this guarded-open variant was clean and sparse:
   reward `1/0/99`, success `0/0/100`, changing only seed `2211`
-  (`+0.103135` reward, unchanged Success). This is a promotion candidate, but
-  its edge is very small; run at least one more disjoint 100-seed holdout
-  before changing packaged defaults.
+  (`+0.103135` reward, unchanged Success). A second disjoint holdout
+  `2310-2409` was fully neutral: reward `0/0/100`, success `0/0/100`.
+- No-mix ablation showed the fifth candidate is necessary for the extra seed
+  `120` Success rescue: with default candidates only and the same guards,
+  known-33 dropped to reward `7/0/26`, success `3/0/30`.
+- Promotion: packaged
+  `submission/models/ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt`, added it
+  to the default candidate list, opened the Sequence left-slack default, and
+  set the new guard defaults to the validated values above. This changes the
+  default submission from the previous sparse rescue set to the guarded-open
+  variant; the edge is still small, so future work should keep validating
+  disjoint windows before adding more candidate policies.
