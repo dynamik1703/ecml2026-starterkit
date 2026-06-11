@@ -3267,3 +3267,32 @@ Multi-candidate raw screen for Success-diversity:
   next high-value work should stop optimizing this offline shared ranker and
   instead train/evaluate a source-specific action-conflict policy/scorer with a
   deployment-style validation protocol from the start.
+- Started that source-specific check with a fresh action-conflict validation
+  block on seeds `2920..2959`, using the same
+  `/private/tmp/ecml_action_conflict_rescue_bc_v1.pt` candidate and prefix
+  lengths `1..5`. Output:
+  `/private/tmp/ecml_diff_prefix_action_rescue_bc_v1_2920_2959_changed.{csv,json}`.
+  This block is more positive than `2880..2919`: prefix `1` has reward
+  `5/0/35` and Success `+2/-0/38`, prefix `2` has reward `6/0/34`, and
+  prefix `5` is high-variance with reward `8/7/25` and Success `+3/-3/34`.
+  It contains the right validation structure for source-specific learning:
+  robust positives (`2931`, `2935`, `2936`, `2940`, `2941`, `2949`) and
+  nearby traps (`2924`, `2926`, `2928`, `2937`, `2939`, `2954`, `2955`).
+- Action-only group-ranker experiment: train on the two previous
+  action-conflict blocks (`2840..2859`, `2880..2919`) and validate on
+  `2920..2959`. Raw ranker at margin `0` selected `2` good, `1` neutral, `0`
+  bad rows, reward `+0.149737`, Success `+0.333333`; all higher margins were
+  empty. Adding an action-only Risk head kept the result clean but did not
+  improve recall. Deployment summary with margin `0`, risk `0.001` found one
+  stable unique good candidate under `consensus_min_splits=2`: seed `2936`,
+  prefix `1`, event `MOVE_FORWARD->MOVE_RIGHT`, reward `+0.074868`, Success
+  `+0.166667`, failed-agent delta `-1`. It also accepted one neutral candidate
+  under `consensus_min_splits=1`.
+- Current conclusion after the first source-specific scorer: the action
+  conflict source is learnable, but the current offline scorer recognizes only
+  one of many obvious positives in a favorable validation block. This is not a
+  winning path by itself. The next useful change should move closer to online
+  RL/policy learning with these features: either use the mined positives as
+  targeted BC/RL curriculum for the action-conflict policy, or train a
+  lightweight online value/rescue head inside the policy instead of selecting
+  offline prefix rows after the fact.
