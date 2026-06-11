@@ -3154,3 +3154,28 @@ Multi-candidate raw screen for Success-diversity:
   first-diff/prefix outcomes from `ecml_action_conflict_rescue_bc_v1.pt`,
   add its wins and hard negatives to the ranker/risk datasets, and only deploy
   through a strict scorer/veto.
+- Mined prefix outcomes from the raw action-conflict Rescue-BC checkpoint on
+  the changed held-out seeds `2842,2845,2846,2847,2850,2852,2854,2855,2859`.
+  Output:
+  `/private/tmp/ecml_diff_prefix_action_rescue_bc_v1_2840_2859_changed.{csv,json}`.
+  This produced a compact mixed sequence dataset with clear positives and hard
+  negatives:
+  - prefix `1`: reward `1/2/6`, Success `2/0/7`, mean delta
+    `-0.011289/+0.037037`
+  - prefix `2`: reward `0/4/5`, Success `1/2/6`, mean delta
+    `-0.043375/-0.018519`
+  - prefix `3`: reward `2/2/5`, Success `1/0/8`, mean delta
+    `-0.031793/+0.018519`
+  - prefix `4`: reward `1/4/4`, Success `1/0/8`, mean delta
+    `-0.056872/+0.018519`
+  - prefix `5`: reward `3/3/3`, Success `1/0/8`, mean delta
+    `-0.022509/+0.018519`
+- Seed-level examples are useful for the next scorer iteration. `2842` only
+  becomes reward-positive at prefix `5`; early prefixes are neutral. `2850`
+  has a genuine prefix-1 Success win. `2854` has repeated Success-positive
+  prefixes despite some reward loss. Hard negatives include `2855` (all
+  prefixes reward-negative while Success is unchanged), `2852` prefix `2`
+  Success regression and prefixes `4/5` reward losses, and `2847` prefix `2`
+  Success regression. This is exactly the signal the current offline
+  ranker/risk stack needs: positive rescues plus nearby traps from the same
+  action-conflict generator.
