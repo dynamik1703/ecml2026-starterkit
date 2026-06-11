@@ -2979,3 +2979,34 @@ Multi-candidate raw screen for Success-diversity:
   trained specifically on small reward-negative traps, or (2) mining more
   local variants around `2446/2573/660` until the ranker sees enough nearby
   positives/neutral no-ops to learn the boundary.
+- Added `tools/evaluate_reward_risk_head.py` as a dedicated reward-loss/risk
+  veto prototype. It trains a single bootstrap MLP ensemble whose label is
+  risk-focused rather than Success-focused: negative utility target,
+  Success-regression, additional failed agents, or reward loss in
+  `non_success` mode. The tool can also join a ranker audit CSV and evaluate
+  "ranker selects, risk head vetoes" with matching CV split seeds. Duplicate
+  joined rows are handled conservatively by using the highest
+  `risk_probability_ucb` for a key.
+- On the hard-negative-augmented pool, the standalone risk head is very
+  conservative at strict thresholds and has low precision, but that is
+  acceptable for veto use. With `risk_positive_weight=40`, 5 split seeds, and
+  a 5-member ensemble, `max_risk_probability=0.0005` reached risk recall
+  `0.883721` while over-vetoing many non-risk rows.
+- As a ranker veto, this is the first offline configuration that removes the
+  known high-score reward traps cleanly. Using the hard-negative no-op ranker
+  audit, `ranker_score_threshold=1.25` and
+  `veto_max_risk_probability=0.0005` changed the selected set from the raw
+  ranker's `8/1/3` good/neutral/bad (`7` Success-positive, `0`
+  Success-negative, reward `+0.466069`, Success `+1.166667`) to `5/1/0`
+  good/neutral/bad (`4` Success-positive, `0` Success-negative, reward
+  `+0.499341`, Success `+0.666667`, failed-agent delta `-4`). The vetoed rows
+  include the main bad traps `2446` prefix `2`, `2446` prefix `5`, and
+  `2573` prefix `1`; it also vetoes some true rescues (`2802`, `2457`,
+  `184`), so recall is still the tradeoff.
+- Current conclusion: the best current architecture is a two-stage offline
+  planner: seed-level ranker for rescue value, then a strict reward-risk veto.
+  This is meaningfully better aligned than the earlier gate/classifier
+  approach. It is still not ready for submission because the validation pool
+  is small and partly built from known traps; next step is fresh held-out
+  validation/mining specifically for this two-stage design before any online
+  integration.
