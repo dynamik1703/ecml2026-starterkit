@@ -3296,3 +3296,35 @@ Multi-candidate raw screen for Success-diversity:
   targeted BC/RL curriculum for the action-conflict policy, or train a
   lightweight online value/rescue head inside the policy instead of selecting
   offline prefix rows after the fact.
+- Targeted action-conflict Rescue-BC curriculum, fair split:
+  converted positive prefix rows from `2840..2859` and `2880..2919` into
+  53 event labels over 11 seeds, then trained
+  `/private/tmp/ecml_action_conflict_rescue_bc_v2_train2840_2919.pt` from
+  `/private/tmp/ecml_action_conflict_rescue_bc_v1.pt` with low LR
+  (`1e-5`) and anchor seeds `3200..3215`. Collection hit 48 labels, missed
+  none, and had 5 invalid labels. Raw held-out comparison on `2920..2959`
+  was worse than v1: v2 reward delta mean `-0.018101` and Success delta
+  `+0.016667` versus v1 reward delta mean `-0.015690` and Success delta
+  `+0.020833`. Positive-only curriculum fixed seed `2925` but damaged
+  `2936` and `2958`; net effect was negative.
+- Added negative-aware curriculum support. `tools/convert_diff_prefix_to_rescue_events.py`
+  now supports `--include-negative-baseline`, which emits harmful prefix
+  events as `event_kind=negative_baseline` baseline-action labels while
+  skipping negative events that also appear in a positive prefix. `tools/train_rescue_behavior_clone.py`
+  now supports `--include-avoidance-events` and `--avoidance-weight`, so those
+  rows can train explicit "do not take the candidate action here" labels.
+- Negative-aware v3 curriculum on the same fair split produced 93 labels
+  (53 positive rescue, 40 negative baseline) over 21 seeds. Training
+  `/private/tmp/ecml_action_conflict_rescue_avoidance_bc_v3_train2840_2919.pt`
+  hit 73 labels, including 25 avoidance hits, with 20 invalid labels. Raw
+  held-out comparison on `2920..2959` was still not deployable and did not beat
+  v1: reward delta mean `-0.017357`, Success delta `+0.020833`, reward
+  wins/losses/ties `9/16/15`, Success `5/3/32`. It preserved v1's Success
+  gains but reduced a reward-positive seed (`2945`) and did not eliminate the
+  major traps (`2924`, `2922`, `2944`, `2937`, `2954`).
+- Current conclusion after targeted BC curricula: event-level BC is too blunt
+  for this problem. It can nudge local actions, but the good/bad distinction
+  depends on rollout context and prefix length. The next RL step should not be
+  another plain BC pass. It should either optimize an online objective with
+  counterfactual/RL feedback, or add a learned online value/risk head that
+  scores the candidate action before the ActorCritic commits to it.

@@ -108,6 +108,12 @@ def is_positive_rescue(row: dict[str, str], args: argparse.Namespace) -> bool:
     return success_delta > 1e-9 or reward_delta > args.reward_epsilon
 
 
+def is_avoidance_event(row: dict[str, str], args: argparse.Namespace) -> bool:
+    if not args.include_avoidance_events:
+        return False
+    return str(row.get("event_kind", "")).lower() == "negative_baseline"
+
+
 def read_rescue_events(
     paths: list[Path],
     args: argparse.Namespace,
@@ -118,7 +124,9 @@ def read_rescue_events(
             for row in csv.DictReader(handle):
                 if str(row.get("forced_applied", "True")).lower() == "false":
                     continue
-                if not is_positive_rescue(row, args):
+                is_positive = is_positive_rescue(row, args)
+                is_avoidance = is_avoidance_event(row, args)
+                if not is_positive and not is_avoidance:
                     continue
                 seed = int(float(row["seed"]))
                 env_time = int(float(row["env_time"]))
@@ -134,6 +142,9 @@ def read_rescue_events(
                         "seed": seed,
                         "env_time": env_time,
                         "agent_id": agent_id,
+                        "event_kind": (
+                            "negative_baseline" if is_avoidance else "positive_rescue"
+                        ),
                         "forced_action": forced_action,
                         "baseline_action": int(float(row.get("baseline_action", -1))),
                         "utility": score,
@@ -168,6 +179,8 @@ def valid_action(observation: Any, action: int, obs_size: int, n_actions: int) -
 
 
 def sample_weight_for_rescue(event: dict[str, Any], args: argparse.Namespace) -> float:
+    if event.get("event_kind") == "negative_baseline":
+        return args.avoidance_weight
     success_delta = float(event.get("success_delta", 0.0) or 0.0)
     if success_delta > 1e-9:
         return args.success_rescue_weight
@@ -189,6 +202,7 @@ def collect_training_samples(
     anchor_samples = 0
     anchor_action_counts: Counter[int] = Counter()
     rescue_action_counts: Counter[int] = Counter()
+    avoidance_hits = 0
     rescue_seed_hits: Counter[int] = Counter()
 
     seeds = sorted(set(rescue_events) | set(args.anchor_seed_list))
@@ -220,6 +234,8 @@ def collect_training_samples(
                         actions_out.append(forced_action)
                         weights_out.append(sample_weight_for_rescue(event, args))
                         rescue_hits += 1
+                        if event.get("event_kind") == "negative_baseline":
+                            avoidance_hits += 1
                         rescue_seed_hits[seed] += 1
                         rescue_action_counts[forced_action] += 1
                     else:
@@ -250,6 +266,7 @@ def collect_training_samples(
     stats = {
         "samples": len(observations_out),
         "rescue_hits": rescue_hits,
+        "avoidance_hits": avoidance_hits,
         "rescue_misses": rescue_misses,
         "rescue_invalid": rescue_invalid,
         "rescue_baseline_mismatches": rescue_baseline_mismatches,
@@ -430,6 +447,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--anchor-weight", type=float, default=0.2)
     parser.add_argument("--reward-rescue-weight", type=float, default=6.0)
     parser.add_argument("--success-rescue-weight", type=float, default=12.0)
+    parser.add_argument(
+        "--include-avoidance-events",
+        action="store_true",
+        help=(
+            "Train rows with event_kind=negative_baseline as baseline-action "
+            "avoidance labels."
+        ),
+    )
+    parser.add_argument("--avoidance-weight", type=float, default=6.0)
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--success-weight", type=float, default=2.0)
     parser.add_argument("--failed-weight", type=float, default=0.75)
@@ -458,6 +484,7 @@ def main() -> int:
         "collection "
         f"samples={collection_stats['samples']} "
         f"rescue_hits={collection_stats['rescue_hits']} "
+        f"avoidance_hits={collection_stats['avoidance_hits']} "
         f"rescue_misses={collection_stats['rescue_misses']} "
         f"rescue_invalid={collection_stats['rescue_invalid']} "
         f"baseline_mismatches={collection_stats['rescue_baseline_mismatches']} "

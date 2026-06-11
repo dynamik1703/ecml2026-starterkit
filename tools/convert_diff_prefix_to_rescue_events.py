@@ -39,6 +39,18 @@ def positive_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
     return success_delta > 1e-9 or reward_delta > reward_epsilon
 
 
+def negative_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
+    reward_delta = safe_float(row.get("reward_delta"))
+    success_delta = safe_float(row.get("success_delta"))
+    failed_delta = safe_float(row.get("failed_agents_delta"))
+    reward_delta = reward_delta if reward_delta == reward_delta else 0.0
+    success_delta = success_delta if success_delta == success_delta else 0.0
+    failed_delta = failed_delta if failed_delta == failed_delta else 0.0
+    if success_delta < -1e-9 or failed_delta > 0:
+        return True
+    return success_delta <= 1e-9 and reward_delta < -reward_epsilon
+
+
 def source_columns(rows: list[dict[str, Any]]) -> list[str]:
     columns = sorted(
         {
@@ -54,12 +66,39 @@ def source_columns(rows: list[dict[str, Any]]) -> list[str]:
 def event_rows(
     rows: list[dict[str, Any]],
     reward_epsilon: float,
+    include_negative_baseline: bool,
 ) -> list[dict[str, Any]]:
     sources = source_columns(rows)
     output = []
     seen = set()
+    positive_event_keys = set()
     for row in rows:
         if not positive_prefix(row, reward_epsilon):
+            continue
+        details = row.get("event_details") or []
+        if not isinstance(details, list):
+            continue
+        for event in details:
+            if not isinstance(event, dict):
+                continue
+            forced_action = action_id(
+                event.get("candidate_action"),
+                event.get("candidate_action_name"),
+            )
+            if forced_action < 0:
+                continue
+            positive_event_keys.add(
+                (
+                    int(float(row.get("seed", event.get("seed", -1)))),
+                    int(float(event.get("env_time", -1))),
+                    int(float(event.get("agent_id", -1))),
+                    forced_action,
+                )
+            )
+    for row in rows:
+        is_positive = positive_prefix(row, reward_epsilon)
+        is_negative = include_negative_baseline and negative_prefix(row, reward_epsilon)
+        if not is_positive and not is_negative:
             continue
         details = row.get("event_details") or []
         if not isinstance(details, list):
@@ -85,13 +124,22 @@ def event_rows(
             )
             if forced_action < 0 or baseline_action < 0:
                 continue
+            target_action = forced_action if is_positive else baseline_action
             key = (
                 int(float(row.get("seed", event.get("seed", -1)))),
                 int(float(event.get("env_time", -1))),
                 int(float(event.get("agent_id", -1))),
-                forced_action,
+                target_action,
             )
             if key in seen:
+                continue
+            candidate_key = (
+                key[0],
+                key[1],
+                key[2],
+                forced_action,
+            )
+            if is_negative and candidate_key in positive_event_keys:
                 continue
             seen.add(key)
             record = {
@@ -100,8 +148,15 @@ def event_rows(
                 "agent_id": key[2],
                 "baseline_action": baseline_action,
                 "baseline_action_name": event.get("baseline_action_name", ""),
-                "forced_action": forced_action,
-                "forced_action_name": event.get("candidate_action_name", ""),
+                "forced_action": target_action,
+                "forced_action_name": (
+                    event.get("candidate_action_name", "")
+                    if is_positive
+                    else event.get("baseline_action_name", "")
+                ),
+                "candidate_action": forced_action,
+                "candidate_action_name": event.get("candidate_action_name", ""),
+                "event_kind": "positive_rescue" if is_positive else "negative_baseline",
                 "forced_applied": True,
                 "reward_delta": reward_delta if reward_delta == reward_delta else 0.0,
                 "success_delta": success_delta if success_delta == success_delta else 0.0,
@@ -140,18 +195,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-csv", required=True, type=Path)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
+    parser.add_argument(
+        "--include-negative-baseline",
+        action="store_true",
+        help=(
+            "Also emit events from harmful prefixes as baseline-action labels. "
+            "Events that also appear in a positive prefix are skipped to avoid "
+            "contradictory labels."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     rows = read_json_rows(args.json)
-    converted = event_rows(rows, args.reward_epsilon)
+    converted = event_rows(rows, args.reward_epsilon, args.include_negative_baseline)
     write_csv(args.output_csv, converted)
     summary = {
         "input_rows": len(rows),
         "event_rows": len(converted),
         "unique_seeds": len({row["seed"] for row in converted}),
+        "positive_rescue_events": sum(
+            1 for row in converted if row.get("event_kind") == "positive_rescue"
+        ),
+        "negative_baseline_events": sum(
+            1 for row in converted if row.get("event_kind") == "negative_baseline"
+        ),
     }
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
