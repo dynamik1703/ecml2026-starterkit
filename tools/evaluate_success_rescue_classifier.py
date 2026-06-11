@@ -44,7 +44,7 @@ class BinaryMLP(nn.Module):
 
 def row_arrays(
     rows: list[dict[str, str]],
-    reward_epsilon: float,
+    args: argparse.Namespace,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     reward_delta = np.asarray(
         [safe_float(row.get("reward_delta")) for row in rows],
@@ -62,9 +62,12 @@ def row_arrays(
     success_delta[~np.isfinite(success_delta)] = 0.0
     failed_delta[~np.isfinite(failed_delta)] = 0.0
     success_labels = (success_delta > 1e-9).astype(np.float32)
+    reward_negative = reward_delta < -args.reward_epsilon
+    if args.reward_negative_unsafe_mode == "non_success":
+        reward_negative = reward_negative & (success_delta <= 1e-9)
     unsafe_labels = (
         (success_delta < -1e-9)
-        | (reward_delta < -reward_epsilon)
+        | reward_negative
         | (failed_delta > 0.0)
     ).astype(np.float32)
     return reward_delta, success_delta, failed_delta, success_labels, unsafe_labels
@@ -234,14 +237,14 @@ def evaluate_split(
         _train_failed_delta,
         train_success_labels,
         train_unsafe_labels,
-    ) = row_arrays(train_rows, args.reward_epsilon)
+    ) = row_arrays(train_rows, args)
     (
         validation_reward_delta,
         validation_success_delta,
         validation_failed_delta,
         _validation_success_labels,
         _validation_unsafe_labels,
-    ) = row_arrays(validation_rows, args.reward_epsilon)
+    ) = row_arrays(validation_rows, args)
     validation_categories = np.asarray(
         [outcome_category(row, args.reward_epsilon) for row in validation_rows],
         dtype=object,
@@ -474,6 +477,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--success-std-coef", type=float, default=1.0)
     parser.add_argument("--unsafe-std-coef", type=float, default=1.0)
     parser.add_argument(
+        "--reward-negative-unsafe-mode",
+        choices=["all", "non_success"],
+        default="all",
+        help=(
+            "Whether reward-negative rows are always unsafe or only unsafe "
+            "when they are not Success-positive. Use non_success for a pure "
+            "Success-rescue head that may tolerate modest reward loss."
+        ),
+    )
+    parser.add_argument(
         "--min-success-probability",
         nargs="+",
         type=float,
@@ -533,13 +546,9 @@ def main() -> int:
 
     aggregate = aggregate_metrics(split_results)
     categories = Counter(outcome_category(row, args.reward_epsilon) for row in train_rows)
-    success_rows = sum(safe_float(row.get("success_delta")) > 1e-9 for row in train_rows)
-    unsafe_rows = sum(
-        safe_float(row.get("success_delta")) < -1e-9
-        or safe_float(row.get("reward_delta")) < -args.reward_epsilon
-        or safe_float(row.get("failed_agents_delta")) > 0.0
-        for row in train_rows
-    )
+    _, _, _, success_labels, unsafe_labels = row_arrays(train_rows, args)
+    success_rows = int(success_labels.sum())
+    unsafe_rows = int(unsafe_labels.sum())
     print(
         "Data: "
         f"rows={len(train_rows) + len(validation_rows)} train_rows={len(train_rows)} "

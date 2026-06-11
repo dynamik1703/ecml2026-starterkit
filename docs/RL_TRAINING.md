@@ -2821,3 +2821,24 @@ Multi-candidate raw screen for Success-diversity:
   columns are ignored; it only affects future models trained with these new
   columns. Smoke mining on `targeted901` seed `2797` produced the expected
   source columns, and a one-episode online smoke on seed `2797` still ran.
+- Re-mining the `rescuebc` and `targeted901` datasets with source features did
+  not by itself fix the Success/Unsafe classifier. The combined CV pool still
+  had 394 rows, now with 737 feature columns. With source features included,
+  strict thresholds accepted only reward-good rows and no Success-positive
+  rows; excluding `candidate_source` reproduced the previous non-source
+  behavior, where the soft region could recover a few Success-positive rows
+  only together with bad/Success-negative leakage. Training only on the new
+  source-featured `rescuebc+targeted901` rows was worse: strict thresholds
+  accepted nothing, and softer thresholds accepted only Success-negative bad
+  rows.
+- `tools/evaluate_success_rescue_classifier.py` now has
+  `--reward-negative-unsafe-mode non_success`. This avoids labeling
+  Success-positive but reward-negative rows as unsafe, which is important for
+  cases like `2781`. The corrected label mode reduced the combined pool's
+  unsafe labels from 108 to 95, but still was not deployable: at strict
+  thresholds it accepted only reward-good plus reward-bad rows and `0`
+  Success-positive rows; at softer thresholds it recovered at most one
+  Success-positive row while also accepting a Success-negative row and several
+  bad rows. The issue is therefore not just source identity or this unsafe
+  label definition; the next model needs richer plan-state representation or
+  a different sequence objective.
