@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,10 @@ import torch.nn.functional as F
 from flatland.envs.persistence import RailEnvPersister
 from flatland.envs.rewards import ECML2026Rewards
 from torch.distributions import Categorical
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from submission.my_policy import ActorCritic
 
@@ -35,6 +40,18 @@ TRAJECTORY_CONFLICT_OBS_SIZE = 64
 ACTION_CONFLICT_OBS_SIZE = 79
 DISTANCE_FEATURE_INDEX = 30
 MOVE_FORWARD_ACTION = 2
+ACTION_CONFLICT_FEATURE_START = 64
+ACTION_CONFLICT_FEATURE_STRIDE = 5
+ACTION_CONFLICT_ACTION_TO_OFFSET = {
+    1: 0,
+    2: 1,
+    3: 2,
+}
+ACTION_CONFLICT_VALID_OFFSET = 0
+ACTION_CONFLICT_DISTANCE_OFFSET = 1
+ACTION_CONFLICT_COUNT_OFFSET = 2
+ACTION_CONFLICT_HEAD_ON_OFFSET = 3
+ACTION_CONFLICT_OPPOSING_OFFSET = 4
 ROUTE_CONFLICT_DISTANCE_INDEX = 36
 ROUTE_CONFLICT_OPPOSING_INDEX = 37
 ROUTE_CONFLICT_OTHER_TIGHTER_INDEX = 40
@@ -155,6 +172,78 @@ def conflict_priority_penalty(
     return -args.conflict_priority_penalty_coef * risky_forward * risk
 
 
+def action_conflict_coefficients(args: argparse.Namespace) -> tuple[float, float, float]:
+    return (
+        float(args.action_conflict_penalty_coef),
+        float(args.action_head_on_penalty_coef),
+        float(args.action_opposing_penalty_coef),
+    )
+
+
+def action_conflict_enabled(args: argparse.Namespace) -> bool:
+    return (
+        args.obs_size >= ACTION_CONFLICT_OBS_SIZE
+        and any(coef != 0.0 for coef in action_conflict_coefficients(args))
+    )
+
+
+def selected_action_conflict_features(
+    args: argparse.Namespace,
+    observations: np.ndarray,
+    actions: np.ndarray,
+) -> dict[str, np.ndarray]:
+    zeros = np.zeros(observations.shape[0], dtype=np.float32)
+    result = {
+        "valid": zeros.copy(),
+        "distance_delta": zeros.copy(),
+        "conflict": zeros.copy(),
+        "head_on": zeros.copy(),
+        "opposing": zeros.copy(),
+        "structural_risk": zeros.copy(),
+        "weighted_risk": zeros.copy(),
+    }
+    if args.obs_size < ACTION_CONFLICT_OBS_SIZE:
+        return result
+
+    conflict_coef, head_on_coef, opposing_coef = action_conflict_coefficients(args)
+    for action, action_offset in ACTION_CONFLICT_ACTION_TO_OFFSET.items():
+        mask = actions == action
+        if not np.any(mask):
+            continue
+        base = (
+            ACTION_CONFLICT_FEATURE_START
+            + action_offset * ACTION_CONFLICT_FEATURE_STRIDE
+        )
+        valid = observations[mask, base + ACTION_CONFLICT_VALID_OFFSET]
+        distance_delta = observations[mask, base + ACTION_CONFLICT_DISTANCE_OFFSET]
+        conflict = observations[mask, base + ACTION_CONFLICT_COUNT_OFFSET]
+        head_on = observations[mask, base + ACTION_CONFLICT_HEAD_ON_OFFSET]
+        opposing = observations[mask, base + ACTION_CONFLICT_OPPOSING_OFFSET]
+        result["valid"][mask] = valid
+        result["distance_delta"][mask] = distance_delta
+        result["conflict"][mask] = conflict
+        result["head_on"][mask] = head_on
+        result["opposing"][mask] = opposing
+        result["structural_risk"][mask] = conflict + head_on + opposing
+        result["weighted_risk"][mask] = (
+            conflict_coef * conflict
+            + head_on_coef * head_on
+            + opposing_coef * opposing
+        )
+    return result
+
+
+def action_conflict_penalty(
+    args: argparse.Namespace,
+    observations: np.ndarray,
+    actions: np.ndarray,
+) -> np.ndarray:
+    if not action_conflict_enabled(args):
+        return np.zeros(observations.shape[0], dtype=np.float32)
+    features = selected_action_conflict_features(args, observations, actions)
+    return -features["weighted_risk"].astype(np.float32)
+
+
 def shaped_rewards(
     args: argparse.Namespace,
     observations: np.ndarray,
@@ -187,6 +276,7 @@ def shaped_rewards(
         )
         shaped += args.global_slack_reward_coef * team_delta
     shaped += conflict_priority_penalty(args, observations, actions)
+    shaped += action_conflict_penalty(args, observations, actions)
     if args.reward_scale != 1.0:
         shaped *= args.reward_scale
     if args.reward_clip > 0.0:
@@ -313,6 +403,16 @@ def collect_rollout(
     completed_success = 0.0
     episode_rewards: list[float] = []
     episode_reward_values: list[float] = []
+    action_conflict_samples = 0
+    action_conflict_move_samples = 0
+    action_conflict_weighted_risk_sum = 0.0
+    action_conflict_conflict_sum = 0.0
+    action_conflict_head_on_sum = 0.0
+    action_conflict_opposing_sum = 0.0
+    action_conflict_distance_delta_sum = 0.0
+    action_conflict_risky_actions = 0
+    action_conflict_head_on_actions = 0
+    action_conflict_opposing_actions = 0
 
     step = 0
     while True:
@@ -335,6 +435,36 @@ def collect_rollout(
             log_probs = distribution.log_prob(actions)
 
         actions_np = actions.cpu().numpy()
+        if args.obs_size >= ACTION_CONFLICT_OBS_SIZE:
+            conflict_features = selected_action_conflict_features(
+                args,
+                obs_np,
+                actions_np,
+            )
+            moving_actions = np.isin(
+                actions_np,
+                list(ACTION_CONFLICT_ACTION_TO_OFFSET),
+            )
+            action_conflict_samples += int(actions_np.shape[0])
+            action_conflict_move_samples += int(moving_actions.sum())
+            action_conflict_weighted_risk_sum += float(
+                conflict_features["weighted_risk"].sum()
+            )
+            action_conflict_conflict_sum += float(conflict_features["conflict"].sum())
+            action_conflict_head_on_sum += float(conflict_features["head_on"].sum())
+            action_conflict_opposing_sum += float(conflict_features["opposing"].sum())
+            action_conflict_distance_delta_sum += float(
+                conflict_features["distance_delta"][moving_actions].sum()
+            )
+            action_conflict_risky_actions += int(
+                (conflict_features["structural_risk"] > 1e-9).sum()
+            )
+            action_conflict_head_on_actions += int(
+                (conflict_features["head_on"] > 1e-9).sum()
+            )
+            action_conflict_opposing_actions += int(
+                (conflict_features["opposing"] > 1e-9).sum()
+            )
         action_dict = {
             handle: int(action)
             for handle, action in zip(handles, actions_np)
@@ -470,6 +600,41 @@ def collect_rollout(
             float(np.mean(episode_rewards)) if episode_rewards else float("nan")
         ),
         "collected_steps": float(len(reward_steps)),
+        "action_conflict_weighted_risk_mean": (
+            action_conflict_weighted_risk_sum / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_conflict_mean": (
+            action_conflict_conflict_sum / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_head_on_fraction": (
+            action_conflict_head_on_actions / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_opposing_fraction": (
+            action_conflict_opposing_actions / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_risky_fraction": (
+            action_conflict_risky_actions / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_move_fraction": (
+            action_conflict_move_samples / action_conflict_samples
+            if action_conflict_samples
+            else float("nan")
+        ),
+        "action_conflict_distance_delta_mean": (
+            action_conflict_distance_delta_sum / action_conflict_move_samples
+            if action_conflict_move_samples
+            else float("nan")
+        ),
     }
     return rollout, stats
 
@@ -668,6 +833,35 @@ def parse_args() -> argparse.Namespace:
         help="Normalized route distance threshold for the conflict-priority penalty.",
     )
     parser.add_argument(
+        "--action-conflict-penalty-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Dense PPO penalty for choosing an action whose action-conflict "
+            "features show route-prefix conflicts. Requires "
+            "--use-action-conflict-obs or obs_size=79."
+        ),
+    )
+    parser.add_argument(
+        "--action-head-on-penalty-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Dense PPO penalty for choosing an action with head-on prefix "
+            "conflicts. Requires --use-action-conflict-obs or obs_size=79."
+        ),
+    )
+    parser.add_argument(
+        "--action-opposing-penalty-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Dense PPO penalty for choosing an action with opposing-direction "
+            "prefix intersections. Requires --use-action-conflict-obs or "
+            "obs_size=79."
+        ),
+    )
+    parser.add_argument(
         "--reward-scale",
         type=float,
         default=1.0,
@@ -768,6 +962,15 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
             f"{DEFAULT_ROUTE_CONFLICT_OBS_BUILDER} --obs-size {ROUTE_CONFLICT_OBS_SIZE}."
         )
 
+    if any(coef != 0.0 for coef in action_conflict_coefficients(args)):
+        if args.obs_size < ACTION_CONFLICT_OBS_SIZE:
+            raise ValueError(
+                "Action-conflict PPO penalties require action-conflict features. "
+                "Pass --use-action-conflict-obs, or set --obs-builder "
+                f"{DEFAULT_ACTION_CONFLICT_OBS_BUILDER} "
+                f"--obs-size {ACTION_CONFLICT_OBS_SIZE}."
+            )
+
     if (
         args.use_route_conflict_obs
         and not args.use_trajectory_conflict_obs
@@ -867,6 +1070,20 @@ def main() -> int:
             if not np.isnan(loss_stats["anchor_kl"])
             else ""
         )
+        action_conflict_text = (
+            " action_conflict_risk="
+            f"{rollout_stats['action_conflict_weighted_risk_mean']:.6g}"
+            " action_conflict_mean="
+            f"{rollout_stats['action_conflict_conflict_mean']:.6g}"
+            " action_conflict_risky="
+            f"{rollout_stats['action_conflict_risky_fraction']:.3g}"
+            " action_head_on="
+            f"{rollout_stats['action_conflict_head_on_fraction']:.3g}"
+            " action_opposing="
+            f"{rollout_stats['action_conflict_opposing_fraction']:.3g}"
+            if not np.isnan(rollout_stats["action_conflict_conflict_mean"])
+            else ""
+        )
         print(
             f"update={update + 1}/{args.updates} "
             f"reward_mean={rollout_stats['reward_mean']:.6g} "
@@ -877,7 +1094,8 @@ def main() -> int:
             f"value_loss={loss_stats['value_loss']:.6g} "
             f"entropy={loss_stats['entropy']:.6g}"
             f"{teacher_loss_text}"
-            f"{anchor_kl_text}",
+            f"{anchor_kl_text}"
+            f"{action_conflict_text}",
             flush=True,
         )
 

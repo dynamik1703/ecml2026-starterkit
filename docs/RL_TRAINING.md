@@ -3356,3 +3356,26 @@ Multi-candidate raw screen for Success-diversity:
   rollout-aware learning: either train this action head with an online RL-style
   objective/TD target, or use it as a critic/risk auxiliary during PPO-style
   training instead of deploying a thresholded event classifier directly.
+- Added the first rollout-aware action-conflict PPO hook to
+  `tools/train_masked_ppo.py`. With `--use-action-conflict-obs`, PPO can now
+  apply opt-in dense penalties to the actually selected action's per-action
+  conflict features:
+  `--action-conflict-penalty-coef`,
+  `--action-head-on-penalty-coef`, and
+  `--action-opposing-penalty-coef`. Defaults are `0`, so existing runs are
+  unchanged. The trainer also logs selected-action diagnostics:
+  `action_conflict_risk`, `action_conflict_mean`, `action_conflict_risky`,
+  `action_head_on`, and `action_opposing`.
+- Smoke validation:
+  direct `--help` now works without manually setting `PYTHONPATH=.`; one
+  16-step PPO smoke run with action-conflict penalties saved
+  `/private/tmp/ecml_action_conflict_penalty_smoke.pt`; passing an
+  action-conflict penalty without the 79-feature observation correctly raises
+  a validation error. A synthetic feature check confirmed that selected
+  `LEFT`/`FORWARD` action risks are converted into negative reward penalties.
+- Current assessment: this is still reward shaping, not a winning policy by
+  itself, but it is the lowest-risk bridge from the failed offline event-head
+  classifier to actual online RL. The next experiment should train a 79-feature
+  PPO candidate on curated hard seeds with these selected-action penalties,
+  then compare both final score and the new conflict-action metrics against
+  the unpenalized action-conflict PPO baseline.
