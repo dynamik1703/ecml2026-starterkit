@@ -200,6 +200,57 @@ def join_key(row: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def candidate_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        str(row.get("seed", "")),
+        str(row.get("prefix_len", "")),
+        str(row.get("forced_applied", "")),
+        str(row.get("events", "")),
+        round(float(row.get("reward_delta", 0.0)), 9),
+        round(float(row.get("success_delta", 0.0)), 9),
+    )
+
+
+def unique_candidate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        rows_by_key.setdefault(candidate_key(row), row)
+    return list(rows_by_key.values())
+
+
+def accepted_metric_row(
+    rows: list[dict[str, Any]],
+    *,
+    min_success_probability: float,
+    max_unsafe_probability: float,
+) -> dict[str, Any]:
+    reward_delta = np.asarray(
+        [safe_float(row.get("reward_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    success_delta = np.asarray(
+        [safe_float(row.get("success_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    failed_delta = np.asarray(
+        [safe_float(row.get("failed_agents_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    categories = np.asarray(
+        [row.get("outcome_category", "") for row in rows],
+        dtype=object,
+    )
+    return metric_row(
+        categories=categories,
+        reward_delta=reward_delta,
+        success_delta=success_delta,
+        failed_delta=failed_delta,
+        accepted=np.ones(len(rows), dtype=bool),
+        min_success_probability=min_success_probability,
+        max_unsafe_probability=max_unsafe_probability,
+    )
+
+
 def ranker_veto_metrics(
     ranker_audit_csv: Path,
     risk_audit_rows: list[dict[str, Any]],
@@ -232,6 +283,7 @@ def ranker_veto_metrics(
             for row in selected_rows
             if safe_float(row.get("rank_score_lcb")) >= score_threshold
         ]
+        unique_score_rows = unique_candidate_rows(score_rows)
         for max_risk_probability in args.veto_max_risk_probability:
             accepted_rows = []
             missing = 0
@@ -242,29 +294,14 @@ def ranker_veto_metrics(
                     continue
                 if float(risk_row["risk_probability_ucb"]) <= max_risk_probability:
                     accepted_rows.append(row)
-            reward_delta = np.asarray(
-                [safe_float(row.get("reward_delta")) for row in accepted_rows],
-                dtype=np.float32,
+            row = accepted_metric_row(
+                accepted_rows,
+                min_success_probability=score_threshold,
+                max_unsafe_probability=max_risk_probability,
             )
-            success_delta = np.asarray(
-                [safe_float(row.get("success_delta")) for row in accepted_rows],
-                dtype=np.float32,
-            )
-            failed_delta = np.asarray(
-                [safe_float(row.get("failed_agents_delta")) for row in accepted_rows],
-                dtype=np.float32,
-            )
-            categories = np.asarray(
-                [row.get("outcome_category", "") for row in accepted_rows],
-                dtype=object,
-            )
-            accepted = np.ones(len(accepted_rows), dtype=bool)
-            row = metric_row(
-                categories=categories,
-                reward_delta=reward_delta,
-                success_delta=success_delta,
-                failed_delta=failed_delta,
-                accepted=accepted,
+            unique_accepted_rows = unique_candidate_rows(accepted_rows)
+            unique_row = accepted_metric_row(
+                unique_accepted_rows,
                 min_success_probability=score_threshold,
                 max_unsafe_probability=max_risk_probability,
             )
@@ -273,18 +310,44 @@ def ranker_veto_metrics(
                     "ranker_score_threshold": float(score_threshold),
                     "veto_max_risk_probability": float(max_risk_probability),
                     "ranker_selected": len(score_rows),
+                    "unique_ranker_selected": len(unique_score_rows),
                     "missing_risk_rows": missing,
                     "vetoed": len(score_rows) - len(accepted_rows) - missing,
+                    "unique_accepted": int(unique_row["accepted"]),
+                    "unique_accepted_good": int(unique_row["accepted_good"]),
+                    "unique_accepted_neutral": int(unique_row["accepted_neutral"]),
+                    "unique_accepted_bad": int(unique_row["accepted_bad"]),
+                    "unique_accepted_success_positive": int(
+                        unique_row["accepted_success_positive"]
+                    ),
+                    "unique_accepted_success_negative": int(
+                        unique_row["accepted_success_negative"]
+                    ),
+                    "unique_accepted_reward_positive": int(
+                        unique_row["accepted_reward_positive"]
+                    ),
+                    "unique_accepted_reward_negative": int(
+                        unique_row["accepted_reward_negative"]
+                    ),
+                    "unique_accepted_reward_delta_sum": float(
+                        unique_row["accepted_reward_delta_sum"]
+                    ),
+                    "unique_accepted_success_delta_sum": float(
+                        unique_row["accepted_success_delta_sum"]
+                    ),
+                    "unique_accepted_failed_delta_sum": float(
+                        unique_row["accepted_failed_delta_sum"]
+                    ),
                 }
             )
             metrics.append(row)
     metrics.sort(
         key=lambda row: (
-            int(row["accepted_success_negative"]),
-            int(row["accepted_bad"]),
-            -float(row["accepted_success_delta_sum"]),
-            -float(row["accepted_reward_delta_sum"]),
-            -int(row["accepted_success_positive"]),
+            int(row["unique_accepted_success_negative"]),
+            int(row["unique_accepted_bad"]),
+            -float(row["unique_accepted_success_delta_sum"]),
+            -float(row["unique_accepted_reward_delta_sum"]),
+            -int(row["unique_accepted_success_positive"]),
         )
     )
     return metrics
@@ -480,6 +543,7 @@ def print_veto_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
         "ranker_score_threshold",
         "veto_max_risk_probability",
         "ranker_selected",
+        "unique_ranker_selected",
         "vetoed",
         "missing_risk_rows",
         "accepted_good",
@@ -492,6 +556,14 @@ def print_veto_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
         "accepted_reward_delta_sum",
         "accepted_success_delta_sum",
         "accepted_failed_delta_sum",
+        "unique_accepted_good",
+        "unique_accepted_neutral",
+        "unique_accepted_bad",
+        "unique_accepted_success_positive",
+        "unique_accepted_success_negative",
+        "unique_accepted_reward_delta_sum",
+        "unique_accepted_success_delta_sum",
+        "unique_accepted_failed_delta_sum",
     ]
     print(",".join(columns))
     for row in metrics[:top_k]:

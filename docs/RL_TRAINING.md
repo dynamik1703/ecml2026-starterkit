@@ -3215,3 +3215,37 @@ Multi-candidate raw screen for Success-diversity:
   disjoint seeds and train a source-specific action-conflict scorer or policy,
   instead of mixing this small generator-specific batch into the shared
   ranker.
+- Mined a second disjoint action-conflict Rescue-BC prefix block on seeds
+  `2880..2919` with prefix lengths `1..5`. Output:
+  `/private/tmp/ecml_diff_prefix_action_rescue_bc_v1_2880_2919_changed.{csv,json}`.
+  The 200 rows contain 25 good, 162 neutral, and 13 bad rows. Prefix `5` is
+  the best raw slice by reward (`7/3/30` reward win/loss/tie), but still has
+  Success `+1/-3/36`, so this is more diagnostic/training material rather
+  than deployable evidence. Positive seeds include `2883`, `2892`, `2913`,
+  `2916`, and `2918`; clear Success-regression hard negatives include
+  `2882`, `2889`, `2890`, `2891`, and `2908`.
+- Retraining the source-ablated group ranker with both action-conflict
+  batches improved the raw row-level table relative to the first naive
+  action-ranker, but it is still not safe. On the unchanged `2860..2879`
+  validation slice, margin `1.25` selected `1/2/4` good/neutral/bad with
+  reward `+0.044733`, while margin `1.0` selected `2/2/5` and reward
+  `+0.371938`. The strict source-aware Risk head can veto this back to clean
+  row-level metrics at margin `1.0`, risk `0.0005`, but row-level counts are
+  misleading because the same seed/event can appear once per split.
+- Added unique-candidate accounting to
+  `tools/evaluate_reward_risk_head.py` for ranker+veto reports. The printed
+  and JSON veto metrics now include `unique_ranker_selected` and
+  `unique_accepted_*` fields keyed by seed, prefix, forced event sequence, and
+  outcome deltas. This prevents cross-split duplicates from being read as
+  multiple rescues.
+- After the unique accounting fix, the apparent action-ranker recall gain
+  disappears. The best clean setting for the two-action-batch ranker plus the
+  source-aware Risk head is still one unique held-out rescue: margin `1.0`,
+  risk `0.0005` gives `unique_accepted_good=1`, `unique_accepted_bad=0`,
+  unique reward `+0.431373`, unique Success `+0.5`. The row-level report showed
+  two accepted good rows only because seed `2872` was accepted in two split
+  models. Current conclusion: the path is producing useful candidate data, but
+  the shared offline ranker still does not generalize enough. Next work should
+  either train a source-specific action-conflict scorer/policy or change the
+  evaluation/training protocol to one deployment model per held-out block,
+  not cross-split row aggregation.
