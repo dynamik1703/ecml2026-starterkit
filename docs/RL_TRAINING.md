@@ -2764,3 +2764,50 @@ Broader raw-mix screen for additional rescue data:
   by training on planned sequence/state context where reward-only positives
   are explicitly excluded from the Success head, and by mining more
   Success-positive patterns from additional candidate policies.
+
+Multi-candidate raw screen for Success-diversity:
+- A fresh scoreboard on seeds `2760-2839` compared guarded rerank against all
+  packaged raw checkpoints. Summary versus rerank:
+  `terminal` reward `5/0/75`, Success `0/0/80`, mean reward delta
+  `+0.006494`; `successdiv610` reward `1/0/79`, Success `0/0/80`;
+  `mix2501` reward `1/2/77`, Success `0/0/80`; `targeted901` reward
+  `1/2/77`, Success `1/1/78`; `rescuebc` reward `13/14/53`, Success
+  `5/5/70`. The best data miner is therefore `rescuebc`, not because it is
+  deployable, but because it exposes both Success rescues and matching hard
+  negatives.
+- Changed seed sets:
+  `rescuebc` changed 27 seeds, with Success-positive
+  `2766,2780,2781,2802,2805` and Success-negative
+  `2770,2775,2790,2799,2823`. `targeted901` changed only
+  `2784,2786,2797`, with `2797` Success-positive and `2786`
+  Success-negative.
+- Prefix mining for `targeted901` is simple and useful as a unit test:
+  `2797` is Success-positive from prefix `1`; `2786` is Success-negative from
+  prefix `1`; `2784` is reward-bad from prefix `1`.
+- Prefix mining for `rescuebc` produced 108 rows: 37 good, 44 neutral, 27 bad,
+  including 10 Success-positive and 10 Success-negative rows. Prefix `1` had
+  reward `2/4/21` and Success `1/1/25`; prefix `2` reward `8/5/14`,
+  Success `1/2/24`; prefix `3` reward `12/8/7`, Success `4/4/19`; prefix
+  `5` reward `14/11/2`, Success `4/3/20`.
+- The mined sequences show why one-step gating is structurally weak here:
+  `2780` is Success-negative for prefixes `1..3` but Success-positive at
+  prefix `5`; `2781` is Success-positive from prefix `1` but reward-negative;
+  `2795` is Success-positive at prefix `3` but reward-bad at prefix `5`;
+  `2802` and `2805` are neutral for prefixes `1/2` and Success-positive at
+  prefix `3`; `2790` becomes Success-negative at prefix `3`; `2823` is a
+  final Success-negative raw candidate whose prefix `5` is only reward-good
+  and Success-neutral. These are plan-level labels, not isolated action labels.
+- The packaged Sequence model still fails on this data. On the RescueBC prefix
+  rows it accepted `4` rows at deployed thresholds, but only
+  `1/2/1` good/neutral/bad and `0` Success-positive rows; the accepted bad was
+  `2795` prefix `5`. On `targeted901` it accepted nothing. The dedicated
+  Success/Unsafe classifier with these new rows added increased the pool to
+  394 rows (69 Success-positive, 108 unsafe), but still was not deployable:
+  strict thresholds accepted only reward-positive rows, while looser
+  thresholds recovered at most a few Success-positive rows together with bad
+  or Success-negative leakage.
+- Current conclusion: we now have the right data shape for a next model, but
+  not the right model interface. The next high-value implementation is to add
+  candidate/source and plan-prefix context as explicit features and evaluate a
+  short-sequence planner/classifier that scores full candidate prefixes, not a
+  greedy accepted-event stream.
