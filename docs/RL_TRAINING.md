@@ -3249,3 +3249,21 @@ Multi-candidate raw screen for Success-diversity:
   either train a source-specific action-conflict scorer/policy or change the
   evaluation/training protocol to one deployment model per held-out block,
   not cross-split row aggregation.
+- Added `tools/summarize_ranker_veto_deployment.py` to make that deployment
+  interpretation explicit. It reads a group-ranker audit and a risk-head audit,
+  then reports per-split model metrics plus consensus metrics over unique
+  seed/prefix/event candidates. This avoids treating five training seeds as
+  five deployment rescues.
+- Deployment-style summary on `2860..2879`, margin `1.0`, risk `0.0005`:
+  the baseline source-ablated ranker plus source-aware Risk head accepts the
+  clean `2872` rescue in one model split. The two-action-batch ranker plus the
+  same Risk head accepts the same `2872` rescue in two model splits, and the
+  `consensus_min_splits=2` metric therefore keeps one unique good candidate
+  with reward `+0.431373`, Success `+0.5`, and no bad candidates. This is a
+  stability improvement for the known rescue, not a recall improvement.
+- Current decision after the deployment-style check: action-conflict mining is
+  giving us real signal, but the current shared ranker mostly learns to
+  rediscover one easy rescue. To move toward a winning RL/MARL solution, the
+  next high-value work should stop optimizing this offline shared ranker and
+  instead train/evaluate a source-specific action-conflict policy/scorer with a
+  deployment-style validation protocol from the start.
