@@ -2906,3 +2906,30 @@ Multi-candidate raw screen for Success-diversity:
   needs either more hard negatives around these trap patterns, an explicit
   no-op/baseline candidate in each seed group, or a second calibrated safety
   head before online integration.
+- `tools/evaluate_sequence_rescue_ranker.py` now supports
+  `--add-baseline-candidate`, which adds one synthetic no-op candidate per
+  seed group with zero deltas and empty `event_details`. The evaluation does
+  not count selected baseline rows as accepted rescues, and the printed
+  metrics include `selected_baseline`/`selected_nonbaseline` so we can see
+  whether the model chooses "do nothing" instead of a risky rescue.
+- The first no-op CV did not solve the trap issue. With default ranker
+  weights plus synthetic baseline candidates, the model selected baseline for
+  25 validation seed-groups across the five splits, but still ranked several
+  bad rows above baseline. At `score_threshold=1.5`, it selected `5/0/3`
+  good/neutral/bad rows with `4` Success-positive and `1` Success-negative;
+  at `score_threshold=2.0`, it selected `1/0/1`, still leaking a bad seed
+  (`2446`).
+- A stronger no-op variant (`reward_loss_penalty=8.0`,
+  `pair_weight_scale=4.0`, `max_pair_weight=12.0`,
+  `pointwise_weight=0.5`) reduced leakage but lost too much useful recall.
+  At `score_threshold=1.25`, it selected `5/0/2` with `4` Success-positive
+  and `0` Success-negative, reward delta `+0.334147`, Success delta
+  `+0.666667`; at `score_threshold=1.5`, only `2/0/1` remained. This is
+  safer but weaker than the previous non-baseline ranker.
+- Current conclusion: explicit no-op is the right interface, but a synthetic
+  baseline row is not enough to calibrate scores. The next useful work should
+  mine and overweight hard-negative families around the observed trap seeds
+  (`2446`, `660`, `2573`, `905`, `946`) and/or combine the ranker with a
+  separate calibrated safety head. This is a signal that we should not deploy
+  the ranker yet; it is a better offline learning objective, not a finished
+  online controller.

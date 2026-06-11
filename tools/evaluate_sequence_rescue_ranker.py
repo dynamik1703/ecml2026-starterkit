@@ -58,6 +58,52 @@ def outcome_arrays(
     return reward_delta, success_delta, failed_delta
 
 
+def is_baseline_candidate(row: dict[str, Any]) -> bool:
+    value = safe_float(row.get("is_baseline_candidate"))
+    return math.isfinite(value) and value > 0.5
+
+
+def add_baseline_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for row_index, row in enumerate(rows):
+        groups.setdefault(seed_key(row, row_index), row)
+
+    augmented = list(rows)
+    for seed, template in sorted(groups.items(), key=lambda item: item[0]):
+        baseline_reward = safe_float(template.get("baseline_reward"))
+        baseline_success = safe_float(template.get("baseline_success"))
+        baseline_failed_agents = safe_float(template.get("baseline_failed_agents"))
+        baseline = {
+            "seed": template.get("seed", seed),
+            "scene": template.get("scene", ""),
+            "num_agents": template.get("num_agents", ""),
+            "line_length": template.get("line_length", ""),
+            "prefix_len": 0,
+            "forced_applied": 0,
+            "baseline_reward": baseline_reward if math.isfinite(baseline_reward) else "",
+            "forced_reward": baseline_reward if math.isfinite(baseline_reward) else "",
+            "reward_delta": 0.0,
+            "baseline_success": baseline_success if math.isfinite(baseline_success) else "",
+            "forced_success": baseline_success if math.isfinite(baseline_success) else "",
+            "success_delta": 0.0,
+            "baseline_failed_agents": (
+                baseline_failed_agents if math.isfinite(baseline_failed_agents) else ""
+            ),
+            "forced_failed_agents": (
+                baseline_failed_agents if math.isfinite(baseline_failed_agents) else ""
+            ),
+            "failed_agents_delta": 0.0,
+            "events": "",
+            "event_details": [],
+            "event_count": 0,
+            "event_unique_agents": 0,
+            "is_baseline_candidate": 1.0,
+            "candidate_source_baseline_noop": 1.0,
+        }
+        augmented.append(baseline)
+    return augmented
+
+
 def target_values(rows: list[dict[str, Any]], args: argparse.Namespace) -> np.ndarray:
     reward_delta, success_delta, failed_delta = outcome_arrays(rows)
     return (
@@ -320,12 +366,20 @@ def evaluate_split(
         current = best_by_seed.get(key)
         if current is None or score_lcb[row_index] > score_lcb[current]:
             best_by_seed[key] = row_index
+    selected_baseline_count = sum(
+        int(is_baseline_candidate(validation_rows[row_index]))
+        for row_index in best_by_seed.values()
+    )
+    selected_nonbaseline_count = len(best_by_seed) - selected_baseline_count
 
     metrics = []
     for score_threshold in args.score_threshold:
         accepted = np.zeros(len(validation_rows), dtype=bool)
         for row_index in best_by_seed.values():
-            if score_lcb[row_index] >= score_threshold:
+            if (
+                score_lcb[row_index] >= score_threshold
+                and not is_baseline_candidate(validation_rows[row_index])
+            ):
                 accepted[row_index] = True
         row = ranker_metric_row(
             validation_rows=validation_rows,
@@ -339,6 +393,8 @@ def evaluate_split(
         row["split_seed"] = split_seed
         row["val_rows"] = len(validation_rows)
         row["train_pairs"] = len(pair_winners)
+        row["selected_baseline"] = selected_baseline_count
+        row["selected_nonbaseline"] = selected_nonbaseline_count
         metrics.append(row)
 
     audit_rows = []
@@ -361,6 +417,7 @@ def evaluate_split(
                 "rank_score_std": float(score_std[row_index]),
                 "rank_score_lcb": float(score_lcb[row_index]),
                 "selected_best_for_seed": int(is_best),
+                "is_baseline_candidate": int(is_baseline_candidate(row)),
                 "event_count": int(validation_event_mask[row_index].sum()),
                 "events": row.get("events", ""),
             }
@@ -369,7 +426,11 @@ def evaluate_split(
                     {
                         **base,
                         "score_threshold": score_threshold,
-                        "accepted": int(is_best and score_lcb[row_index] >= score_threshold),
+                        "accepted": int(
+                            is_best
+                            and score_lcb[row_index] >= score_threshold
+                            and not is_baseline_candidate(row)
+                        ),
                     }
                 )
     return metrics, audit_rows
@@ -394,6 +455,8 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "val_rows",
         "selection_groups",
         "train_pairs",
+        "selected_baseline",
+        "selected_nonbaseline",
     ]
     buckets: dict[float, dict[str, Any]] = {}
     for row in results:
@@ -448,6 +511,8 @@ def aggregate_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def print_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
     columns = [
         "score_threshold",
+        "selected_baseline",
+        "selected_nonbaseline",
         "accepted_good",
         "accepted_neutral",
         "accepted_bad",
@@ -482,6 +547,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("json", nargs="+", type=Path)
     parser.add_argument("--validation-json", nargs="+", type=Path)
+    parser.add_argument(
+        "--add-baseline-candidate",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Add one synthetic no-op/baseline candidate per seed group.",
+    )
     parser.add_argument("--include-feature-regex")
     parser.add_argument("--exclude-feature-regex")
     parser.add_argument("--drop-prefix-features", action="store_true")
@@ -538,6 +609,10 @@ def main() -> int:
     args = parse_args()
     train_rows = read_json_rows(args.json)
     validation_rows = read_json_rows(args.validation_json) if args.validation_json else []
+    if args.add_baseline_candidate:
+        train_rows = add_baseline_candidates(train_rows)
+        if validation_rows:
+            validation_rows = add_baseline_candidates(validation_rows)
     rows_for_features = train_rows + validation_rows
     if not train_rows:
         raise ValueError("No rows found")
