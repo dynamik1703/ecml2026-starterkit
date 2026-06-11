@@ -211,7 +211,18 @@ def train_rank_member(
         else:
             pair_loss = torch.zeros((), dtype=torch.float32)
         point_loss = point_loss_fn(scores, target_tensor)
-        loss = pair_loss + args.pointwise_weight * point_loss
+        negative_mask = target_tensor < args.negative_target_threshold
+        if negative_mask.any() and args.negative_margin_weight > 0.0:
+            negative_loss = torch.relu(
+                scores[negative_mask] - args.negative_score_margin
+            ).pow(2).mean()
+        else:
+            negative_loss = torch.zeros((), dtype=torch.float32)
+        loss = (
+            pair_loss
+            + args.pointwise_weight * point_loss
+            + args.negative_margin_weight * negative_loss
+        )
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
         optimizer.step()
@@ -592,6 +603,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pair-weight-scale", type=float, default=1.0)
     parser.add_argument("--max-pair-weight", type=float, default=5.0)
     parser.add_argument("--pointwise-weight", type=float, default=0.25)
+    parser.add_argument("--negative-margin-weight", type=float, default=0.0)
+    parser.add_argument("--negative-target-threshold", type=float, default=0.0)
+    parser.add_argument("--negative-score-margin", type=float, default=0.0)
     parser.add_argument("--score-std-coef", type=float, default=0.5)
     parser.add_argument(
         "--score-threshold",

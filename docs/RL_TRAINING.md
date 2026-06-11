@@ -2933,3 +2933,49 @@ Multi-candidate raw screen for Success-diversity:
   separate calibrated safety head. This is a signal that we should not deploy
   the ranker yet; it is a better offline learning objective, not a finished
   online controller.
+- Mined targeted hard-negative families for trap seeds
+  `2446,660,2573,905,946` with prefix lengths `1..5` and the trajectory
+  conflict observation builder. Three candidate sources were used:
+  `mix2501`, `rescuebc`, and `targeted901`. The first attempt without the
+  trajectory conflict obs failed with a `41` vs `64` feature-shape mismatch,
+  confirming again that these checkpoints must be mined/evaluated with
+  `submission.my_observation_builder.MyTrajectoryConflictObservationBuilder`.
+- The targeted trap datasets are useful and compact:
+  `mix2501` produced 20 rows over seeds `660,905,2446,2573`, with `19` bad,
+  `1` neutral, `0` Success-positive, `7` Success-negative, and reward
+  `4/15` positive/negative; `rescuebc` produced 25 rows over all five seeds,
+  with `3` good, `14` neutral, `8` bad, and no Success changes;
+  `targeted901` produced 15 rows over `660,905,2573`, with `4` good,
+  `10` neutral, `1` bad, and `1` Success-negative. This is the right kind of
+  data: dense around known traps rather than broad random mining.
+- Adding these hard-negative families to the no-op ranker pool improved the
+  useful high-threshold region materially. With default ranker weights,
+  no-op candidates, and the added trap rows, `score_threshold=1.25` selected
+  `8/1/3` good/neutral/bad rows, `7` Success-positive, `0`
+  Success-negative, reward delta `+0.466069`, Success delta `+1.166667`,
+  and failed-agent delta `-7`. This is better than the previous no-op CV at
+  the same threshold (`8/1/6`, `5` Success-positive, `1` Success-negative,
+  reward `+0.326446`, Success `+0.666667`).
+- The remaining high-score bad rows are now concentrated and interpretable:
+  mainly seed `2446` prefixes `2/5`, seed `2573` prefix `1`, and seed `660`
+  prefix `5`. The separate Success/Unsafe classifier did not veto them:
+  pure reward-negative rows received very low `unsafe_probability_ucb`
+  despite being labeled unsafe, so combining ranker plus current unsafe head
+  does not fix this failure mode.
+- Added optional negative-score margin terms to
+  `tools/evaluate_sequence_rescue_ranker.py`:
+  `--negative-margin-weight`, `--negative-target-threshold`, and
+  `--negative-score-margin`. The idea is to force rows with negative target
+  value below an absolute score margin, not just below better candidates.
+  Ablations did not solve the issue: margin weight `2.0` was nearly
+  unchanged, while margin weight `10.0` reduced some leakage but also reduced
+  recall and worsened the useful `score_threshold=1.25` region (`6/1/4`,
+  `5` Success-positive, `0` Success-negative, reward `+0.437928`, Success
+  `+0.833333`).
+- Current conclusion: targeted hard-negative mining is the right direction
+  and already improved the offline ranker, but this model still cannot
+  reliably identify small reward-only traps. The next step should not be more
+  threshold tuning; it should be either (1) a dedicated reward-loss/risk head
+  trained specifically on small reward-negative traps, or (2) mining more
+  local variants around `2446/2573/660` until the ranker sees enough nearby
+  positives/neutral no-ops to learn the boundary.
