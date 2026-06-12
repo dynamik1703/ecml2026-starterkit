@@ -3722,3 +3722,42 @@ Multi-candidate raw screen for Success-diversity:
   either more independent OOD blocks with the success-heavy event-only target,
   or an exported conservative sequence selector that can be audited online
   before any PPO distillation.
+- Extended the OOD sequence-selector audit to `3240..3319`. Current Sequence
+  default scored `0.909811 / 0.922917` over 80 seeds; 29 partial/failed seeds
+  were mined with rolling prefixes `1..5`, producing 145 sequence rows:
+  `58` good, `67` neutral, `20` bad. The block is a stronger stress test than
+  `3200..3239`: it contains large rescues such as `3297` prefix 1
+  (`+0.467613` reward, `+0.5` Success), `3300` prefix 1 (`+0.333333 /
+  +0.333333`), and `3311` prefix 1 (`+0.122129 / +0.166667`), but also hard
+  Success-negative traps such as `3265` prefix 5 and `3302` prefixes 1..5.
+- Raw rolling-prefix means on `3240..3319` again show real opportunity but
+  unsafe direct deployment. Prefix 1 averaged `+0.016628 / +0.051724` with
+  Success wins/losses/ties `7/1/21`; prefix 2 averaged `+0.015569 /
+  +0.063218` with Success `9/1/19`; longer prefixes kept positive Success
+  means but accumulated more Success losses, reaching `8/4/17` at prefix 5.
+- Success-heavy event-only Group-Ranker, trained only on the old 55 mined
+  groups and validated on `3240..3319`, is safe only at conservative margins.
+  At margin `-0.25` it accepted `1` good and `7` neutral rows with `0` bad and
+  `0` Success-negative leaks, aggregate `+0.052101 / +0.166667`. At margin
+  `-1.0` it recovered more Success (`4` good, `14` neutral) but leaked one bad
+  reward-only candidate, aggregate `-0.060374 / +0.666667`. This is not
+  deployable without a veto.
+- Adding the previous OOD block (`3200..3239`) to training made the same
+  event-only selector safer but too conservative on `3240..3319`: at margin
+  `-1.0` it accepted `1` good and `8` neutral rows with `0` bad and
+  `0` Success-negative leaks, aggregate `+0.052101 / +0.166667`; stricter
+  margins accepted only neutral rows. More OOD data therefore helps safety,
+  but does not by itself unlock recall.
+- Split-consensus is currently the safest learned-selection rule. With the old
+  55-group training set and margin `-1.0`, candidates accepted by all three
+  split models were clean on both OOD blocks: on `3200..3239`, 4 unique
+  candidates, `0` bad, `0` Success-negative, `+0.388524 / +0.500000`; on
+  `3240..3319`, 4 unique candidates, `0` bad, `0` Success-negative,
+  `+0.052101 / +0.166667`. This is promising but still low recall.
+- A standalone event-level Good/Risk head trained on `3080..3239` and
+  validated on `3240..3319` is not safe as an acceptor: even strict settings
+  leaked multiple bad and Success-negative unique events. Conclusion: the next
+  high-value engineering step is not another PPO/BC run and not just lower
+  ranker margins. We need a prefix-level risk/veto model, preferably trained
+  listwise at the same granularity as the Group-Ranker, so that we can keep
+  the high-recall `-1.0` ranker while rejecting traps like `3265` and `3302`.
