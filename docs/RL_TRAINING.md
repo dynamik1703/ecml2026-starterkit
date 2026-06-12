@@ -3868,3 +3868,24 @@ Multi-candidate raw screen for Success-diversity:
   Next step should be an online export of the listwise selector behind a
   conservative fallback, followed by distilling its accepted prefixes into the
   RL/BC policy.
+- Exported the listwise selector for online use. `tools/evaluate_group_rescue_ranker.py`
+  can now write a submission checkpoint with static/event feature schema,
+  normalization statistics, and the full `SequenceRescueNet` ensemble via
+  `--export-model`. The exported checkpoint is
+  `submission/models/ecml_group_listwise_successheavy.pt`: 15 ensemble members,
+  `8` static features, `164` event features, `max_events=5`, trained on all
+  currently mined rolling-prefix rows through `3320..3399` (`780` rows,
+  `130` seed groups).
+- `submission.sequence_success_policy.SequenceSuccessPolicy` now loads this
+  checkpoint by default when present and uses it as the primary selector in
+  `ECML_SEQUENCE_SELECTOR_MODE=listwise`. The runtime scorer constructs the
+  same prefix row used during mining from already accepted events plus the
+  current candidate diff, scores it against a synthetic no-op baseline, and
+  accepts only when the listwise margin clears
+  `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD` (default `0.2`). The old
+  Value/Risk sequence scorer remains available as fallback by changing
+  `ECML_SEQUENCE_SELECTOR_MODE`.
+- Runtime smoke test with the online listwise selector on seeds `3320..3324`
+  completed without errors: mean `reward=0.896815`, mean `success=0.933333`
+  over 5 episodes. This is only a load/runtime sanity check, not a statistically
+  meaningful benchmark.

@@ -32,6 +32,9 @@ SUBMISSION_DIR = Path(__file__).resolve().parent
 DEFAULT_SEQUENCE_MODEL_PATH = str(
     SUBMISSION_DIR / "models" / "ecml_success_only_sequence_with_rescue.pt"
 )
+DEFAULT_LISTWISE_MODEL_PATH = str(
+    SUBMISSION_DIR / "models" / "ecml_group_listwise_successheavy.pt"
+)
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_successdiv_seed610_u4.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_terminal_stronger_u3.pt"),
@@ -207,6 +210,200 @@ class SequenceEnsembleScorer:
         }
 
 
+class SequenceListwiseNet(nn.Module):
+    def __init__(
+        self,
+        static_dim: int,
+        event_dim: int,
+        hidden_size: int,
+        event_hidden_size: int,
+        dropout: float,
+    ):
+        super().__init__()
+        self.static_encoder = (
+            nn.Sequential(nn.Linear(static_dim, hidden_size), nn.ReLU())
+            if static_dim > 0
+            else None
+        )
+        self.event_encoder = (
+            nn.Sequential(nn.Linear(event_dim, event_hidden_size), nn.ReLU())
+            if event_dim > 0
+            else None
+        )
+        self.event_gru = (
+            nn.GRU(event_hidden_size, hidden_size, batch_first=True)
+            if event_dim > 0
+            else None
+        )
+        combined_dim = hidden_size * (1 + int(static_dim > 0))
+        self.head = nn.Sequential(
+            nn.Linear(combined_dim, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, 1),
+        )
+
+    def forward(
+        self,
+        static_features: torch.Tensor,
+        event_features: torch.Tensor,
+        event_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        parts = []
+        if self.event_encoder is not None and self.event_gru is not None:
+            encoded_events = self.event_encoder(event_features)
+            output, _hidden = self.event_gru(encoded_events)
+            lengths = event_mask.sum(dim=1).long().clamp_min(1)
+            indices = (lengths - 1).view(-1, 1, 1).expand(-1, 1, output.shape[-1])
+            event_summary = output.gather(dim=1, index=indices).squeeze(1)
+            event_summary = torch.where(
+                event_mask.sum(dim=1, keepdim=True) > 0,
+                event_summary,
+                torch.zeros_like(event_summary),
+            )
+            parts.append(event_summary)
+        if self.static_encoder is not None:
+            parts.append(self.static_encoder(static_features))
+        return self.head(torch.cat(parts, dim=1)).squeeze(-1)
+
+
+class ListwiseSequenceScorer:
+    def __init__(
+        self,
+        checkpoint_path: str,
+        margin_threshold: float,
+        score_std_coef: float,
+        baseline_std_coef: float,
+    ):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        self.static_feature_columns = list(checkpoint["static_feature_columns"])
+        self.event_feature_columns = list(checkpoint["event_feature_columns"])
+        self.static_feature_mean = checkpoint["static_feature_mean"].detach().cpu().numpy()
+        self.static_feature_std = checkpoint["static_feature_std"].detach().cpu().numpy()
+        self.event_feature_mean = checkpoint["event_feature_mean"].detach().cpu().numpy()
+        self.event_feature_std = checkpoint["event_feature_std"].detach().cpu().numpy()
+        self.max_events = int(checkpoint["max_events"])
+        self.margin_threshold = float(margin_threshold)
+        self.score_std_coef = float(score_std_coef)
+        self.baseline_std_coef = float(baseline_std_coef)
+        self.models = []
+        for state_dict in checkpoint["model_state_dicts"]:
+            model = SequenceListwiseNet(
+                static_dim=int(checkpoint["static_dim"]),
+                event_dim=int(checkpoint["event_dim"]),
+                hidden_size=int(checkpoint["hidden_size"]),
+                event_hidden_size=int(checkpoint["event_hidden_size"]),
+                dropout=float(checkpoint.get("dropout", 0.0)),
+            )
+            model.load_state_dict(state_dict)
+            model.eval()
+            self.models.append(model)
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            result = float(value)
+        except Exception:
+            return 0.0
+        return result if np.isfinite(result) else 0.0
+
+    def _static_features(self, row: dict[str, Any]) -> np.ndarray:
+        raw = np.asarray(
+            [
+                self._safe_float(row.get(column, 0.0))
+                for column in self.static_feature_columns
+            ],
+            dtype=np.float32,
+        )
+        return (raw - self.static_feature_mean) / self.static_feature_std
+
+    def _event_feature_value(self, event: dict[str, Any], feature: str) -> float:
+        if feature.startswith("num:"):
+            return self._safe_float(event.get(feature[4:]))
+        if feature.startswith("cat:"):
+            _prefix, field, value = feature.split(":", 2)
+            return float(str(event.get(field)) == value)
+        if feature.startswith("transition:"):
+            value = feature[len("transition:") :]
+            transition = (
+                f"{event.get('baseline_action_name')}"
+                f"->{event.get('candidate_action_name')}"
+            )
+            return float(transition == value)
+        return 0.0
+
+    def _event_features(self, row: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+        events = row.get("event_details") or []
+        if not isinstance(events, list):
+            events = []
+        matrix = np.zeros(
+            (self.max_events, len(self.event_feature_columns)),
+            dtype=np.float32,
+        )
+        mask = np.zeros((self.max_events,), dtype=np.float32)
+        for event_index, event in enumerate(events[: self.max_events]):
+            if not isinstance(event, dict):
+                continue
+            mask[event_index] = 1.0
+            for feature_index, feature in enumerate(self.event_feature_columns):
+                matrix[event_index, feature_index] = self._event_feature_value(
+                    event,
+                    feature,
+                )
+        if len(self.event_feature_columns):
+            matrix = (matrix - self.event_feature_mean) / self.event_feature_std
+        return matrix, mask
+
+    def _score_raw(self, row: dict[str, Any]) -> tuple[float, float]:
+        static_features = torch.as_tensor(
+            self._static_features(row)[None, :],
+            dtype=torch.float32,
+        )
+        event_features_np, event_mask_np = self._event_features(row)
+        event_features = torch.as_tensor(
+            event_features_np[None, :, :],
+            dtype=torch.float32,
+        )
+        event_mask = torch.as_tensor(event_mask_np[None, :], dtype=torch.float32)
+        scores = []
+        with torch.no_grad():
+            for model in self.models:
+                scores.append(
+                    float(model(static_features, event_features, event_mask).item())
+                )
+        return float(np.mean(scores)), float(np.std(scores))
+
+    def score(self, row: dict[str, Any]) -> tuple[bool, dict[str, float]]:
+        baseline_row = {
+            "prefix_len": 0,
+            "forced_applied": 0,
+            "reward_delta": 0.0,
+            "success_delta": 0.0,
+            "failed_agents_delta": 0.0,
+            "event_details": [],
+            "event_count": 0,
+            "event_unique_agents": 0,
+            "is_baseline_candidate": 1.0,
+            "candidate_source_baseline_noop": 1.0,
+        }
+        candidate_mean, candidate_std = self._score_raw(row)
+        baseline_mean, baseline_std = self._score_raw(baseline_row)
+        candidate_lcb = candidate_mean - self.score_std_coef * candidate_std
+        baseline_ucb = baseline_mean + self.baseline_std_coef * baseline_std
+        margin = candidate_lcb - baseline_ucb
+        accepted = margin >= self.margin_threshold
+        return accepted, {
+            "value_lcb": margin,
+            "listwise_margin": margin,
+            "listwise_candidate_lcb": candidate_lcb,
+            "listwise_candidate_mean": candidate_mean,
+            "listwise_candidate_std": candidate_std,
+            "listwise_baseline_ucb": baseline_ucb,
+            "listwise_baseline_mean": baseline_mean,
+            "listwise_baseline_std": baseline_std,
+        }
+
+
 class SequenceSuccessPolicy(RerankPolicy):
     """Experimental online wrapper for the exported sequence Success gate.
 
@@ -223,6 +420,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             checkpoint_path
             or os.environ.get("ECML_SEQUENCE_SUCCESS_MODEL")
             or DEFAULT_SEQUENCE_MODEL_PATH
+        )
+        listwise_model_path = (
+            os.environ.get("ECML_SEQUENCE_LISTWISE_MODEL")
+            or DEFAULT_LISTWISE_MODEL_PATH
         )
         candidate_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
@@ -247,6 +448,15 @@ class SequenceSuccessPolicy(RerankPolicy):
             if Path(sequence_model_path).exists()
             else None
         )
+        self.listwise_scorer = (
+            self._load_listwise_scorer(listwise_model_path)
+            if Path(listwise_model_path).exists()
+            else None
+        )
+        self.selector_mode = os.environ.get(
+            "ECML_SEQUENCE_SELECTOR_MODE",
+            "listwise",
+        ).strip().lower()
         self.max_accepted_events = self._env_int(
             "ECML_SEQUENCE_MAX_ACCEPTED_EVENTS",
             1,
@@ -422,6 +632,23 @@ class SequenceSuccessPolicy(RerankPolicy):
             ),
         )
 
+    def _load_listwise_scorer(self, listwise_model_path: str) -> ListwiseSequenceScorer:
+        return ListwiseSequenceScorer(
+            checkpoint_path=listwise_model_path,
+            margin_threshold=self._env_float(
+                "ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD",
+                0.2,
+            ),
+            score_std_coef=self._env_float(
+                "ECML_SEQUENCE_LISTWISE_SCORE_STD_COEF",
+                0.5,
+            ),
+            baseline_std_coef=self._env_float(
+                "ECML_SEQUENCE_LISTWISE_BASELINE_STD_COEF",
+                0.5,
+            ),
+        )
+
     def _reset_episode_state_if_needed(self, step: int | None) -> None:
         if step is None:
             return
@@ -454,7 +681,10 @@ class SequenceSuccessPolicy(RerankPolicy):
         **kwargs,
     ) -> Dict[int, RailEnvActions]:
         baseline_actions = super().act_many(handles, observations, **kwargs)
-        if not self.candidate_policies or self.sequence_scorer is None:
+        if (
+            not self.candidate_policies
+            or (self.sequence_scorer is None and self.listwise_scorer is None)
+        ):
             return baseline_actions
         if (
             diff_row is None
@@ -679,6 +909,52 @@ class SequenceSuccessPolicy(RerankPolicy):
         candidate_action: int,
         extra_candidate: bool,
     ) -> tuple[bool, dict[str, float]]:
+        if (
+            self.listwise_scorer is not None
+            and self.selector_mode in {"listwise", "listwise_primary"}
+        ):
+            score_row = dict(aggregate)
+            score_row["prefix_len"] = len(self._accepted_event_details) + 1
+            score_row["forced_applied"] = len(self._accepted_event_details) + 1
+            score_row["event_details"] = [*self._accepted_event_details, detail]
+            accepted, scores = self.listwise_scorer.score(score_row)
+            if accepted and self._low_value_same_edge_candidate(detail, scores):
+                accepted = False
+            if accepted and self._low_value_right_detour(
+                baseline_action,
+                candidate_action,
+                scores,
+            ):
+                accepted = False
+            if accepted and self._low_value_left_detour(
+                baseline_action,
+                candidate_action,
+                scores,
+            ):
+                accepted = False
+            if accepted and self._low_confidence_left_to_forward(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+            if accepted and self._crowded_right_detour(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+            if accepted and self._low_conflict_right_detour(
+                baseline_action,
+                candidate_action,
+                detail,
+                scores,
+            ):
+                accepted = False
+            return accepted, scores
+
+        if self.sequence_scorer is None:
+            return False, {}
         old_min_success = self.sequence_scorer.min_success_probability
         old_right_value = self.right_detour_min_value
         old_low_conflict_right_value = self.right_detour_low_conflict_min_value
@@ -894,6 +1170,13 @@ class SequenceSuccessPolicy(RerankPolicy):
             "success_lcb": float(scores.get("success_lcb", 0.0)),
             "success_regression_ucb": float(
                 scores.get("success_regression_ucb", 0.0)
+            ),
+            "listwise_margin": float(scores.get("listwise_margin", 0.0)),
+            "listwise_candidate_lcb": float(
+                scores.get("listwise_candidate_lcb", 0.0)
+            ),
+            "listwise_baseline_ucb": float(
+                scores.get("listwise_baseline_ucb", 0.0)
             ),
             "accepted_event_count_before": len(self._accepted_event_details),
         }

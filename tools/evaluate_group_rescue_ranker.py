@@ -198,6 +198,122 @@ def train_group_ensemble(
     ]
 
 
+def train_export_ensemble(
+    train_rows: list[dict[str, Any]],
+    static_feature_columns: list[str],
+    event_feature_columns: list[str],
+    args: argparse.Namespace,
+) -> tuple[list[SequenceRescueNet], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    train_static_raw = static_feature_matrix(train_rows, static_feature_columns)
+    train_events_raw, train_event_mask = sequence_feature_matrix(
+        train_rows,
+        event_feature_columns,
+        args.max_events,
+    )
+    targets = target_values(train_rows, args)
+    train_groups, train_labels, group_weights = build_training_groups(
+        train_rows,
+        targets,
+        args,
+    )
+
+    _, static_mean, static_std = standardize(train_static_raw, train_static_raw)
+    train_static = (train_static_raw - static_mean) / static_std
+    train_events, event_mean, event_std = standardize_sequences(
+        train_events=train_events_raw,
+        train_mask=train_event_mask,
+        all_events=train_events_raw,
+    )
+
+    models = []
+    for split_seed in args.split_seeds:
+        models.extend(
+            train_group_ensemble(
+                split_seed=split_seed,
+                train_static=train_static,
+                train_events=train_events,
+                train_event_mask=train_event_mask,
+                targets=targets,
+                train_groups=train_groups,
+                train_labels=train_labels,
+                group_weights=group_weights,
+                args=args,
+            )
+        )
+    return models, static_mean, static_std, event_mean, event_std
+
+
+def serializable_args(args: argparse.Namespace) -> dict[str, Any]:
+    result = {}
+    for key, value in vars(args).items():
+        if isinstance(value, Path):
+            result[key] = str(value)
+        elif isinstance(value, list):
+            result[key] = [
+                str(item) if isinstance(item, Path) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
+def write_model_checkpoint(
+    path: Path,
+    train_rows: list[dict[str, Any]],
+    static_feature_columns: list[str],
+    event_feature_columns: list[str],
+    args: argparse.Namespace,
+) -> None:
+    models, static_mean, static_std, event_mean, event_std = train_export_ensemble(
+        train_rows,
+        static_feature_columns,
+        event_feature_columns,
+        args,
+    )
+    categories = [outcome_category(row, args.reward_epsilon) for row in train_rows]
+    targets = target_values(train_rows, args)
+    train_groups, _labels, _weights = build_training_groups(train_rows, targets, args)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_class": "SequenceRescueNet",
+            "selector_kind": "group_listwise",
+            "model_state_dicts": [model.state_dict() for model in models],
+            "static_feature_columns": static_feature_columns,
+            "event_feature_columns": event_feature_columns,
+            "static_feature_mean": torch.as_tensor(static_mean, dtype=torch.float32),
+            "static_feature_std": torch.as_tensor(static_std, dtype=torch.float32),
+            "event_feature_mean": torch.as_tensor(event_mean, dtype=torch.float32),
+            "event_feature_std": torch.as_tensor(event_std, dtype=torch.float32),
+            "static_dim": len(static_feature_columns),
+            "event_dim": len(event_feature_columns),
+            "hidden_size": args.hidden_size,
+            "event_hidden_size": args.event_hidden_size,
+            "dropout": args.dropout,
+            "max_events": args.max_events,
+            "split_seeds": list(args.split_seeds),
+            "ensemble_size": args.ensemble_size,
+            "config": serializable_args(args),
+            "train_summary": {
+                "rows": len(train_rows),
+                "groups": len(train_groups),
+                "categories": dict(Counter(categories)),
+                "target_min": float(targets.min()),
+                "target_max": float(targets.max()),
+                "seeds": sorted(
+                    {
+                        int(float(row["seed"]))
+                        for row in train_rows
+                        if str(row.get("seed", "")).strip()
+                    }
+                ),
+            },
+        },
+        path,
+    )
+
+
 def predict_scores(
     models: list[SequenceRescueNet],
     static_x: np.ndarray,
@@ -602,6 +718,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=25)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-audit-csv", type=Path)
+    parser.add_argument("--export-model", type=Path)
     return parser.parse_args()
 
 
@@ -709,6 +826,14 @@ def main() -> int:
             handle.write("\n")
     if args.output_audit_csv:
         write_csv(args.output_audit_csv, audit_rows)
+    if args.export_model:
+        write_model_checkpoint(
+            path=args.export_model,
+            train_rows=train_rows,
+            static_feature_columns=static_feature_columns,
+            event_feature_columns=event_feature_columns,
+            args=args,
+        )
     return 0
 
 
