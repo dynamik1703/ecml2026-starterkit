@@ -3789,3 +3789,31 @@ Multi-candidate raw screen for Success-diversity:
   better next online candidate than the old Group-Ranker gate. Next steps are
   to validate this deployment-style prefix planner on at least one more OOD
   block and then export a conservative online prefix selector.
+- Validated the prefix planner on a second independent OOD block,
+  `3320..3399`. The current Sequence default scored `0.906810 / 0.912500`
+  over 80 seeds; 31 partial seeds were mined with rolling prefixes `1..5`,
+  producing 155 rows: `59` good, `80` neutral, `16` bad. The block contains
+  both useful rescues and real traps: `3386` prefixes rescue a `0.5 / 0.5`
+  baseline to `1.0 / 1.0`, while `3390` and `3399` include Success-negative
+  prefixes and `3324` includes reward-only bad prefixes.
+- The previous prefix planner settings did not remain safe under the earlier
+  loose deployment threshold grid. With thresholds up to `0.5`, every
+  deployment-style configuration leaked at least one bad candidate on
+  `3320..3399`. Raising the planner threshold and requiring full split
+  consensus recovered safe behavior: `unsafe_weight=0.25`,
+  `score_threshold=0.9`, `consensus_min_splits=3` accepted 3 unique seeds,
+  `1` good and `2` neutral, `0` bad, `0` Success-negative, aggregate
+  `+0.500000 / +0.500000`. The stricter `score_threshold=0.95` accepted only
+  the strong `3386` rescue, still `0` bad and `0` Success-negative, aggregate
+  `+0.500000 / +0.500000`.
+- Added an optional reward-risk head to
+  `tools/evaluate_sequence_rescue_planner.py` and corresponding
+  `planner_reward_risk_weight` support in
+  `tools/summarize_prefix_planner_deployment.py`. This head learns
+  reward-negative prefix risk separately from the existing Success and Unsafe
+  heads. On this OOD block it did not yet improve the best safe recall over
+  the high-threshold consensus rule, so the current evidence says the main
+  deployable improvement is stricter calibrated selection, not the new head.
+  The next experiment should use the reward-risk head as a recall recovery
+  tool: keep the safe high-threshold consensus baseline, then search for lower
+  thresholds that stay clean only when reward-risk is weighted.

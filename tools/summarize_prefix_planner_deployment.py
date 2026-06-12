@@ -72,69 +72,76 @@ def accepted_metric(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
-def planner_score(row: dict[str, Any], unsafe_weight: float) -> float:
+def planner_score(
+    row: dict[str, Any],
+    unsafe_weight: float,
+    reward_risk_weight: float,
+) -> float:
+    reward_risk = safe_float(row.get("reward_risk_probability_ucb"))
     return safe_float(row.get("success_probability_lcb")) - unsafe_weight * safe_float(
         row.get("unsafe_probability_ucb")
-    )
+    ) - reward_risk_weight * reward_risk
 
 
 def summarize(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
     metrics: list[dict[str, Any]] = []
     for unsafe_weight in args.planner_unsafe_weight:
-        for score_threshold in args.planner_score_threshold:
-            accepted_by_candidate: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
-            for row in rows:
-                score = planner_score(row, unsafe_weight)
-                if score < score_threshold:
-                    continue
-                candidate = dict(row)
-                candidate["planner_score"] = score
-                accepted_by_candidate[candidate_key(row)].append(candidate)
-
-            for min_splits in args.consensus_min_splits:
-                candidates: list[dict[str, Any]] = []
-                for candidate_rows in accepted_by_candidate.values():
-                    split_set = {str(row.get("split_seed", "")) for row in candidate_rows}
-                    if len(split_set) < min_splits:
+        for reward_risk_weight in args.planner_reward_risk_weight:
+            for score_threshold in args.planner_score_threshold:
+                accepted_by_candidate: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+                for row in rows:
+                    score = planner_score(row, unsafe_weight, reward_risk_weight)
+                    if score < score_threshold:
                         continue
-                    representative = dict(candidate_rows[0])
-                    representative["consensus_splits"] = len(split_set)
-                    representative["planner_score_mean"] = sum(
-                        safe_float(row.get("planner_score")) for row in candidate_rows
-                    ) / len(candidate_rows)
-                    candidates.append(representative)
+                    candidate = dict(row)
+                    candidate["planner_score"] = score
+                    accepted_by_candidate[candidate_key(row)].append(candidate)
 
-                best_by_seed: dict[str, dict[str, Any]] = {}
-                for candidate in candidates:
-                    seed = str(candidate.get("seed", ""))
-                    current = best_by_seed.get(seed)
-                    candidate_rank = (
-                        safe_float(candidate.get("planner_score_mean")),
-                        safe_float(candidate.get("success_delta")),
-                        safe_float(candidate.get("reward_delta")),
-                        -safe_float(candidate.get("prefix_len")),
+                for min_splits in args.consensus_min_splits:
+                    candidates: list[dict[str, Any]] = []
+                    for candidate_rows in accepted_by_candidate.values():
+                        split_set = {str(row.get("split_seed", "")) for row in candidate_rows}
+                        if len(split_set) < min_splits:
+                            continue
+                        representative = dict(candidate_rows[0])
+                        representative["consensus_splits"] = len(split_set)
+                        representative["planner_score_mean"] = sum(
+                            safe_float(row.get("planner_score")) for row in candidate_rows
+                        ) / len(candidate_rows)
+                        candidates.append(representative)
+
+                    best_by_seed: dict[str, dict[str, Any]] = {}
+                    for candidate in candidates:
+                        seed = str(candidate.get("seed", ""))
+                        current = best_by_seed.get(seed)
+                        candidate_rank = (
+                            safe_float(candidate.get("planner_score_mean")),
+                            safe_float(candidate.get("success_delta")),
+                            safe_float(candidate.get("reward_delta")),
+                            -safe_float(candidate.get("prefix_len")),
+                        )
+                        current_rank = (
+                            safe_float(current.get("planner_score_mean")),
+                            safe_float(current.get("success_delta")),
+                            safe_float(current.get("reward_delta")),
+                            -safe_float(current.get("prefix_len")),
+                        ) if current is not None else None
+                        if current is None or candidate_rank > current_rank:
+                            best_by_seed[seed] = candidate
+
+                    accepted_rows = list(best_by_seed.values())
+                    metric = accepted_metric(accepted_rows)
+                    metric.update(
+                        {
+                            "planner_unsafe_weight": float(unsafe_weight),
+                            "planner_reward_risk_weight": float(reward_risk_weight),
+                            "planner_score_threshold": float(score_threshold),
+                            "consensus_min_splits": int(min_splits),
+                            "accepted_unique_seeds": len(accepted_rows),
+                            "accepted_unique_candidates": len(candidates),
+                        }
                     )
-                    current_rank = (
-                        safe_float(current.get("planner_score_mean")),
-                        safe_float(current.get("success_delta")),
-                        safe_float(current.get("reward_delta")),
-                        -safe_float(current.get("prefix_len")),
-                    ) if current is not None else None
-                    if current is None or candidate_rank > current_rank:
-                        best_by_seed[seed] = candidate
-
-                accepted_rows = list(best_by_seed.values())
-                metric = accepted_metric(accepted_rows)
-                metric.update(
-                    {
-                        "planner_unsafe_weight": float(unsafe_weight),
-                        "planner_score_threshold": float(score_threshold),
-                        "consensus_min_splits": int(min_splits),
-                        "accepted_unique_seeds": len(accepted_rows),
-                        "accepted_unique_candidates": len(candidates),
-                    }
-                )
-                metrics.append(metric)
+                    metrics.append(metric)
 
     metrics.sort(
         key=lambda row: (
@@ -151,6 +158,7 @@ def summarize(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dict
 def print_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
     columns = [
         "planner_unsafe_weight",
+        "planner_reward_risk_weight",
         "planner_score_threshold",
         "consensus_min_splits",
         "accepted_unique_seeds",
@@ -197,6 +205,12 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         type=float,
         default=[0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5],
+    )
+    parser.add_argument(
+        "--planner-reward-risk-weight",
+        nargs="+",
+        type=float,
+        default=[0.0],
     )
     parser.add_argument("--consensus-min-splits", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--top-k", type=int, default=25)

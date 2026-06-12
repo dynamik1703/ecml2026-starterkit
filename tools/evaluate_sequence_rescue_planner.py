@@ -376,6 +376,26 @@ def predict_ensemble(
     return stack.mean(axis=0), stack.std(axis=0)
 
 
+def reward_risk_labels(
+    rows: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> np.ndarray:
+    reward_delta = np.asarray(
+        [safe_float(row.get("reward_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    success_delta = np.asarray(
+        [safe_float(row.get("success_delta")) for row in rows],
+        dtype=np.float32,
+    )
+    reward_delta[~np.isfinite(reward_delta)] = 0.0
+    success_delta[~np.isfinite(success_delta)] = 0.0
+    risk = reward_delta < -args.reward_epsilon
+    if args.reward_risk_mode == "non_success":
+        risk = risk & (success_delta <= 1e-9)
+    return risk.astype(np.float32)
+
+
 def train_ensembles(
     split_seed: int,
     train_static: np.ndarray,
@@ -383,10 +403,16 @@ def train_ensembles(
     train_event_mask: np.ndarray,
     train_success: np.ndarray,
     train_unsafe: np.ndarray,
+    train_reward_risk: np.ndarray,
     args: argparse.Namespace,
-) -> tuple[list[SequenceRescueNet], list[SequenceRescueNet]]:
+) -> tuple[
+    list[SequenceRescueNet],
+    list[SequenceRescueNet],
+    list[SequenceRescueNet],
+]:
     success_models = []
     unsafe_models = []
+    reward_risk_models = []
     for member in range(args.ensemble_size):
         base_seed = args.torch_seed + split_seed * 1000 + member
         success_models.append(
@@ -413,7 +439,20 @@ def train_ensembles(
                 args=args,
             )
         )
-    return success_models, unsafe_models
+        if args.reward_risk_head:
+            reward_risk_models.append(
+                train_binary_member(
+                    seed=base_seed + 200_000,
+                    train_static=train_static,
+                    train_events=train_events,
+                    train_event_mask=train_event_mask,
+                    train_y=train_reward_risk,
+                    positive_weight=args.reward_risk_positive_weight,
+                    negative_weight=args.reward_risk_negative_weight,
+                    args=args,
+                )
+            )
+    return success_models, unsafe_models, reward_risk_models
 
 
 def evaluate_split(
@@ -443,6 +482,7 @@ def evaluate_split(
         train_success_labels,
         train_unsafe_labels,
     ) = row_arrays(train_rows, args)
+    train_reward_risk_labels = reward_risk_labels(train_rows, args)
     (
         validation_reward_delta,
         validation_success_delta,
@@ -470,13 +510,14 @@ def evaluate_split(
     train_event_mask = combined_mask[: len(train_rows)]
     validation_event_mask = combined_mask[len(train_rows) :]
 
-    success_models, unsafe_models = train_ensembles(
+    success_models, unsafe_models, reward_risk_models = train_ensembles(
         split_seed=split_seed,
         train_static=train_static,
         train_events=train_events,
         train_event_mask=train_event_mask,
         train_success=train_success_labels,
         train_unsafe=train_unsafe_labels,
+        train_reward_risk=train_reward_risk_labels,
         args=args,
     )
     success_mean, success_std = predict_ensemble(
@@ -493,6 +534,18 @@ def evaluate_split(
     )
     success_lcb = success_mean - args.success_std_coef * success_std
     unsafe_ucb = unsafe_mean + args.unsafe_std_coef * unsafe_std
+    if reward_risk_models:
+        reward_risk_mean, reward_risk_std = predict_ensemble(
+            reward_risk_models,
+            validation_static,
+            validation_events,
+            validation_event_mask,
+        )
+        reward_risk_ucb = reward_risk_mean + args.reward_risk_std_coef * reward_risk_std
+    else:
+        reward_risk_mean = np.zeros_like(success_mean)
+        reward_risk_std = np.zeros_like(success_std)
+        reward_risk_ucb = np.zeros_like(success_lcb)
 
     metrics = []
     planner_metrics = []
@@ -516,33 +569,39 @@ def evaluate_split(
             metrics.append(row)
 
     for unsafe_weight in args.planner_unsafe_weight:
-        planner_score = success_lcb - unsafe_weight * unsafe_ucb
-        best_by_seed: dict[str, int] = {}
-        for row_index, row in enumerate(validation_rows):
-            seed_key = str(row.get("seed", row_index))
-            current = best_by_seed.get(seed_key)
-            if current is None or planner_score[row_index] > planner_score[current]:
-                best_by_seed[seed_key] = row_index
-        for score_threshold in args.planner_score_threshold:
-            accepted = np.zeros(len(validation_rows), dtype=bool)
-            for row_index in best_by_seed.values():
-                if planner_score[row_index] >= score_threshold:
-                    accepted[row_index] = True
-            row = metric_row(
-                categories=validation_categories,
-                reward_delta=validation_reward_delta,
-                success_delta=validation_success_delta,
-                failed_delta=validation_failed_delta,
-                accepted=accepted,
-                min_success_probability=score_threshold,
-                max_unsafe_probability=unsafe_weight,
+        for reward_risk_weight in args.planner_reward_risk_weight:
+            planner_score = (
+                success_lcb
+                - unsafe_weight * unsafe_ucb
+                - reward_risk_weight * reward_risk_ucb
             )
-            row["split_seed"] = split_seed
-            row["val_rows"] = len(validation_rows)
-            row["selection_groups"] = len(best_by_seed)
-            row["planner_score_threshold"] = score_threshold
-            row["planner_unsafe_weight"] = unsafe_weight
-            planner_metrics.append(row)
+            best_by_seed: dict[str, int] = {}
+            for row_index, row in enumerate(validation_rows):
+                seed_key = str(row.get("seed", row_index))
+                current = best_by_seed.get(seed_key)
+                if current is None or planner_score[row_index] > planner_score[current]:
+                    best_by_seed[seed_key] = row_index
+            for score_threshold in args.planner_score_threshold:
+                accepted = np.zeros(len(validation_rows), dtype=bool)
+                for row_index in best_by_seed.values():
+                    if planner_score[row_index] >= score_threshold:
+                        accepted[row_index] = True
+                row = metric_row(
+                    categories=validation_categories,
+                    reward_delta=validation_reward_delta,
+                    success_delta=validation_success_delta,
+                    failed_delta=validation_failed_delta,
+                    accepted=accepted,
+                    min_success_probability=score_threshold,
+                    max_unsafe_probability=unsafe_weight,
+                )
+                row["split_seed"] = split_seed
+                row["val_rows"] = len(validation_rows)
+                row["selection_groups"] = len(best_by_seed)
+                row["planner_score_threshold"] = score_threshold
+                row["planner_unsafe_weight"] = unsafe_weight
+                row["planner_reward_risk_weight"] = reward_risk_weight
+                planner_metrics.append(row)
 
     if args.output_audit_csv:
         for row_index, row in enumerate(validation_rows):
@@ -562,6 +621,9 @@ def evaluate_split(
                 "unsafe_probability_mean": float(unsafe_mean[row_index]),
                 "unsafe_probability_std": float(unsafe_std[row_index]),
                 "unsafe_probability_ucb": float(unsafe_ucb[row_index]),
+                "reward_risk_probability_mean": float(reward_risk_mean[row_index]),
+                "reward_risk_probability_std": float(reward_risk_std[row_index]),
+                "reward_risk_probability_ucb": float(reward_risk_ucb[row_index]),
                 "event_count": int(validation_event_mask[row_index].sum()),
                 "events": row.get("events", ""),
             }
@@ -601,13 +663,21 @@ def aggregate_planner_metrics(results: list[dict[str, Any]]) -> list[dict[str, A
         "val_rows",
         "selection_groups",
     ]
-    buckets: dict[tuple[float, float], dict[str, Any]] = {}
+    buckets: dict[tuple[float, float, float], dict[str, Any]] = {}
     for row in results:
-        key = (row["planner_unsafe_weight"], row["planner_score_threshold"])
+        key = (
+            row["planner_unsafe_weight"],
+            row.get("planner_reward_risk_weight", 0.0),
+            row["planner_score_threshold"],
+        )
         bucket = buckets.setdefault(
             key,
             {
                 "planner_unsafe_weight": row["planner_unsafe_weight"],
+                "planner_reward_risk_weight": row.get(
+                    "planner_reward_risk_weight",
+                    0.0,
+                ),
                 "planner_score_threshold": row["planner_score_threshold"],
                 "splits": 0,
             },
@@ -685,6 +755,7 @@ def print_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
 def print_planner_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
     columns = [
         "planner_unsafe_weight",
+        "planner_reward_risk_weight",
         "planner_score_threshold",
         "accepted_good",
         "accepted_neutral",
@@ -782,6 +853,34 @@ def parse_args() -> argparse.Namespace:
         help="Weights for best-by-seed planner score success_lcb - weight * unsafe_ucb.",
     )
     parser.add_argument(
+        "--reward-risk-head",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Train an additional head for reward-negative prefix risk.",
+    )
+    parser.add_argument(
+        "--reward-risk-mode",
+        choices=["all", "non_success"],
+        default="non_success",
+        help=(
+            "Whether reward-negative rows are reward-risk positives always "
+            "or only when they do not improve Success."
+        ),
+    )
+    parser.add_argument("--reward-risk-positive-weight", type=float, default=24.0)
+    parser.add_argument("--reward-risk-negative-weight", type=float, default=1.0)
+    parser.add_argument("--reward-risk-std-coef", type=float, default=1.0)
+    parser.add_argument(
+        "--planner-reward-risk-weight",
+        nargs="+",
+        type=float,
+        default=[0.0],
+        help=(
+            "Weights for reward risk in planner score: "
+            "success_lcb - unsafe_weight * unsafe_ucb - weight * reward_risk_ucb."
+        ),
+    )
+    parser.add_argument(
         "--planner-score-threshold",
         nargs="+",
         type=float,
@@ -846,8 +945,10 @@ def main() -> int:
     planner_aggregate = aggregate_planner_metrics(planner_results)
     categories = Counter(outcome_category(row, args.reward_epsilon) for row in train_rows)
     _, _, _, success_labels, unsafe_labels = row_arrays(train_rows, args)
+    reward_risk = reward_risk_labels(train_rows, args)
     success_rows = int(success_labels.sum())
     unsafe_rows = int(unsafe_labels.sum())
+    reward_risk_rows = int(reward_risk.sum())
     event_counts = [
         len(row.get("event_details") or [])
         for row in train_rows + validation_rows
@@ -859,6 +960,7 @@ def main() -> int:
         f"validation_rows={len(validation_rows)} good={categories['good']} "
         f"neutral={categories['neutral']} bad={categories['bad']} "
         f"success_positive_rows={success_rows} unsafe_rows={unsafe_rows} "
+        f"reward_risk_rows={reward_risk_rows} "
         f"static_features={len(static_feature_columns)} "
         f"event_features={len(event_feature_columns)} "
         f"max_events={args.max_events} "
@@ -882,6 +984,7 @@ def main() -> int:
                         "categories": dict(categories),
                         "success_positive_rows": success_rows,
                         "unsafe_rows": unsafe_rows,
+                        "reward_risk_rows": reward_risk_rows,
                         "static_features": len(static_feature_columns),
                         "event_features": len(event_feature_columns),
                         "static_feature_columns": static_feature_columns,
