@@ -3988,3 +3988,26 @@ Multi-candidate raw screen for Success-diversity:
   `--aux-bc-include-negative-baseline`; the next selector test should trace raw
   v4a's Success-win seeds and mine/score their prefixes rather than expecting
   the current listwise model to accept them automatically.
+- Conflict-filtered Aux-BC PPO v4b reran the same setup with
+  `--aux-bc-include-negative-baseline`, Aux-BC coefficient `0.16`, and a
+  separate cache
+  `/private/tmp/ecml_rolling_sequence_conflict_aux_bc_cache_3080_3399_withneg.pt`.
+  Collection produced `199` usable samples from the `226` event rows:
+  `117` positive labels and `82` avoidance labels, with `27` invalid labels
+  filtered out and `4` baseline mismatches. Training stayed conservative:
+  Teacher CE stayed `<=0.0077`, KL stayed `<=0.0034`, and Aux-BC loss moved
+  from `0.95` to `0.86`.
+- Fresh raw-v4b screen on `3400..3439`: Sequence default
+  `0.889680 / 0.916667`, raw v4b RerankPolicy `0.870859 / 0.925000`.
+  Compared with v4a, negative-baseline labels helped: Success improved from
+  `0.920833` to `0.925000`, reward improved from `0.865126` to `0.870859`,
+  and Success losses dropped from `3` to `2`. Raw v4b is still not deployable:
+  seed-level reward is `5/22/13`, Success is `4/34/2`, with losses on
+  `3419` and `3422`.
+- Gated-v4b as an extra `SequenceSuccessPolicy` candidate was again exactly
+  neutral on `3400..3439`: `0` changed seeds versus the guarded Sequence
+  default. The online selector is currently the bottleneck for using these RL
+  candidates. Further raw PPO/BC training is useful only if paired with
+  selector training on the same candidate-specific win/loss prefixes, or if we
+  replace the post-hoc selector with an integrated critic/value head that
+  scores the candidate action during policy inference.
