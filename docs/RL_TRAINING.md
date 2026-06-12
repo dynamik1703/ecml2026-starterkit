@@ -3889,3 +3889,27 @@ Multi-candidate raw screen for Success-diversity:
   completed without errors: mean `reward=0.896815`, mean `success=0.933333`
   over 5 episodes. This is only a load/runtime sanity check, not a statistically
   meaningful benchmark.
+- Online A/B benchmark of the exported listwise selector against the previous
+  online Sequence default, both with
+  `submission.sequence_success_policy.MyPolicy` and the Action-Conflict
+  observation:
+  - OOD `3240..3319` (`80` episodes): previous Sequence default
+    `0.909811 / 0.922917`, listwise online `0.910420 / 0.920833`; delta
+    `+0.000609 / -0.002083`. Seed-level comparison: reward `1/78/1`
+    wins/ties/losses, Success `0/79/1`.
+  - OOD `3320..3399` (`80` episodes): previous Sequence default
+    `0.906810 / 0.912500`, listwise online `0.909361 / 0.916667`; delta
+    `+0.002551 / +0.004167`. Seed-level comparison: reward `3/77/0`,
+    Success `2/78/0`.
+  - Combined `160` episodes: previous Sequence default
+    `0.908311 / 0.917708`, listwise online `0.909890 / 0.918750`; delta
+    `+0.001580 / +0.001042`. Seed-level comparison: reward `4/155/1`,
+    Success `2/157/1`.
+- Updated assessment after the online A/B: the exported listwise selector is
+  modestly positive overall and improves the second OOD block, but it is not a
+  decisive online lift yet. The single Success regression on seed `3243` means
+  we should not keep scaling it blindly. The next useful step is an
+  online-decision trace for accepted/rejected listwise interventions, followed
+  by threshold/candidate ablations or direct distillation into PPO/BC only if
+  the trace confirms that the selector is fixing real conflict states rather
+  than mostly making neutral changes.
