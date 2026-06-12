@@ -3761,3 +3761,31 @@ Multi-candidate raw screen for Success-diversity:
   ranker margins. We need a prefix-level risk/veto model, preferably trained
   listwise at the same granularity as the Group-Ranker, so that we can keep
   the high-recall `-1.0` ranker while rejecting traps like `3265` and `3302`.
+- Reused the existing prefix-level sequence Success/Unsafe model in
+  `tools/evaluate_sequence_rescue_planner.py` as the first real prefix-risk
+  audit. Training on `3080..3239` and validating on `3240..3319`, with
+  `reward_negative_unsafe_mode=non_success`, produced safe threshold metrics
+  at low recall and a stronger planner-style score. The raw planner metric at
+  `unsafe_weight=0.5`, `score_threshold=0.25` accepted `4` good and `10`
+  neutral rows across split models, `0` bad, `0` Success-negative, aggregate
+  `+0.407831 / +0.500000`.
+- Added `tools/summarize_prefix_planner_deployment.py` to avoid over-counting
+  split-model rows or multiple prefix lengths for the same seed. It scores
+  prefix candidates per split, requires split consensus, and then keeps at
+  most one prefix per seed. Under this deployment-style metric on
+  `3240..3319`, the best safe prefix-planner settings reached:
+  `10` unique seeds accepted, `3` good and `7` neutral, `0` bad,
+  `0` Success-negative, aggregate `+0.285702 / +0.333333`
+  (`unsafe_weight=0.25`, `score_threshold=0.2`, `consensus_min_splits=1`).
+  A more conservative consensus-2 setting accepted `7` seeds, `2` good and
+  `5` neutral, also safe, aggregate `+0.167666 / +0.333333`.
+- The ranker+prefix-veto combination is safe but lower recall on this block.
+  `tools/summarize_ranker_veto_deployment.py` now accepts both
+  `risk_probability_ucb` and prefix-model `unsafe_probability_ucb` columns.
+  With Group-Ranker margin `-1.0` plus prefix unsafe veto, the deployment-style
+  unique-candidate metric on `3240..3319` kept `0` bad and `0`
+  Success-negative rows but only one useful Success rescue (`+0.052101 /
+  +0.166667`). Current decision: the prefix-level planner/risk model is the
+  better next online candidate than the old Group-Ranker gate. Next steps are
+  to validate this deployment-style prefix planner on at least one more OOD
+  block and then export a conservative online prefix selector.

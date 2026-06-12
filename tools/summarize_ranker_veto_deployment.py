@@ -56,11 +56,15 @@ def read_risk_rows(path: Path) -> dict[tuple[Any, ...], dict[str, Any]]:
         for row in csv.DictReader(handle):
             key = join_key(row)
             current = rows_by_key.get(key)
-            if current is None or safe_float(row.get("risk_probability_ucb")) > safe_float(
-                current.get("risk_probability_ucb")
-            ):
+            if current is None or risk_probability_ucb(row) > risk_probability_ucb(current):
                 rows_by_key[key] = row
     return rows_by_key
+
+
+def risk_probability_ucb(row: dict[str, Any]) -> float:
+    if "risk_probability_ucb" in row:
+        return safe_float(row.get("risk_probability_ucb"))
+    return safe_float(row.get("unsafe_probability_ucb"))
 
 
 def read_ranker_rows(path: Path) -> list[dict[str, Any]]:
@@ -133,7 +137,7 @@ def summarize(
                     if risk_row is None:
                         missing_risk_rows += 1
                         continue
-                    if safe_float(risk_row.get("risk_probability_ucb")) <= max_risk_probability:
+                    if risk_probability_ucb(risk_row) <= max_risk_probability:
                         accepted_rows.append(row)
                         key = candidate_key(row)
                         accepted_by_candidate.setdefault(key, row)
