@@ -3836,3 +3836,35 @@ Multi-candidate raw screen for Success-diversity:
   improve the learned prefix objective from "Success-positive minus risk" to a
   calibrated utility/risk objective, or train a listwise selector that directly
   optimizes "best safe prefix per seed" instead of scoring rows independently.
+- Revisited the existing listwise tool `tools/evaluate_group_rescue_ranker.py`
+  with a success-heavy utility target and explicit baseline/no-op candidate.
+  This is closer to the desired selector than the rowwise prefix planner: for
+  each seed group it learns which prefix, if any, should beat no-op. Training
+  protocol stayed OOD: `3240..3319` was validated with training rows through
+  `3200..3239`, and `3320..3399` was validated with training rows through
+  `3240..3319`.
+- On `3240..3319`, the listwise ranker remained conservative but safe:
+  deployment-style consensus/no-veto at margin `-1.0`, `consensus_min_splits=1`
+  accepted 10 unique candidates, `1` good and `9` neutral, `0` bad,
+  `0` Success-negative, aggregate `+0.052101 / +0.166667`. This confirms
+  the hard part of this block is recall, not veto calibration.
+- On `3320..3399`, the same listwise setup generalized much better. With
+  deployment-style consensus/no-veto at margin `0.1` or `0.2` and
+  `consensus_min_splits=1`, it accepted 17 unique candidates, `6` good and
+  `11` neutral, `0` bad, `0` Success-negative, aggregate
+  `+0.709765 / +1.000000`. A light prefix-risk veto at max risk `1.0` did not
+  change the top result.
+- Added `tools/compare_ranker_deployment.py` to compare ranker deployment
+  summaries across OOD blocks. The best shared safe listwise config across
+  `3240..3319` and `3320..3399` is margin `0.1` or `0.2`, max risk `1.0`
+  or effectively no veto, `consensus_min_splits=1`: 18 unique candidates,
+  `6` good and `12` neutral, `0` bad, `0` Success-negative, aggregate
+  `+0.709765 / +1.000000`. This doubles the safe Success lift of the
+  high-threshold prefix-planner fallback (`+0.500000 / +0.500000`).
+- Updated decision: the listwise Group-Ranker is now the better next online
+  candidate than the rowwise prefix planner. It is still not a complete
+  winning solution because one OOD block contributes almost all of the lift,
+  but it is the strongest learned selector so far under zero-leak constraints.
+  Next step should be an online export of the listwise selector behind a
+  conservative fallback, followed by distilling its accepted prefixes into the
+  RL/BC policy.
