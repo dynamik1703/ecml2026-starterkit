@@ -83,6 +83,20 @@ NON_NUMERIC_DETAIL_KEYS = {
 }
 
 
+def normalized_transition_name(baseline_action: int, candidate_action: int) -> str:
+    return f"{action_name(baseline_action)}->{action_name(candidate_action)}".upper()
+
+
+def parse_transition_filter(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {
+        token.strip().upper()
+        for token in value.split(",")
+        if token.strip()
+    }
+
+
 def column_slug(value: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in value).strip("_")
 
@@ -242,6 +256,13 @@ def run_diff_prefix_episode(
             if baseline_action is None or candidate_action is None:
                 continue
             if baseline_action == candidate_action:
+                continue
+            if int(env._elapsed_steps) < args.min_diff_time:
+                continue
+            if normalized_transition_name(
+                int(baseline_action),
+                int(candidate_action),
+            ) in args.exclude_diff_transition_set:
                 continue
 
             detail = diff_row(
@@ -424,6 +445,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip rows where fewer than prefix_len candidate diffs were applied.",
     )
+    parser.add_argument(
+        "--min-diff-time",
+        type=int,
+        default=0,
+        help="Ignore candidate-vs-baseline action diffs before this env step.",
+    )
+    parser.add_argument(
+        "--exclude-diff-transitions",
+        default="",
+        help=(
+            "Comma-separated action-name transitions to ignore while mining "
+            "candidate diffs, for example DO_NOTHING->MOVE_RIGHT."
+        ),
+    )
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--output-csv", type=Path)
     parser.add_argument("--output-json", type=Path)
@@ -433,6 +468,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.exclude_diff_transition_set = parse_transition_filter(
+        args.exclude_diff_transitions
+    )
     seeds = selected_seeds(args)
     prefix_lengths = selected_prefix_lengths(args)
     rows: list[dict[str, Any]] = []

@@ -4042,3 +4042,25 @@ Multi-candidate raw screen for Success-diversity:
   win/loss divergence points, or train PPO with a stronger return objective
   and use the guarded Sequence policy only as a fallback/teacher rather than
   as the main decision maker.
+- Added later-diff filters to `tools/mine_diff_prefix_dataset.py`:
+  `--min-diff-time` and `--exclude-diff-transitions`. The immediate reason was
+  that raw-v4b prefix-5 rows on `3440..3479` were dominated by identical
+  `t=0 DO_NOTHING->MOVE_RIGHT` start differences, which made both prefix
+  outcomes and trajectory-level classifiers uninformative.
+- Re-mining `3440..3479` with `--min-diff-time 1
+  --exclude-diff-transitions DO_NOTHING->MOVE_RIGHT` produced a more useful
+  later-diff dataset:
+  `/private/tmp/ecml_diff_prefix_v4b_vs_sequence_3440_3479_laterdiff.json`.
+  It still has sparse signal, but no observed negative prefix rows:
+  prefix 1..3 were all neutral, prefix 4 had reward/success `1/0/39`, and
+  prefix 5 had reward `2/0/38` plus Success `1/0/39`. The non-neutral seeds
+  were `3446` prefix 5 (`+0.033985 / +0.0`) and `3470` prefix 4/5
+  (`+0.087629 / +0.166667`). This means later-diff mining can expose small
+  safe rescue opportunities that the initial-diff dataset completely missed.
+- The existing rolling-trained listwise selector still selected no
+  non-baseline candidates on that later-diff validation block, even at margin
+  `-1`. So the current packaged selector is safe but blind to these
+  candidate-specific v4b patterns. Next useful selector experiment: train a
+  candidate-specific later-diff selector on several filtered blocks and hold
+  out a fresh block; do not export it until it demonstrates recall on
+  Success-positive rows without introducing bad leaks.
