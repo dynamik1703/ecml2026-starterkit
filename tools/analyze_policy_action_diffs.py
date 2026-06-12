@@ -108,6 +108,37 @@ def raw_policy_actions(policy: Any, handles: list[int], observations: list[Any])
     }
 
 
+def warn_if_policy_observation_mismatch(
+    args: argparse.Namespace,
+    policy: Any,
+    policy_name: str,
+    observation: Any,
+) -> None:
+    raw_policy = getattr(policy, "rl_policy", policy)
+    obs_size = getattr(raw_policy, "obs_size", None)
+    n_actions = getattr(raw_policy, "n_actions", None)
+    if obs_size is None or n_actions is None:
+        return
+    observation_len = int(np.asarray(observation, dtype=np.float32).shape[0])
+    required_len = int(obs_size) + int(n_actions)
+    if observation_len >= required_len:
+        return
+    warning_key = (policy_name, int(obs_size), int(n_actions), observation_len)
+    emitted = getattr(args, "_obs_mismatch_warnings", set())
+    if warning_key in emitted:
+        return
+    emitted.add(warning_key)
+    args._obs_mismatch_warnings = emitted
+    print(
+        "warning: "
+        f"{policy_name} policy expects obs_size+n_actions={required_len} "
+        f"but {args.obs_builder} emitted length {observation_len}. "
+        "The policy will not receive the appended action mask; use the "
+        "checkpoint's matching observation builder.",
+        flush=True,
+    )
+
+
 def safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -750,6 +781,19 @@ def analyze_seed(args: argparse.Namespace, seed: int) -> list[dict[str, Any]]:
     while int(env._elapsed_steps) < env._max_episode_steps:
         handles = list(env.get_agent_handles())
         obs_list = observation_list(observations, handles)
+        if obs_list:
+            warn_if_policy_observation_mismatch(
+                args,
+                baseline_policy,
+                "baseline",
+                obs_list[0],
+            )
+            warn_if_policy_observation_mismatch(
+                args,
+                candidate_policy,
+                "candidate",
+                obs_list[0],
+            )
         baseline_raw_actions = raw_policy_actions(baseline_policy, handles, obs_list)
         candidate_raw_actions = raw_policy_actions(candidate_policy, handles, obs_list)
         baseline_actions = policy_actions(baseline_policy, handles, obs_list)

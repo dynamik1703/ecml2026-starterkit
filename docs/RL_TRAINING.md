@@ -4174,3 +4174,42 @@ Multi-candidate raw screen for Success-diversity:
   `/private/tmp/ecml_v4b_fullloss_policy_diff_negative_events_later_maskvalid.csv`
   with `260/260` rows. This should be the default audit command before any
   future policy-diff labels are used in PPO.
+- Correction after auditing the mining setup: the first full-policy diff files
+  above were mined with the default 36-feature observation builder, while the
+  v4b checkpoint expects the 79-feature Action-Conflict observation. That made
+  the actor pad observations and fall back to an all-ones action mask, so the
+  `1/260` positive mask-valid result was an artifact of the wrong mining
+  observation, not a property of v4b itself.
+- Re-mining the same raw-v4b win/loss seeds with
+  `--obs-builder submission.my_observation_builder.MyActionConflictObservationBuilder`
+  and the same later-diff filters produced
+  `/private/tmp/ecml_v4b_fullwin_policy_diffs_positive_later_actionobs.csv`
+  (`194` rows) and
+  `/private/tmp/ecml_v4b_fullloss_policy_diffs_negative_later_actionobs.csv`
+  (`151` rows). With `--require-forced-action-mask-valid`, conversion kept
+  `194/194` positive rows and `151/151` negative-baseline rows. This is the
+  correct replayable full-policy diff dataset.
+- A corrected v6b probe from v4b used those Action-Conflict-Obs full-diff
+  labels. Collection was clean: `345` samples, `345` rescue hits, `151`
+  avoidance hits, `0` invalid labels, and `0` baseline mismatches. However,
+  the two-update conservative probe did not improve the raw candidate.
+  Against guarded Sequence on the 26 event seeds, v4b scored
+  `0.827295 / 0.865385` (delta `-0.024086 / +0.006410`, reward W/L/T
+  `10/9/7`, Success W/L/T `7/3/16`), while v6b scored
+  `0.806492 / 0.858974` (delta `-0.044890 / +0.0`, reward W/L/T `9/10/7`,
+  Success W/L/T `7/4/15`). Directly versus v4b, v6b was worse by
+  `-0.020803 / -0.006410`, with losses on `3451`, `3487`, and `3496`.
+- Updated decision after the corrected audit: the Action-Conflict-Obs
+  full-diff labels are now valid training data, but a short low-LR Aux-BC PPO
+  update is not enough and can degrade v4b. The next experiment should not be
+  blind longer training. It should either use this corrected dataset to train a
+  candidate-specific selector/action-value head, or run a controlled sweep
+  where each checkpoint is evaluated directly against v4b on the hard loss
+  seeds before any broader OOD evaluation.
+- Added an observation/checkpoint mismatch warning to
+  `tools/analyze_policy_action_diffs.py`. If a policy exposes `obs_size` and
+  `n_actions`, and the selected observation builder emits fewer than
+  `obs_size + n_actions` values, the tool now warns that the appended action
+  mask will not reach the policy. Smoke test: the old base-observation command
+  warned for v4b (`expected 84`, observed `41`); the corrected
+  Action-Conflict-Obs command did not warn.
