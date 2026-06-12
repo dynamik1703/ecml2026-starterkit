@@ -3595,3 +3595,35 @@ Multi-candidate raw screen for Success-diversity:
   stronger no-op/teacher anchoring. That should let PPO learn rescue actions
   only where the online return supports them, instead of deploying a globally
   drifted BC policy.
+- `tools/train_masked_ppo.py` now supports an auxiliary BC loss through
+  `--aux-bc-csv` and `--aux-bc-coef`. The implementation reuses the
+  event-to-observation collection path from `train_rescue_behavior_clone.py`,
+  then mixes a weighted masked cross-entropy loss into each PPO minibatch. It
+  supports positive rescue rows and `event_kind=negative_baseline` avoidance
+  rows, plus optional low-weight baseline-action anchor samples. The intent is
+  to keep PPO online and reward-driven while giving it direct gradients on the
+  rare rescue/avoidance states.
+- First auxiliary-BC PPO run from the stable actor init:
+  `/private/tmp/ecml_aux_bc_currentinit_ppo_v1.pt`. Training used
+  `submission/checkpoint.pt` with 79-feature Action-Conflict obs, 8 PPO updates
+  x 4 complete episodes, Teacher CE to `submission.sequence_success_policy`
+  (`1.2`), KL to the stable actor init (`1.0`), Action-Conflict penalties,
+  terminal team shaping, and Aux-BC coefficient `0.45`.
+  The Aux-BC CSV combined the 51 best-prefix positive labels with 42 harmful
+  prefix negative-baseline labels. Collection hit `82` labels
+  (`51` positive plus `31` negative-baseline after mask filtering), skipped
+  `11` invalid labels, and had `0` baseline mismatches.
+- On the same 55-seed `3080..3199` screen, Aux-BC PPO is a clear improvement
+  over raw BC and BC-init PPO, but still not safe enough to promote raw:
+  current Sequence default `0.847169 / 0.830303`, Aux-BC PPO
+  `0.844261 / 0.854545`; reward wins/losses/ties `21/21/13`, Success
+  `16/7/32`. Strong wins include `3196`, `3180`, `3188`, `3107`, `3194`,
+  and `3116`. Remaining severe regressions are `3093`, `3143`, `3146`,
+  `3109`, `3168`, and `3083` by Success, plus several reward-only losses.
+- Current decision: this is the first PPO/BC variant moving in the intended
+  direction. It confirms the better architecture: stable-policy init +
+  auxiliary rescue/avoidance BC + online PPO. It should not be deployed raw
+  yet. The next v2 should overweight the seven Success-loss seeds as
+  negative-baseline/teacher anchors, cache Aux-BC samples for faster sweeps,
+  and test a lower Aux-BC coefficient or stronger KL/Teacher CE before any
+  gated integration.

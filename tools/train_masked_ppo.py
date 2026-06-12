@@ -34,6 +34,7 @@ DEFAULT_ACTION_CONFLICT_OBS_BUILDER = (
     "submission.my_observation_builder.MyActionConflictObservationBuilder"
 )
 DEFAULT_TEACHER_POLICY = "submission.rerank_policy.MyPolicy"
+DEFAULT_AUX_BC_BASELINE_POLICY = "submission.sequence_success_policy.MyPolicy"
 BASE_OBS_SIZE = 36
 ROUTE_CONFLICT_OBS_SIZE = 52
 TRAJECTORY_CONFLICT_OBS_SIZE = 64
@@ -361,6 +362,53 @@ def parse_seed_list(value: str | None) -> list[int]:
     return seeds
 
 
+def load_aux_bc_dataset(
+    args: argparse.Namespace,
+) -> tuple[dict[str, torch.Tensor] | None, dict[str, Any] | None]:
+    if not args.aux_bc_csv or args.aux_bc_coef == 0.0:
+        return None, None
+
+    from tools.train_rescue_behavior_clone import (
+        collect_training_samples as collect_aux_bc_samples,
+        read_rescue_events as read_aux_bc_events,
+    )
+
+    aux_args = argparse.Namespace(
+        base_state_pkl=args.base_state_pkl,
+        baseline_policy=args.aux_bc_baseline_policy,
+        baseline_checkpoint=args.aux_bc_baseline_checkpoint,
+        obs_builder=args.obs_builder,
+        rewards="flatland.envs.rewards.ECML2026Rewards",
+        num_agents=args.num_agents,
+        line_length=args.line_length,
+        scene=args.scene,
+        obs_size=args.obs_size,
+        n_actions=args.n_actions,
+        anchor_seed_list=args.aux_bc_anchor_seed_list,
+        anchor_stride=args.aux_bc_anchor_stride,
+        anchor_weight=args.aux_bc_anchor_weight,
+        reward_rescue_weight=args.aux_bc_reward_rescue_weight,
+        success_rescue_weight=args.aux_bc_success_rescue_weight,
+        include_avoidance_events=args.aux_bc_include_negative_baseline,
+        avoidance_weight=args.aux_bc_avoidance_weight,
+        reward_epsilon=args.aux_bc_reward_epsilon,
+        success_weight=args.aux_bc_success_weight,
+        failed_weight=args.aux_bc_failed_weight,
+    )
+    rescue_events = read_aux_bc_events(args.aux_bc_csv, aux_args)
+    observations, actions, weights, stats = collect_aux_bc_samples(
+        aux_args,
+        rescue_events,
+    )
+    weights = weights / weights.mean().clamp_min(1e-6)
+    dataset = {
+        "observations": observations,
+        "actions": actions,
+        "weights": weights,
+    }
+    return dataset, stats
+
+
 def rollout_seed(
     args: argparse.Namespace,
     start_seed: int,
@@ -645,6 +693,7 @@ def ppo_update(
     optimizer: torch.optim.Optimizer,
     rollout: dict[str, torch.Tensor],
     anchor_policy: ActorCritic | None,
+    aux_bc_data: dict[str, torch.Tensor] | None,
 ) -> dict[str, float]:
     observations = rollout["observations"]
     actions = rollout["actions"]
@@ -661,6 +710,8 @@ def ppo_update(
     teacher_losses = []
     teacher_valid_fractions = []
     anchor_kls = []
+    aux_bc_losses = []
+    aux_bc_valid_fractions = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -711,6 +762,42 @@ def ppo_update(
                 loss = loss + args.anchor_kl_coef * anchor_kl
                 anchor_kls.append(float(anchor_kl.item()))
 
+            if aux_bc_data is not None and args.aux_bc_coef != 0.0:
+                aux_observations = aux_bc_data["observations"]
+                aux_actions = aux_bc_data["actions"]
+                aux_weights = aux_bc_data["weights"]
+                aux_count = aux_actions.shape[0]
+                if args.aux_bc_batch_size > 0 and args.aux_bc_batch_size < aux_count:
+                    aux_idx = torch.randint(
+                        low=0,
+                        high=aux_count,
+                        size=(args.aux_bc_batch_size,),
+                    )
+                else:
+                    aux_idx = torch.arange(aux_count)
+                aux_logits, _ = policy.masked_forward(aux_observations[aux_idx])
+                aux_action_batch = aux_actions[aux_idx]
+                aux_action_logits = aux_logits.gather(
+                    1,
+                    aux_action_batch.unsqueeze(1),
+                ).squeeze(1)
+                valid_aux = torch.isfinite(aux_action_logits)
+                aux_bc_valid_fractions.append(float(valid_aux.float().mean().item()))
+                if valid_aux.any():
+                    aux_loss_values = F.cross_entropy(
+                        aux_logits[valid_aux],
+                        aux_action_batch[valid_aux],
+                        reduction="none",
+                    )
+                    aux_weight_batch = aux_weights[aux_idx][valid_aux]
+                    aux_bc_loss = (
+                        aux_loss_values * aux_weight_batch
+                    ).sum() / aux_weight_batch.sum().clamp_min(1e-6)
+                else:
+                    aux_bc_loss = aux_logits.new_tensor(0.0)
+                loss = loss + args.aux_bc_coef * aux_bc_loss
+                aux_bc_losses.append(float(aux_bc_loss.item()))
+
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
@@ -734,6 +821,14 @@ def ppo_update(
         ),
         "anchor_kl": (
             float(np.mean(anchor_kls)) if anchor_kls else float("nan")
+        ),
+        "aux_bc_loss": (
+            float(np.mean(aux_bc_losses)) if aux_bc_losses else float("nan")
+        ),
+        "aux_bc_valid_fraction": (
+            float(np.mean(aux_bc_valid_fractions))
+            if aux_bc_valid_fractions
+            else float("nan")
         ),
     }
 
@@ -927,6 +1022,50 @@ def parse_args() -> argparse.Namespace:
             "new observation features but keeping PPO close to the stable actor."
         ),
     )
+    parser.add_argument(
+        "--aux-bc-csv",
+        nargs="+",
+        type=Path,
+        default=[],
+        help=(
+            "Optional rescue/avoidance event CSVs used as an auxiliary "
+            "behavior-cloning loss during PPO updates."
+        ),
+    )
+    parser.add_argument(
+        "--aux-bc-coef",
+        type=float,
+        default=0.0,
+        help="Weight for the auxiliary BC loss. Disabled when 0.",
+    )
+    parser.add_argument(
+        "--aux-bc-batch-size",
+        type=int,
+        default=128,
+        help="Auxiliary BC samples per PPO minibatch. Use <=0 for all samples.",
+    )
+    parser.add_argument("--aux-bc-baseline-policy", default=DEFAULT_AUX_BC_BASELINE_POLICY)
+    parser.add_argument("--aux-bc-baseline-checkpoint", type=Path)
+    parser.add_argument(
+        "--aux-bc-anchor-seeds",
+        help=(
+            "Comma-separated seeds for low-weight baseline-action auxiliary "
+            "anchors. Defaults to --training-seeds when omitted."
+        ),
+    )
+    parser.add_argument("--aux-bc-anchor-stride", type=int, default=12)
+    parser.add_argument("--aux-bc-anchor-weight", type=float, default=0.0)
+    parser.add_argument("--aux-bc-reward-rescue-weight", type=float, default=8.0)
+    parser.add_argument("--aux-bc-success-rescue-weight", type=float, default=16.0)
+    parser.add_argument(
+        "--aux-bc-include-negative-baseline",
+        action="store_true",
+        help="Use event_kind=negative_baseline rows as baseline-action labels.",
+    )
+    parser.add_argument("--aux-bc-avoidance-weight", type=float, default=12.0)
+    parser.add_argument("--aux-bc-reward-epsilon", type=float, default=1e-6)
+    parser.add_argument("--aux-bc-success-weight", type=float, default=2.0)
+    parser.add_argument("--aux-bc-failed-weight", type=float, default=0.75)
     parser.add_argument("--normalize-advantages", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -999,6 +1138,11 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     args.training_seed_list = parse_seed_list(args.training_seeds)
     if args.training_seed_list and args.episodes_per_update <= 0:
         raise ValueError("--training-seeds requires --episodes-per-update > 0")
+    args.aux_bc_anchor_seed_list = parse_seed_list(args.aux_bc_anchor_seeds)
+    if not args.aux_bc_anchor_seed_list:
+        args.aux_bc_anchor_seed_list = list(args.training_seed_list)
+    if args.aux_bc_coef != 0.0 and not args.aux_bc_csv:
+        raise ValueError("--aux-bc-coef requires --aux-bc-csv")
     return args
 
 
@@ -1049,6 +1193,20 @@ def main() -> int:
         for parameter in anchor_policy.parameters():
             parameter.requires_grad_(False)
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.learning_rate)
+    aux_bc_data, aux_bc_stats = load_aux_bc_dataset(args)
+    if aux_bc_data is not None and aux_bc_stats is not None:
+        print(
+            "aux_bc "
+            f"samples={aux_bc_stats['samples']} "
+            f"rescue_hits={aux_bc_stats['rescue_hits']} "
+            f"avoidance_hits={aux_bc_stats['avoidance_hits']} "
+            f"rescue_misses={aux_bc_stats['rescue_misses']} "
+            f"rescue_invalid={aux_bc_stats['rescue_invalid']} "
+            f"baseline_mismatches={aux_bc_stats['rescue_baseline_mismatches']} "
+            f"anchor_samples={aux_bc_stats['anchor_samples']} "
+            f"coef={args.aux_bc_coef}",
+            flush=True,
+        )
 
     for update in range(args.updates):
         episode_seed_offset = update * max(1, args.episodes_per_update)
@@ -1058,7 +1216,14 @@ def main() -> int:
             args.seed + update * 1000,
             episode_seed_offset=episode_seed_offset,
         )
-        loss_stats = ppo_update(args, policy, optimizer, rollout, anchor_policy)
+        loss_stats = ppo_update(
+            args,
+            policy,
+            optimizer,
+            rollout,
+            anchor_policy,
+            aux_bc_data,
+        )
         teacher_loss_text = (
             f" teacher_loss={loss_stats['teacher_loss']:.6g}"
             f" teacher_valid={loss_stats['teacher_valid_fraction']:.3g}"
@@ -1068,6 +1233,12 @@ def main() -> int:
         anchor_kl_text = (
             f" anchor_kl={loss_stats['anchor_kl']:.6g}"
             if not np.isnan(loss_stats["anchor_kl"])
+            else ""
+        )
+        aux_bc_text = (
+            f" aux_bc_loss={loss_stats['aux_bc_loss']:.6g}"
+            f" aux_bc_valid={loss_stats['aux_bc_valid_fraction']:.3g}"
+            if not np.isnan(loss_stats["aux_bc_loss"])
             else ""
         )
         action_conflict_text = (
@@ -1095,6 +1266,7 @@ def main() -> int:
             f"entropy={loss_stats['entropy']:.6g}"
             f"{teacher_loss_text}"
             f"{anchor_kl_text}"
+            f"{aux_bc_text}"
             f"{action_conflict_text}",
             flush=True,
         )
@@ -1104,6 +1276,7 @@ def main() -> int:
         {
             "model": policy.state_dict(),
             "config": vars(args),
+            "aux_bc_stats": aux_bc_stats,
         },
         args.output_checkpoint,
     )
