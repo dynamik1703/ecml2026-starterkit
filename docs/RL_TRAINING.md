@@ -3474,3 +3474,38 @@ Multi-candidate raw screen for Success-diversity:
   route to better RL performance: train policies that create more low-risk
   first-extra actions like `3088`, and separately build a sequence-level
   planner for multi-event rescues like `3107`.
+- Added `tools/mine_rolling_sequence_dataset.py` as the first explicit
+  rolling-horizon sequence candidate generator. Unlike policy-diff mining, it
+  does not require a second policy to propose deviations. It scans a baseline
+  rollout for critical decisions, scores legal alternative actions by local
+  conflict/risk improvement, rejects known unsafe transitions such as
+  `MOVE_RIGHT->MOVE_FORWARD`, selects top-scoring events, replays short
+  chronological prefixes, and writes sequence rows with final outcome labels.
+- First smoke on `3088,3107,3101`: the initial implementation exposed why this
+  must stay offline for now. On already-solved `3088`, Prefix 2/3 can regress;
+  on `3101`, early alternatives can create a Success loss. On `3107`, however,
+  the planner found a useful two-event reward improvement and rediscovered the
+  same first key action as PPO3800 (`121:a2 MOVE_FORWARD->MOVE_RIGHT`), showing
+  that this is a real multi-step candidate-generation path.
+- Failure-focused rolling-sequence mining on ten current failed/partial seeds
+  from `3080..3119`
+  (`3081,3083,3096,3106,3107,3109,3110,3112,3113,3116`) produced:
+  - Prefix 1: reward wins/losses/ties `2/2/6`, Success `1/1/8`,
+    mean delta `-0.003817 / 0.000000`.
+  - Prefix 2: reward `3/2/5`, Success `1/0/9`, mean delta
+    `+0.010310 / +0.016667`.
+  - Prefix 3: reward `3/1/6`, Success `2/0/8`, mean delta
+    `+0.021346 / +0.033333`.
+  Strong positives include seed `3081` (`+0.122288` reward,
+  `+0.166667` Success; first event `188:a3 MOVE_LEFT->MOVE_FORWARD`),
+  seed `3107` (`+0.072971` reward; first event
+  `121:a2 MOVE_FORWARD->MOVE_RIGHT`), and seed `3112` (`+0.038369`
+  reward). Hard negatives include seed `3096` Prefix 1/2 and seed `3113`
+  Prefix 1, which are exactly the kind of rows needed for a learned
+  value/risk scorer.
+- Current assessment after the rolling-sequence prototype: the candidate
+  generator is promising and more strategic than single-action PPO gating, but
+  it is not safe as a hand-written online policy. The next high-value step is
+  to scale this mining over broader failure windows and train a sequence
+  value/risk model that accepts the `3081/3107/3112`-style positives while
+  rejecting `3096/3113`-style traps.
