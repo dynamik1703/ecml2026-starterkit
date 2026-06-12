@@ -3817,3 +3817,22 @@ Multi-candidate raw screen for Success-diversity:
   The next experiment should use the reward-risk head as a recall recovery
   tool: keep the safe high-threshold consensus baseline, then search for lower
   thresholds that stay clean only when reward-risk is weighted.
+- Added `tools/compare_prefix_planner_deployment.py` to compare shared
+  deployment configs across OOD blocks. The low-threshold overlap between
+  `3240..3319` and `3320..3399` has no safe common config: every shared config
+  up to `score_threshold=0.5` leaked at least one bad candidate, despite much
+  better combined recall (`+1.333333` Success at the top but with `1` bad
+  leak). The high-threshold overlap has 10 safe common configs. The safest
+  useful family requires `consensus_min_splits=3` and `score_threshold>=0.9`;
+  for example `unsafe_weight=0.25`, `score_threshold=0.9` accepted 3 unique
+  candidates across the two blocks, `1` good and `2` neutral, `0` bad,
+  `0` Success-negative, aggregate `+0.500000 / +0.500000`. The purer
+  deployment candidate is `score_threshold=0.95`, which accepts only the
+  strong `3386` rescue and no neutral interventions, with the same aggregate
+  lift.
+- Current decision: this is safe but not yet a winning selector. We should not
+  export this as the final solution and declare victory; it is a conservative
+  fallback. The next high-value work is recall recovery without bad leaks:
+  improve the learned prefix objective from "Success-positive minus risk" to a
+  calibrated utility/risk objective, or train a listwise selector that directly
+  optimizes "best safe prefix per seed" instead of scoring rows independently.
