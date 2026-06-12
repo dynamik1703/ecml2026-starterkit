@@ -39,6 +39,20 @@ def positive_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
     return success_delta > 1e-9 or reward_delta > reward_epsilon
 
 
+def row_utility(row: dict[str, Any], success_weight: float, failed_weight: float) -> float:
+    reward_delta = safe_float(row.get("reward_delta"))
+    success_delta = safe_float(row.get("success_delta"))
+    failed_delta = safe_float(row.get("failed_agents_delta"))
+    reward_delta = reward_delta if reward_delta == reward_delta else 0.0
+    success_delta = success_delta if success_delta == success_delta else 0.0
+    failed_delta = failed_delta if failed_delta == failed_delta else 0.0
+    return float(
+        reward_delta
+        + success_weight * success_delta
+        - failed_weight * max(0.0, failed_delta)
+    )
+
+
 def negative_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
     reward_delta = safe_float(row.get("reward_delta"))
     success_delta = safe_float(row.get("success_delta"))
@@ -67,12 +81,34 @@ def event_rows(
     rows: list[dict[str, Any]],
     reward_epsilon: float,
     include_negative_baseline: bool,
+    best_prefix_per_seed: bool,
+    success_weight: float,
+    failed_weight: float,
 ) -> list[dict[str, Any]]:
+    if best_prefix_per_seed:
+        best_positive_by_seed: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not positive_prefix(row, reward_epsilon):
+                continue
+            seed = str(row.get("seed", ""))
+            previous = best_positive_by_seed.get(seed)
+            if previous is None or row_utility(
+                row,
+                success_weight,
+                failed_weight,
+            ) > row_utility(previous, success_weight, failed_weight):
+                best_positive_by_seed[seed] = row
+        selected_positive_rows = set(map(id, best_positive_by_seed.values()))
+    else:
+        selected_positive_rows = None
+
     sources = source_columns(rows)
     output = []
     seen = set()
     positive_event_keys = set()
     for row in rows:
+        if selected_positive_rows is not None and id(row) not in selected_positive_rows:
+            continue
         if not positive_prefix(row, reward_epsilon):
             continue
         details = row.get("event_details") or []
@@ -96,7 +132,9 @@ def event_rows(
                 )
             )
     for row in rows:
-        is_positive = positive_prefix(row, reward_epsilon)
+        is_positive = positive_prefix(row, reward_epsilon) and (
+            selected_positive_rows is None or id(row) in selected_positive_rows
+        )
         is_negative = include_negative_baseline and negative_prefix(row, reward_epsilon)
         if not is_positive and not is_negative:
             continue
@@ -106,10 +144,10 @@ def event_rows(
         reward_delta = safe_float(row.get("reward_delta"))
         success_delta = safe_float(row.get("success_delta"))
         failed_delta = safe_float(row.get("failed_agents_delta"))
-        utility = (
-            (reward_delta if reward_delta == reward_delta else 0.0)
-            + 2.0 * (success_delta if success_delta == success_delta else 0.0)
-            - 0.75 * max(0.0, failed_delta if failed_delta == failed_delta else 0.0)
+        utility = row_utility(
+            row,
+            success_weight=success_weight,
+            failed_weight=failed_weight,
         )
         for index, event in enumerate(details):
             if not isinstance(event, dict):
@@ -196,6 +234,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument(
+        "--best-prefix-per-seed",
+        action="store_true",
+        help="Emit positive events only from the highest-utility positive prefix per seed.",
+    )
+    parser.add_argument("--success-weight", type=float, default=2.0)
+    parser.add_argument("--failed-weight", type=float, default=0.75)
+    parser.add_argument(
         "--include-negative-baseline",
         action="store_true",
         help=(
@@ -210,7 +255,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     rows = read_json_rows(args.json)
-    converted = event_rows(rows, args.reward_epsilon, args.include_negative_baseline)
+    converted = event_rows(
+        rows,
+        reward_epsilon=args.reward_epsilon,
+        include_negative_baseline=args.include_negative_baseline,
+        best_prefix_per_seed=args.best_prefix_per_seed,
+        success_weight=args.success_weight,
+        failed_weight=args.failed_weight,
+    )
     write_csv(args.output_csv, converted)
     summary = {
         "input_rows": len(rows),

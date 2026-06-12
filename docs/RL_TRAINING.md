@@ -3551,3 +3551,47 @@ Multi-candidate raw screen for Success-diversity:
   train a sequence-value model or distill the best prefixes into PPO/BC so the
   policy learns the rescues directly instead of relying on a brittle online
   rescue gate.
+- Added `--best-prefix-per-seed` to
+  `tools/convert_diff_prefix_to_rescue_events.py` so rolling-sequence rows can
+  be converted into cleaner BC labels: only the highest-utility positive prefix
+  per seed is emitted, rather than every positive intermediate prefix. On the
+  55 mined seeds from `3080..3199`, this produced 51 event labels from 25
+  positive seeds. The label set is mixed but meaningful: 24 Success-rescue
+  events and 27 reward-only rescue events, with actions split across
+  `MOVE_LEFT`, `MOVE_FORWARD`, and `MOVE_RIGHT`.
+- First rolling-sequence Oracle-BC checkpoint:
+  `/private/tmp/ecml_rolling_oracle_bc_v1.pt`. Training used the 79-feature
+  Action-Conflict observation, the current `submission.sequence_success_policy`
+  as rollout baseline, all 55 mined seeds as low-weight anchors, and the 51
+  best-prefix Oracle events as high-weight BC targets. Collection was clean:
+  `rescue_hits=51`, `rescue_misses=0`, `rescue_invalid=0`,
+  `baseline_mismatches=0`, `anchor_samples=13301`. This is an important
+  reproducibility check: the mined Oracle events are reachable from the current
+  baseline rollout.
+- Raw Oracle-BC is not deployable. On the same 55-seed screen versus current
+  Sequence default with Action-Conflict obs, it scored:
+  current `0.847169 / 0.830303`, raw BC `0.816776 / 0.830303`;
+  reward wins/losses/ties `17/31/7`, Success `14/13/28`. It contains strong
+  new rescues, e.g. `3180` (`+0.225254` reward, `+0.333333` Success), `3188`,
+  `3194`, `3196`, but also severe regressions such as `3143`, `3092`, `3093`,
+  `3193`, and `3146`. The diagnosis is clear: global BC from sparse rescue
+  labels learns useful rescue behavior but changes too many unlabelled
+  decisions.
+- First PPO/BC polish from the raw BC checkpoint:
+  `/private/tmp/ecml_rolling_oracle_bc_ppo_v1.pt`. It used 8 PPO updates x 4
+  complete episodes, Action-Conflict penalties, terminal team success/failure
+  shaping, Teacher CE to the current Sequence policy (`0.8`), and a small KL
+  anchor to the BC init (`0.5`). The training remained numerically controlled,
+  but did not fix the deployment issue. On the same 55 seeds it scored:
+  current `0.847169 / 0.830303`, PPO/BC `0.818167 / 0.830303`;
+  reward `19/30/6`, Success `17/14/24`. PPO recovered or improved a few BC
+  wins, but preserved too many bad drifts, including a catastrophic `3093`
+  Success loss.
+- Current PPO/BC conclusion: the data path is now valid and the rescue labels
+  are real, but "BC checkpoint first, PPO polish second" is not the right
+  architecture yet. The next better variant should keep the current safe policy
+  as initialization and add the Oracle rescue labels as an auxiliary BC loss
+  during PPO, with explicit negative-baseline labels from harmful prefixes and
+  stronger no-op/teacher anchoring. That should let PPO learn rescue actions
+  only where the online return supports them, instead of deploying a globally
+  drifted BC policy.
