@@ -4064,3 +4064,17 @@ Multi-candidate raw screen for Success-diversity:
   candidate-specific later-diff selector on several filtered blocks and hold
   out a fresh block; do not export it until it demonstrates recall on
   Success-positive rows without introducing bad leaks.
+- A second later-diff block, `3480..3499`, was the needed counterexample:
+  `/private/tmp/ecml_diff_prefix_v4b_vs_sequence_3480_3499_laterdiff.json`
+  produced `100` rows with `93` neutral and `7` bad labels, no good labels.
+  The bad rows came from seed `3485` from prefix 2 onward
+  (`-0.036390 / -0.166667`) and seed `3499` from prefix 3 onward
+  (`-0.326508 / -0.166667`).
+- First candidate-specific later-diff selector test failed safety. Training on
+  the rolling pool plus `3440..3479_laterdiff` and validating on
+  `3480..3499_laterdiff` selected only bad rows: at margin `1.0` it accepted
+  `4` bad rows and no good/neutral rows; at margin `0.2` it accepted `6` bad
+  rows. The accepted rows were exactly the `3485` and `3499` loss prefixes.
+  This makes a quick export unsafe. We need either substantially more balanced
+  later-diff data with hard negatives, or a different policy-improvement route
+  where RL learns to avoid these bad right-detour motifs directly.
