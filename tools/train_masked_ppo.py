@@ -366,7 +366,18 @@ def load_aux_bc_dataset(
     args: argparse.Namespace,
 ) -> tuple[dict[str, torch.Tensor] | None, dict[str, Any] | None]:
     if not args.aux_bc_csv or args.aux_bc_coef == 0.0:
+        if args.aux_bc_cache and args.aux_bc_coef != 0.0 and args.aux_bc_cache.exists():
+            payload = torch.load(args.aux_bc_cache, map_location="cpu")
+            return payload["dataset"], payload.get("stats")
         return None, None
+
+    if (
+        args.aux_bc_cache
+        and args.aux_bc_cache.exists()
+        and not args.aux_bc_refresh_cache
+    ):
+        payload = torch.load(args.aux_bc_cache, map_location="cpu")
+        return payload["dataset"], payload.get("stats")
 
     from tools.train_rescue_behavior_clone import (
         collect_training_samples as collect_aux_bc_samples,
@@ -406,6 +417,25 @@ def load_aux_bc_dataset(
         "actions": actions,
         "weights": weights,
     }
+    if args.aux_bc_cache:
+        args.aux_bc_cache.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "dataset": dataset,
+                "stats": stats,
+                "config": {
+                    "aux_bc_csv": [str(path) for path in args.aux_bc_csv],
+                    "obs_builder": args.obs_builder,
+                    "obs_size": args.obs_size,
+                    "num_agents": args.num_agents,
+                    "line_length": args.line_length,
+                    "scene": args.scene,
+                    "anchor_seeds": args.aux_bc_anchor_seed_list,
+                    "include_negative_baseline": args.aux_bc_include_negative_baseline,
+                },
+            },
+            args.aux_bc_cache,
+        )
     return dataset, stats
 
 
@@ -1044,6 +1074,19 @@ def parse_args() -> argparse.Namespace:
         default=128,
         help="Auxiliary BC samples per PPO minibatch. Use <=0 for all samples.",
     )
+    parser.add_argument(
+        "--aux-bc-cache",
+        type=Path,
+        help=(
+            "Optional torch cache for collected auxiliary BC observations. "
+            "When present, it is reused unless --aux-bc-refresh-cache is set."
+        ),
+    )
+    parser.add_argument(
+        "--aux-bc-refresh-cache",
+        action="store_true",
+        help="Rebuild --aux-bc-cache from --aux-bc-csv instead of reusing it.",
+    )
     parser.add_argument("--aux-bc-baseline-policy", default=DEFAULT_AUX_BC_BASELINE_POLICY)
     parser.add_argument("--aux-bc-baseline-checkpoint", type=Path)
     parser.add_argument(
@@ -1141,8 +1184,15 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     args.aux_bc_anchor_seed_list = parse_seed_list(args.aux_bc_anchor_seeds)
     if not args.aux_bc_anchor_seed_list:
         args.aux_bc_anchor_seed_list = list(args.training_seed_list)
-    if args.aux_bc_coef != 0.0 and not args.aux_bc_csv:
-        raise ValueError("--aux-bc-coef requires --aux-bc-csv")
+    if args.aux_bc_coef != 0.0 and not args.aux_bc_csv and args.aux_bc_cache is None:
+        raise ValueError("--aux-bc-coef requires --aux-bc-csv or --aux-bc-cache")
+    if (
+        args.aux_bc_coef != 0.0
+        and not args.aux_bc_csv
+        and args.aux_bc_cache is not None
+        and not args.aux_bc_cache.exists()
+    ):
+        raise ValueError("--aux-bc-cache does not exist and no --aux-bc-csv was given")
     return args
 
 

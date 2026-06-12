@@ -3627,3 +3627,28 @@ Multi-candidate raw screen for Success-diversity:
   negative-baseline/teacher anchors, cache Aux-BC samples for faster sweeps,
   and test a lower Aux-BC coefficient or stronger KL/Teacher CE before any
   gated integration.
+- `tools/train_masked_ppo.py` now supports `--aux-bc-cache` and
+  `--aux-bc-refresh-cache`. Collected Aux-BC observations/actions/weights are
+  saved as a torch payload and can be reused without replaying the environment.
+  The broad cache `/private/tmp/ecml_rolling_sequence_aux_bc_cache.pt` reloads
+  in a few seconds and reproduces the v1 collection stats:
+  `samples=13380`, `rescue_hits=82`, `avoidance_hits=31`,
+  `rescue_invalid=11`, `baseline_mismatches=0`, `anchor_samples=13298`.
+- Focused v2 cache:
+  `/private/tmp/ecml_rolling_sequence_aux_bc_v2_focus_cache.pt` kept the same
+  82 valid rescue/avoidance labels but added dense baseline anchors on the
+  v1 Success-loss seeds `3083,3093,3109,3143,3146,3168,3174`
+  (`anchor_samples=27099`). The v2 PPO run used this cache, lower Aux-BC
+  coefficient `0.22`, stronger Teacher CE/KL (`2.0/2.0`), lower learning rate
+  `7e-6`, and a focused 32-episode schedule mixing loss seeds with strong
+  rescue seeds.
+- v2 was not an improvement. On the same 55-seed `3080..3199` screen:
+  current Sequence default `0.847169 / 0.830303`, v2
+  `0.825744 / 0.830303`; reward `19/20/16`, Success `10/7/38`.
+  It preserved some wins (`3180`, `3107`, `3196`) but made the key safety
+  failures worse or unchanged: `3093`, `3109`, `3143`, `3146`, `3168`,
+  plus a new Success loss on `3134`. Conclusion: dense anchors on the loss
+  seeds are not sufficient. The next useful improvement should mine exact
+  negative action labels from the candidate-vs-current policy diffs on these
+  failure seeds, instead of trying to correct them with generic baseline
+  anchors.
