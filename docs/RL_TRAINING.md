@@ -4078,3 +4078,32 @@ Multi-candidate raw screen for Success-diversity:
   This makes a quick export unsafe. We need either substantially more balanced
   later-diff data with hard negatives, or a different policy-improvement route
   where RL learns to avoid these bad right-detour motifs directly.
+- Converted the two later-diff blocks into Aux-BC event labels:
+  `/private/tmp/ecml_v4b_laterdiff_aux_events_3440_3499.csv`. The converter
+  emitted `19` events across four seeds: `9` positive rescue events
+  (`3446`, `3470`) and `10` negative-baseline events (`3485`, `3499`). This
+  is balanced but very small; it should be treated as hard corrective labels,
+  not as a standalone training set.
+- Aux-BC PPO v5 used v4b as init, the old conflict-filtered event CSV plus the
+  later-diff event CSV, a refreshed cache
+  `/private/tmp/ecml_aux_bc_laterdiff_v5_cache.pt`, and output
+  `/private/tmp/ecml_aux_bc_laterdiff_v5.pt`. Collection produced `206`
+  usable Aux-BC samples with `206` rescue hits and `89` avoidance hits; the
+  new labels were therefore replayable. Training stayed numerically controlled
+  (`anchor_kl <= 0.00082`, teacher CE `<=0.0243`, Aux-BC loss about `0.85`),
+  but rollout Success fell on updates 3/4, so evaluation was required.
+- Raw v5 is still not deployable. On `3440..3499` against guarded Sequence,
+  Sequence averaged `0.906894 / 0.930556`, v5 averaged
+  `0.783152 / 0.680556`, delta `-0.123742 / -0.250000`, seed-level reward
+  `10/4/46` and Success `3/11/46` wins/ties/losses. Against v4b on the same
+  block, v5 was only slightly better: `+0.007864 / +0.008333`, reward
+  `15/39/6`, Success `6/51/3`. It improved some seeds (`3442`, `3449`,
+  `3456`, `3479`, `3492`) but worsened `3470` and `3455`, and did not fix
+  the explicitly labelled hard negative `3485`.
+- Updated decision: small corrective Aux-BC labels are useful diagnostics but
+  not enough to change the raw RL policy reliably. The next winning-solution
+  attempt should either train on many more replayable later-diff hard
+  positives/negatives with stronger per-event validation, or shift to a
+  trajectory/value-based objective that learns when the whole v4b-style mode is
+  beneficial. Do not spend more time trying to export v5 raw or to patch it
+  with the current post-hoc selector.
