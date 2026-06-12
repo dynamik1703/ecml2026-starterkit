@@ -3685,3 +3685,40 @@ Multi-candidate raw screen for Success-diversity:
   evaluate candidate action prefixes over short horizons, learn which prefixes
   improve final team outcome, then distill only those causally validated
   prefixes into PPO/BC or use the model as a learned online reranker.
+- Started the next sequence-selector OOD loop on a fresh seed window. Current
+  Sequence default on `3200..3239` scored `0.914404 / 0.916667`; 15 partial
+  seeds were selected for rolling-prefix mining:
+  `3200,3203,3209,3210,3211,3218,3219,3222,3224,3229,3230,3234,3235,3237,3238`.
+  Rolling prefixes `1..5` produced 75 rows with useful label diversity:
+  `26` good, `34` neutral, `15` bad; Success deltas included eight positive
+  rows (`4` at `+0.166667`, `4` at `+0.5`) and one negative row
+  (`-0.166667`). The raw oracle signal is again real but unsafe as a rule:
+  prefix 2 had mean delta `+0.020280 / +0.044444`, while prefix 5 still had
+  one Success loss despite positive mean delta.
+- OOD Group-Ranker validation was run with train rows from the old 55 mined
+  groups (`3080..3199`) and validation only on the fresh `3200..3239` partial
+  block. The previous full-feature target was safe but too conservative:
+  with uncertainty penalties and margin `0.25/0.5`, it accepted one good
+  reward-only row and five neutral rows, with `0` bad and `0` Success-negative
+  leaks, but no Success rescue (`+0.089147 / +0.000000` aggregate reward /
+  Success over three training seeds).
+- Event-only scoring generalized better on the same OOD block. With the
+  original target and margin `-0.25`, it accepted three good reward-only rows
+  and four neutral rows with `0` bad and `0` Success-negative leaks
+  (`+0.267442 / +0.000000`).
+- A success-heavy event-only target is the strongest sequence-selector result
+  so far. Configuration: `success_weight=12`, `reward_loss_penalty=1.5`,
+  `success_loss_penalty=16`, `failure_penalty=6`, uncertainty coefficients
+  `0.5/0.5`, margin `-1.0`. Across split seeds `1,3,5`, it accepted
+  `7` good and `8` neutral rows, `0` bad rows, `0` Success-negative leaks,
+  and aggregate deltas `+1.283928 / +1.500000`. The key Success rescue
+  `3218` prefix 2 (`+0.299376` reward, `+0.5` Success) was accepted in all
+  three split models. The consensus accepted rows were stable for
+  `3200` prefix 1 (neutral), `3218` prefix 2 (strong Success rescue),
+  `3229` prefix 1 (neutral), and `3237` prefix 1 (reward rescue).
+- Current decision after the OOD smoke: this supports the architecture shift.
+  Sequence-level learned selection is more promising than more pointwise PPO
+  labels. It is still not deployable from one 15-seed OOD block; next we need
+  either more independent OOD blocks with the success-heavy event-only target,
+  or an exported conservative sequence selector that can be audited online
+  before any PPO distillation.
