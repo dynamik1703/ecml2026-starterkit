@@ -4011,3 +4011,34 @@ Multi-candidate raw screen for Success-diversity:
   selector training on the same candidate-specific win/loss prefixes, or if we
   replace the post-hoc selector with an integrated critic/value head that
   scores the candidate action during policy inference.
+- Candidate-specific prefix audit for v4b:
+  `/private/tmp/ecml_diff_prefix_v4b_vs_sequence_3400_targeted.json` mined
+  targeted raw-v4b versus guarded-Sequence diffs on selected seeds from
+  `3400..3439`. The old rolling-trained listwise selector was safe but blind:
+  on the v4b validation rows it accepted only neutral prefixes and missed the
+  useful v4b Success examples such as seed `3411` prefix 3. Adding the v4b
+  rows to cross-validation increased general acceptance but still leaked bad
+  rows, while a deliberately leaky v4b-only selffit showed the model can fit
+  these examples (`10/0/0` good/neutral/bad at threshold `-1`, `7/0/0` at
+  threshold `0`). Interpretation: architecture/features are not completely
+  broken, but the selector does not generalize from the old rolling pool to
+  this new RL candidate.
+- OOD audit on fresh seeds `3440..3479` changed the priority. After fixing
+  `ActorCritic` to zero-pad observations shorter than a checkpoint's expected
+  `obs_size`, `tools/mine_diff_prefix_dataset.py` completed raw-v4b versus
+  guarded-Sequence mining with prefix lengths 1..5. Raw v4b was much worse
+  OOD: Sequence averaged `0.907840 / 0.925000`, raw v4b averaged
+  `0.768962 / 0.687500`, seed-level reward `6/4/30`, Success `3/7/30`.
+  However, every one of the 200 prefix rows was neutral: prefix 1..5 produced
+  reward `0/0/40` and Success `0/0/40` for each prefix length. Several raw
+  wins (`3443`, `3451`, `3464`) only appear at full-rollout level, not in the
+  first five candidate diffs.
+- Updated decision: do not keep investing primarily in short-prefix Gate
+  tuning for v4b. It is useful as a safety wrapper and for conflict-event
+  analysis, but it cannot expose the current candidate's full-rollout gains.
+  The next high-leverage RL step should move the learning signal closer to
+  trajectory return: either train a trajectory/value selector over longer
+  candidate rollouts, mine adaptive later diffs around the actual raw-v4b
+  win/loss divergence points, or train PPO with a stronger return objective
+  and use the guarded Sequence policy only as a fallback/teacher rather than
+  as the main decision maker.

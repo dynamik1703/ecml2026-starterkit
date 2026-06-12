@@ -92,7 +92,21 @@ class ActorCritic(nn.Module):
         if obs_t.ndim == 1:
             obs_t = obs_t.unsqueeze(0)
 
-        features = obs_t[:, : self.obs_size]
+        if obs_t.shape[1] >= self.obs_size:
+            features = obs_t[:, : self.obs_size]
+        else:
+            pad_width = self.obs_size - obs_t.shape[1]
+            features = torch.cat(
+                [
+                    obs_t,
+                    torch.zeros(
+                        (obs_t.shape[0], pad_width),
+                        dtype=obs_t.dtype,
+                        device=obs_t.device,
+                    ),
+                ],
+                dim=1,
+            )
         if action_masks is None:
             if obs_t.shape[1] >= self.obs_size + self.n_actions:
                 mask = obs_t[:, -self.n_actions :]
