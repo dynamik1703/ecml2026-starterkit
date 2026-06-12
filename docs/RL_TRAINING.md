@@ -4166,3 +4166,11 @@ Multi-candidate raw screen for Success-diversity:
   actions with temporal context. Any future policy-diff converter should either
   filter by action-mask validity before export or record the legal action that
   the deployed policy actually sends to Flatland.
+- Added `--require-forced-action-mask-valid` to
+  `tools/convert_policy_diffs_to_negative_events.py` to make that filter
+  explicit. Re-converting the full-policy diffs with the filter produced
+  `/private/tmp/ecml_v4b_fullwin_policy_diff_positive_events_later_maskvalid.csv`
+  with `1/260` rows (`259` skipped as mask-invalid) and
+  `/private/tmp/ecml_v4b_fullloss_policy_diff_negative_events_later_maskvalid.csv`
+  with `260/260` rows. This should be the default audit command before any
+  future policy-diff labels are used in PPO.
