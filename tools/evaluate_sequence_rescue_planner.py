@@ -63,6 +63,15 @@ EVENT_CATEGORICAL_FIELDS = (
     "state",
 )
 
+FEATURE_VALUE_CLIP = 1_000.0
+
+
+def bounded_feature_value(value: Any) -> float:
+    numeric_value = safe_float(value)
+    if not math.isfinite(numeric_value):
+        return 0.0
+    return float(np.clip(numeric_value, -FEATURE_VALUE_CLIP, FEATURE_VALUE_CLIP))
+
 
 class SequenceRescueNet(nn.Module):
     def __init__(
@@ -163,8 +172,7 @@ def static_feature_matrix(
     matrix = np.empty((len(rows), len(feature_columns)), dtype=np.float32)
     for row_index, row in enumerate(rows):
         for column_index, column in enumerate(feature_columns):
-            value = safe_float(row.get(column))
-            matrix[row_index, column_index] = value if math.isfinite(value) else 0.0
+            matrix[row_index, column_index] = bounded_feature_value(row.get(column))
     return matrix
 
 
@@ -235,8 +243,7 @@ def choose_event_feature_columns(
 
 def event_feature_value(event: dict[str, Any], feature: str) -> float:
     if feature.startswith("num:"):
-        value = safe_float(event.get(feature[4:]))
-        return value if math.isfinite(value) else 0.0
+        return bounded_feature_value(event.get(feature[4:]))
     if feature.startswith("cat:"):
         _prefix, field, value = feature.split(":", 2)
         return float(str(event.get(field)) == value)

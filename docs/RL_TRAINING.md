@@ -3509,3 +3509,45 @@ Multi-candidate raw screen for Success-diversity:
   to scale this mining over broader failure windows and train a sequence
   value/risk model that accepts the `3081/3107/3112`-style positives while
   rejecting `3096/3113`-style traps.
+- Scaled rolling-sequence mining to the current failed/partial seed pool from
+  `3080..3199`: 19 train-window seeds from `3080..3119` and 36 holdout-window
+  seeds from `3120..3199`, each with prefix lengths `1..5`. The holdout raw
+  prefix means improved with longer prefixes, but still had meaningful reward
+  regressions:
+  - Prefix 1: mean delta `-0.007301 / +0.013889`, reward wins/losses/ties
+    `4/7/25`, Success `4/1/31`.
+  - Prefix 3: mean delta `+0.022928 / +0.027778`, reward `13/6/17`,
+    Success `7/1/28`.
+  - Prefix 5: mean delta `+0.028771 / +0.041667`, reward `13/9/14`,
+    Success `9/0/27`.
+  This confirms that the generator finds real rescues, but longer prefixes are
+  not automatically safe.
+- Oracle check with no-op/baseline available on all 55 mined seeds shows the
+  current sequence-generator opportunity size: a perfect selector would accept
+  25 seeds and leave 30 seeds unchanged, for about `+2.192` reward delta and
+  `+2.000` Success delta. This is large enough to justify more learned
+  sequence selection work, but it is not yet a solved RL policy.
+- The first listwise group-ranker evaluation exposed a numeric issue in the
+  shared sequence feature pipeline: finite sentinel values such as
+  `priority_effective_slack=1e9` could appear in validation but not training
+  splits, producing huge out-of-distribution standardized values and absurd
+  scores (one bad `3096` candidate received a score near `593000`). The
+  sequence feature encoder now clips numeric static and event features to
+  `[-1000, 1000]` before standardization. This is an offline scorer/training
+  robustness fix; it does not change the packaged policy behavior.
+- With clipped features, five-split CV over all 55 mined seed groups gives a
+  promising but still conservative sequence-selector signal. Full static+event
+  features, no uncertainty penalty, margin `-0.25`: accepted `7` good, `11`
+  neutral, `0` bad, with `0` Success-negative leaks and aggregate deltas
+  `+0.996` reward / `+0.833` Success over the validation folds. Event-only
+  scoring is slightly weaker but stable at margin `0.1/0.25`: accepted `8`
+  good, `7` neutral, `0` bad, aggregate `+0.816` reward / `+0.667` Success.
+- The strict out-of-window test remains weak when training only on the 19
+  `3080..3119` seeds and validating on the 36 `3120..3199` seeds. Both the
+  full-feature and event-only rankers leak bad candidates. Conclusion: the
+  rolling-sequence ranker is a useful learning direction and a better target
+  than more hard-coded gate relaxations, but it is not deployment-ready. The
+  next large-step RL plan should mine substantially more seed groups, then
+  train a sequence-value model or distill the best prefixes into PPO/BC so the
+  policy learns the rescues directly instead of relying on a brittle online
+  rescue gate.
