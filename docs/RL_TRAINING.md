@@ -4107,3 +4107,24 @@ Multi-candidate raw screen for Success-diversity:
   trajectory/value-based objective that learns when the whole v4b-style mode is
   beneficial. Do not spend more time trying to export v5 raw or to patch it
   with the current post-hoc selector.
+- Added `tools/convert_diff_prefix_to_trajectory_rows.py` for trajectory/value
+  diagnostics. It keeps prefix or later-diff feature rows but replaces the
+  local prefix outcome label with the full raw candidate rollout delta
+  (`candidate_reward_delta`, `candidate_success_delta`) and removes the
+  top-level candidate outcome columns to avoid label leakage. This gives a
+  reproducible path for testing "can these early/later diff features predict
+  whether the whole RL candidate mode wins?"
+- First v4b trajectory-label test was negative. Prefix-5 conversions produced:
+  targeted `3400` rows `6` good / `10` bad, later-diff `3440..3479` rows
+  `5` good / `4` neutral / `31` bad, and later-diff `3480..3499` rows
+  `2` good / `18` bad. Training the existing Success/Risk classifier on
+  `3400 + 3440..3479` and validating on `3480..3499` accepted nothing at all,
+  even with low Success thresholds (`0.05`) and loose unsafe thresholds
+  (`0.5`).
+- The audit says this was not just conservative calibration. On the
+  `3480..3499` holdout, actual good seeds `3483` and `3488` had near-zero or
+  negative Success LCBs and high Unsafe UCBs, while bad seed `3491` received
+  the highest Success score. Conclusion: prefix/later-diff aggregate features
+  are not sufficient for a simple trajectory meta-selector yet. The next
+  serious RL direction should learn from full trajectories or agent-centric
+  temporal state, not just aggregate first-five-diff summaries.
