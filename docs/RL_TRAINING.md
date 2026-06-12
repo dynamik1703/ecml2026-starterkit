@@ -3652,3 +3652,36 @@ Multi-candidate raw screen for Success-diversity:
   negative action labels from the candidate-vs-current policy diffs on these
   failure seeds, instead of trying to correct them with generic baseline
   anchors.
+- Added `tools/convert_policy_diffs_to_negative_events.py` to turn
+  baseline-vs-candidate action-diff rows into Aux-BC-compatible
+  `event_kind=negative_baseline` rows. This makes exact "candidate chose X,
+  current safe policy chose Y" corrections reproducible from
+  `tools/analyze_policy_action_diffs.py`. On the v2 regression seeds
+  `3083,3093,3109,3134,3143,3146,3168`, the converter produced 47 negative
+  labels. The candidate action was mostly `MOVE_FORWARD` (`33/47`), while the
+  safe forced labels were balanced between `MOVE_LEFT` (`18`), `MOVE_RIGHT`
+  (`17`), and `MOVE_FORWARD` (`12`).
+- Aux-BC PPO v3 used those exact policy-diff negative labels plus the previous
+  rolling-sequence rescue/avoidance labels. Cache:
+  `/private/tmp/ecml_aux_bc_v3_policy_diff_cache.pt` with `17483` samples,
+  `100` rescue hits, `49` avoidance hits, `34` invalid labels, `0` baseline
+  mismatches, and `17383` low-weight anchors. Training started again from the
+  stable actor init, used Teacher CE/KL `2.0/2.0`, LR `8e-6`, and Aux-BC
+  coefficient `0.30`. Checkpoint:
+  `/private/tmp/ecml_aux_bc_currentinit_ppo_v3.pt`.
+- v3 is not the next deployable checkpoint. On the same 55-seed screen:
+  current Sequence default `0.847169 / 0.830303`, v3
+  `0.838133 / 0.845455`; reward `18/23/14`, Success `10/5/40`. It reduced
+  Success losses compared with v1 (`5` vs `7`) and preserved strong rescue
+  wins on `3196`, `3180`, `3107`, `3194`, `3116`, and `3188`, but it still
+  failed hard on the exact regression seeds we tried to repair:
+  `3143`, `3093`, `3146`, `3168`, and `3134`, with large reward-only losses
+  on `3109`, `3108`, `3154`, `3115`, and `3126`.
+- Current decision: exact pointwise negative policy-diff labels help reduce
+  some Success losses, but they do not solve the causal sequence failures.
+  The best current RL checkpoint remains v1 for Success lift, but it is still
+  not raw-deployable. The next high-value direction should stop adding more
+  point labels and instead learn a sequence-level value/risk model or selector:
+  evaluate candidate action prefixes over short horizons, learn which prefixes
+  improve final team outcome, then distill only those causally validated
+  prefixes into PPO/BC or use the model as a learned online reranker.
