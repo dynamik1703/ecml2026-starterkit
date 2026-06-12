@@ -53,6 +53,20 @@ def action_name(action: int | None) -> str:
         return str(action)
 
 
+def normalized_transition_name(baseline_action: int, candidate_action: int) -> str:
+    return f"{action_name(baseline_action)}->{action_name(candidate_action)}".upper()
+
+
+def parse_transition_filter(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {
+        token.strip().upper()
+        for token in value.split(",")
+        if token.strip()
+    }
+
+
 def done_all(dones: Any) -> bool:
     if isinstance(dones, dict):
         return bool(dones.get("__all__", False))
@@ -742,7 +756,18 @@ def analyze_seed(args: argparse.Namespace, seed: int) -> list[dict[str, Any]]:
         candidate_actions = policy_actions(candidate_policy, handles, obs_list)
 
         for handle, observation in zip(handles, obs_list):
-            if baseline_actions.get(handle) != candidate_actions.get(handle):
+            baseline_action = baseline_actions.get(handle)
+            candidate_action = candidate_actions.get(handle)
+            if baseline_action != candidate_action:
+                if baseline_action is None or candidate_action is None:
+                    continue
+                if int(env._elapsed_steps) < args.min_diff_time:
+                    continue
+                if normalized_transition_name(
+                    int(baseline_action),
+                    int(candidate_action),
+                ) in args.exclude_diff_transition_set:
+                    continue
                 rows.append(
                     diff_row(
                         args,
@@ -818,6 +843,20 @@ def parse_args() -> argparse.Namespace:
         help="Maximum synchronized action differences to record for each seed.",
     )
     parser.add_argument(
+        "--min-diff-time",
+        type=int,
+        default=0,
+        help="Ignore candidate-vs-baseline action diffs before this env step.",
+    )
+    parser.add_argument(
+        "--exclude-diff-transitions",
+        default="",
+        help=(
+            "Comma-separated action-name transitions to ignore while recording "
+            "policy diffs, for example DO_NOTHING->MOVE_RIGHT."
+        ),
+    )
+    parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
@@ -828,6 +867,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.exclude_diff_transition_set = parse_transition_filter(
+        args.exclude_diff_transitions
+    )
     if args.max_diffs_per_seed <= 0:
         raise ValueError("--max-diffs-per-seed must be positive")
     seeds = (

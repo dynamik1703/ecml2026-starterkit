@@ -97,6 +97,11 @@ def utility(row: dict[str, str], args: argparse.Namespace) -> float:
 
 
 def is_positive_rescue(row: dict[str, str], args: argparse.Namespace) -> bool:
+    if (
+        str(row.get("event_kind", "")).lower() == "positive_rescue"
+        and safe_float(row.get("candidate_source_policy_diff_positive")) > 0.0
+    ):
+        return True
     reward_delta = safe_float(row.get("reward_delta"))
     success_delta = safe_float(row.get("success_delta"))
     failed_delta = safe_float(row.get("failed_agents_delta"))

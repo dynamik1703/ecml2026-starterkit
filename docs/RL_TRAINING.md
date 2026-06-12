@@ -4128,3 +4128,41 @@ Multi-candidate raw screen for Success-diversity:
   are not sufficient for a simple trajectory meta-selector yet. The next
   serious RL direction should learn from full trajectories or agent-centric
   temporal state, not just aggregate first-five-diff summaries.
+- Added filtered full-policy diff mining to `tools/analyze_policy_action_diffs.py`
+  through `--min-diff-time` and `--exclude-diff-transitions`, and extended
+  `tools/convert_policy_diffs_to_negative_events.py` with
+  `--event-kind positive_rescue|negative_baseline`. The immediate goal was to
+  test whether full raw-v4b win/loss trajectories can provide better
+  action-level PPO labels than the failed prefix aggregate selectors.
+- Full-policy diff mining used v4b raw wins
+  `3401,3411,3430,3432,3434,3435,3443,3451,3461,3464,3466,3483,3488`
+  and raw losses
+  `3449,3450,3487,3491,3460,3442,3440,3479,3489,3496,3492,3485,3499`,
+  with `--min-diff-time 1 --exclude-diff-transitions DO_NOTHING->MOVE_RIGHT`.
+  It produced `260` positive candidate-action events and `260`
+  negative-baseline events.
+- The replay/mask audit was decisive: positive candidate targets were valid
+  under the 79-feature action mask for only `1/260` events, while negative
+  baseline targets were valid for `260/260`. The positive rows are therefore
+  not usable as direct masked PPO BC targets in their current form. The Aux-BC
+  loader now accepts `candidate_source_policy_diff_positive` rows explicitly,
+  but the mask audit means most of them are filtered before training.
+- A short v6 probe from v4b used the two full-policy diff event CSVs with
+  `aux_bc_coef=0.10`, no anchors, and two PPO updates. Collection produced
+  `261` usable samples, `260` avoidance hits, `259` invalid labels, and `0`
+  baseline mismatches. Training stayed numerically stable, but the labels were
+  effectively almost all negative-baseline avoidance examples.
+- The v6 probe is not a useful candidate. On the 26 event seeds against guarded
+  Sequence, it matched mean Success but lost reward:
+  Sequence/v6 `0.851381 / 0.858974` versus `0.806492 / 0.858974`,
+  reward W/L/T `9/10/7`, Success W/L/T `7/4/15`. Severe regressions were
+  `3449` (`-0.412764 / -0.5`), `3485` (`-0.315502 / -0.333333`), and
+  `3487` (`-0.211349 / -0.166667`). Do not run a longer v6 from these labels
+  as-is.
+- Updated decision: pointwise full-policy diffs are useful diagnostics but not
+  the next winning route. The next high-leverage RL step should produce
+  replayable positive labels from causally validated sequence prefixes or move
+  to an integrated trajectory/action-value head that chooses among legal
+  actions with temporal context. Any future policy-diff converter should either
+  filter by action-mask validity before export or record the legal action that
+  the deployed policy actually sends to Flatland.
