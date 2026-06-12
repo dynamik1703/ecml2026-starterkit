@@ -3913,3 +3913,42 @@ Multi-candidate raw screen for Success-diversity:
   by threshold/candidate ablations or direct distillation into PPO/BC only if
   the trace confirms that the selector is fixing real conflict states rather
   than mostly making neutral changes.
+- Online traces for `3243`, `3358`, `3380`, and `3396` showed the key failure
+  mode. The `3243` Success regression accepted a first
+  `MOVE_FORWARD -> MOVE_LEFT` detour from PPO3600 at time `336` with listwise
+  margin `0.689`, but all prefix-conflict signals were zero:
+  `candidate_prefix_cell_intersections=0`,
+  `candidate_prefix_head_on_edge_conflicts=0`,
+  `candidate_prefix_same_edge_conflicts=0`, and route occupancy/intersection
+  observation counts were also zero. The true Success gains on `3358` and
+  `3380` were different: their first accepted detours had nonzero prefix
+  intersections/same-edge conflicts (`9/8` and `15/15`). This says the selector
+  is useful when it acts on visible route-conflict context, but still
+  overgeneralizes to apparently conflict-free timing changes.
+- Added `ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS` and trace
+  `reject_reason` logging to `submission.sequence_success_policy.MyPolicy`.
+  The guard applies only to the first accepted detour from baseline
+  `MOVE_FORWARD` to candidate `MOVE_LEFT`/`MOVE_RIGHT`, and requires at least
+  one prefix conflict signal by default. Default is now `1.0`.
+- Guard ablation with `ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS=1`:
+  - `3240..3319`: previous Sequence baseline `0.909811 / 0.922917`,
+    unguarded listwise `0.910420 / 0.920833`, guarded listwise
+    `0.909811 / 0.922917`. The guard repaired seed `3243` and gave back the
+    neutral reward-only gain on `3317`.
+  - `3320..3399`: previous Sequence baseline `0.906810 / 0.912500`,
+    unguarded listwise `0.909361 / 0.916667`, guarded listwise
+    `0.908001 / 0.916667`. The guard preserved the two Success gains
+    (`3358`, `3380`) and gave back reward-only seed `3396`.
+  - Combined `160` episodes: guarded listwise versus previous Sequence default
+    is `+0.000595 / +0.002083`, with seed-level reward `2/158/0` and Success
+    `2/158/0` wins/ties/losses. Unguarded listwise had larger reward lift but
+    one Success loss. The safer default is therefore the guarded listwise
+    selector.
+- Current decision: keep the guarded listwise selector as the packaged online
+  default because it is strictly non-negative versus the previous Sequence
+  baseline on these two OOD blocks and has no observed Success regression.
+  This is still not enough for a winning solution. The next RL step should
+  distill the conflict-positive accepted events (`3358`, `3380`, and similar
+  mined events) into the PPO/BC policy or train the policy with an auxiliary
+  conflict-rescue objective, while treating conflict-free detour wins like
+  `3396` as a lower-priority reward optimization problem.

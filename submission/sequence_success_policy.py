@@ -498,6 +498,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN",
             0.5,
         )
+        self.first_detour_min_prefix_conflicts = self._env_float(
+            "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
+            1.0,
+        )
         self.right_detour_max_obs_intersections = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_MAX_OBS_INTERSECTIONS",
             0.5,
@@ -920,30 +924,42 @@ class SequenceSuccessPolicy(RerankPolicy):
             accepted, scores = self.listwise_scorer.score(score_row)
             if accepted and self._low_value_same_edge_candidate(detail, scores):
                 accepted = False
+                scores["reject_reason"] = "same_edge_low_value"
             if accepted and self._low_value_right_detour(
                 baseline_action,
                 candidate_action,
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_low_value"
             if accepted and self._low_value_left_detour(
                 baseline_action,
                 candidate_action,
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "left_detour_low_value"
             if accepted and self._low_confidence_left_to_forward(
                 baseline_action,
                 candidate_action,
                 detail,
             ):
                 accepted = False
+                scores["reject_reason"] = "left_to_forward_low_confidence"
+            if accepted and self._low_conflict_first_detour(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "first_detour_low_prefix_conflict"
             if accepted and self._crowded_right_detour(
                 baseline_action,
                 candidate_action,
                 detail,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_crowded"
             if accepted and self._low_conflict_right_detour(
                 baseline_action,
                 candidate_action,
@@ -951,6 +967,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_low_conflict"
             return accepted, scores
 
         if self.sequence_scorer is None:
@@ -972,30 +989,42 @@ class SequenceSuccessPolicy(RerankPolicy):
             accepted, scores = self.sequence_scorer.score(aggregate)
             if accepted and self._low_value_same_edge_candidate(detail, scores):
                 accepted = False
+                scores["reject_reason"] = "same_edge_low_value"
             if accepted and self._low_value_right_detour(
                 baseline_action,
                 candidate_action,
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_low_value"
             if accepted and self._low_value_left_detour(
                 baseline_action,
                 candidate_action,
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "left_detour_low_value"
             if accepted and self._low_confidence_left_to_forward(
                 baseline_action,
                 candidate_action,
                 detail,
             ):
                 accepted = False
+                scores["reject_reason"] = "left_to_forward_low_confidence"
+            if accepted and self._low_conflict_first_detour(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "first_detour_low_prefix_conflict"
             if accepted and self._crowded_right_detour(
                 baseline_action,
                 candidate_action,
                 detail,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_crowded"
             if accepted and self._low_conflict_right_detour(
                 baseline_action,
                 candidate_action,
@@ -1003,6 +1032,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 scores,
             ):
                 accepted = False
+                scores["reject_reason"] = "right_detour_low_conflict"
             return accepted, scores
         finally:
             self.sequence_scorer.min_success_probability = old_min_success
@@ -1094,6 +1124,34 @@ class SequenceSuccessPolicy(RerankPolicy):
             return False
         return margin < self.left_to_forward_min_margin
 
+    def _low_conflict_first_detour(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if self.first_detour_min_prefix_conflicts <= 0:
+            return False
+        if self._accepted_event_details:
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action not in (
+                ReservationPolicy.MOVE_LEFT,
+                ReservationPolicy.MOVE_RIGHT,
+            )
+        ):
+            return False
+        try:
+            prefix_conflicts = max(
+                float(detail.get("candidate_prefix_cell_intersections", 0.0)),
+                float(detail.get("candidate_prefix_head_on_edge_conflicts", 0.0)),
+                float(detail.get("candidate_prefix_same_edge_conflicts", 0.0)),
+            )
+        except Exception:
+            return False
+        return prefix_conflicts < self.first_detour_min_prefix_conflicts
+
     def _crowded_right_detour(
         self,
         baseline_action: int,
@@ -1180,6 +1238,8 @@ class SequenceSuccessPolicy(RerankPolicy):
             ),
             "accepted_event_count_before": len(self._accepted_event_details),
         }
+        if "reject_reason" in scores:
+            row["reject_reason"] = str(scores["reject_reason"])
         for key in (
             "slack",
             "distance",
