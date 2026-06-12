@@ -65,6 +65,33 @@ def negative_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
     return success_delta <= 1e-9 and reward_delta < -reward_epsilon
 
 
+def prefix_conflict_value(event: dict[str, Any]) -> float:
+    values = [
+        safe_float(event.get("forced_prefix_cell_intersections")),
+        safe_float(event.get("forced_prefix_head_on_edge_conflicts")),
+        safe_float(event.get("forced_prefix_same_edge_conflicts")),
+        safe_float(event.get("candidate_prefix_cell_intersections")),
+        safe_float(event.get("candidate_prefix_head_on_edge_conflicts")),
+        safe_float(event.get("candidate_prefix_same_edge_conflicts")),
+    ]
+    finite = [value for value in values if value == value]
+    return max(finite, default=0.0)
+
+
+def row_prefix_conflict_value(row: dict[str, Any]) -> float:
+    details = row.get("event_details") or []
+    if not isinstance(details, list):
+        return 0.0
+    return max(
+        (
+            prefix_conflict_value(event)
+            for event in details
+            if isinstance(event, dict)
+        ),
+        default=0.0,
+    )
+
+
 def source_columns(rows: list[dict[str, Any]]) -> list[str]:
     columns = sorted(
         {
@@ -84,11 +111,14 @@ def event_rows(
     best_prefix_per_seed: bool,
     success_weight: float,
     failed_weight: float,
+    positive_min_prefix_conflicts: float,
 ) -> list[dict[str, Any]]:
     if best_prefix_per_seed:
         best_positive_by_seed: dict[str, dict[str, Any]] = {}
         for row in rows:
             if not positive_prefix(row, reward_epsilon):
+                continue
+            if row_prefix_conflict_value(row) < positive_min_prefix_conflicts:
                 continue
             seed = str(row.get("seed", ""))
             previous = best_positive_by_seed.get(seed)
@@ -110,6 +140,8 @@ def event_rows(
         if selected_positive_rows is not None and id(row) not in selected_positive_rows:
             continue
         if not positive_prefix(row, reward_epsilon):
+            continue
+        if row_prefix_conflict_value(row) < positive_min_prefix_conflicts:
             continue
         details = row.get("event_details") or []
         if not isinstance(details, list):
@@ -135,6 +167,11 @@ def event_rows(
         is_positive = positive_prefix(row, reward_epsilon) and (
             selected_positive_rows is None or id(row) in selected_positive_rows
         )
+        if (
+            is_positive
+            and row_prefix_conflict_value(row) < positive_min_prefix_conflicts
+        ):
+            is_positive = False
         is_negative = include_negative_baseline and negative_prefix(row, reward_epsilon)
         if not is_positive and not is_negative:
             continue
@@ -241,6 +278,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--success-weight", type=float, default=2.0)
     parser.add_argument("--failed-weight", type=float, default=0.75)
     parser.add_argument(
+        "--positive-min-prefix-conflicts",
+        type=float,
+        default=0.0,
+        help=(
+            "Keep positive prefixes only when at least one event has this many "
+            "forced/candidate prefix cell, same-edge, or head-on conflicts."
+        ),
+    )
+    parser.add_argument(
         "--include-negative-baseline",
         action="store_true",
         help=(
@@ -262,6 +308,7 @@ def main() -> int:
         best_prefix_per_seed=args.best_prefix_per_seed,
         success_weight=args.success_weight,
         failed_weight=args.failed_weight,
+        positive_min_prefix_conflicts=args.positive_min_prefix_conflicts,
     )
     write_csv(args.output_csv, converted)
     summary = {
@@ -274,6 +321,7 @@ def main() -> int:
         "negative_baseline_events": sum(
             1 for row in converted if row.get("event_kind") == "negative_baseline"
         ),
+        "positive_min_prefix_conflicts": args.positive_min_prefix_conflicts,
     }
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)

@@ -3952,3 +3952,39 @@ Multi-candidate raw screen for Success-diversity:
   mined events) into the PPO/BC policy or train the policy with an auxiliary
   conflict-rescue objective, while treating conflict-free detour wins like
   `3396` as a lower-priority reward optimization problem.
+- Added `--positive-min-prefix-conflicts` to
+  `tools/convert_diff_prefix_to_rescue_events.py`. This lets the Aux-BC/PPO
+  path keep positive rescue prefixes only when at least one event has visible
+  prefix conflict signal (`forced` or `candidate` cell intersections,
+  same-edge conflicts, or head-on edge conflicts). Negative-baseline labels are
+  not filtered by this option.
+- Converted the current rolling-sequence pool from `3080..3399`
+  (`650` prefix rows, `130` seed groups) into a conflict-filtered Aux-BC CSV:
+  `/private/tmp/ecml_rolling_sequence_conflict_aux_events_3080_3399.csv`.
+  Using `--best-prefix-per-seed --include-negative-baseline
+  --positive-min-prefix-conflicts 1` produced `226` event rows across `83`
+  seeds: `117` positive rescue events and `109` negative-baseline events.
+  Among the positive events, `60` were Success-positive and `57` were
+  reward-only.
+- First conflict-filtered Aux-BC PPO diagnostic, v4a:
+  `/private/tmp/ecml_aux_bc_conflict_currentinit_ppo_v4.pt`. This run
+  accidentally omitted `--aux-bc-include-negative-baseline`, so the trainer
+  used only the `117` positive labels (`avoidance_hits=0`) and no anchor
+  samples. It was still useful as a diagnostic: training stayed numerically
+  stable, Aux-BC loss decreased from `1.03` to `0.59`, Teacher CE stayed small
+  (`<=0.012`), and KL to the stable actor stayed low (`<=0.0065`).
+- Fresh raw-v4a screen on `3400..3439` against the guarded Sequence default:
+  Sequence `0.889680 / 0.916667`, raw v4a RerankPolicy
+  `0.865126 / 0.920833`. Seed-level comparison was reward `6/20/14` and
+  Success `4/33/3`. This is not raw-deployable: it finds some new completions
+  (`3411`, `3435`, `3432`, `3434`) but pays too much reward and still creates
+  three Success losses (`3419`, `3421`, `3422`).
+- Gated-v4a as an extra `SequenceSuccessPolicy` candidate was exactly neutral
+  on `3400..3439`: `0` changed seeds versus the guarded Sequence default. The
+  current listwise selector therefore blocks all v4a changes on this fresh
+  block. This confirms the architecture split: the RL policy can learn useful
+  rescue tendencies, but the current selector does not yet recognize them as
+  safe online improvements. The next RL test should rerun v4 with
+  `--aux-bc-include-negative-baseline`; the next selector test should trace raw
+  v4a's Success-win seeds and mine/score their prefixes rather than expecting
+  the current listwise model to accept them automatically.
