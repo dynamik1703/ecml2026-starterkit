@@ -4423,3 +4423,36 @@ Multi-candidate raw screen for Success-diversity:
   useful data step: mine accepted overlay prefixes on random seeds, replay them
   counterfactually, and add harmful high-margin prefixes as negative selector
   labels.
+- Added `tools/convert_sequence_trace_to_prefix_rows.py` to close the online
+  feedback loop. It converts `SequenceSuccessPolicy` accepted-event traces plus
+  `tools/compare_policies.py` result JSONs into sequence-ranker rows with
+  `event_details`, aggregate event features, and episode-level deltas. This is
+  the format needed to turn online OOD failures into selector training data.
+- Converted the hard-seed margin-1.0 trace and fresh `3500..3519`
+  margin-1.25 trace into
+  `/private/tmp/ecml_online_sequence_prefix_rows_hard26_fresh20.json`: `23`
+  prefix rows over `5` seeds, with `8` good, `5` neutral, and `10` bad rows.
+  The key negative families are seed `3516` reward-only losses and seed `3518`
+  Success-loss prefixes; the key positives are seed `3449` Success rescue and
+  seed `3479` reward-only improvement.
+- Retrained the risk-heavy listwise ranker with the previous four proposal
+  prefix datasets plus the online-prefix rows and exported
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix.pt`. Offline
+  seed-split metrics still show some reward-negative bad accepts, but no
+  Success-negative accepts at the reported thresholds.
+- Correct online validation of the updated ranker against
+  `RerankPolicy(v4b)` on the combined 46 seeds
+  (`26` hard seeds plus `3500..3519`):
+  - threshold `3.5`: `+0.019686` reward, `+0.018116` Success, reward W/L/T
+    `4/0/42`, Success W/L/T `3/0/43`.
+  - threshold `3.0`: `+0.023625` reward, `+0.025362` Success, reward W/L/T
+    `5/0/41`, Success W/L/T `4/0/42`.
+  - threshold `2.5`: `+0.024513` reward, `+0.021739` Success, reward W/L/T
+    `5/0/41`, but Success W/L/T `4/1/41`; seed `3518` regresses again.
+  Threshold `3.0` is the current best tested operating point.
+- Updated decision: the online-prefix retraining is the right direction. It
+  preserves the hard-seed `3449` rescue, fixes the `3518` OOD regression at
+  threshold `3.0`, and discovers new Success gains on `3485`, `3504`, and
+  `3509`. Next step is broader validation, not more local tuning: run the
+  updated checkpoint with threshold `3.0` on at least two fresh 50-seed windows
+  and keep harvesting accepted prefixes from any regressions.
