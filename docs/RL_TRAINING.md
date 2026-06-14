@@ -4456,3 +4456,39 @@ Multi-candidate raw screen for Success-diversity:
   `3509`. Next step is broader validation, not more local tuning: run the
   updated checkpoint with threshold `3.0` on at least two fresh 50-seed windows
   and keep harvesting accepted prefixes from any regressions.
+
+Follow-up online-prefix v3 promotion:
+- Important runtime correction: the deployed listwise selector threshold is
+  `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD`, not
+  `ECML_SEQUENCE_SCORE_THRESHOLD`. The latter does not control the listwise
+  scorer.
+- Converted the broader online trace pool plus the v2 diagnostic deltas into
+  `/private/tmp/ecml_online_sequence_prefix_rows_hard26_fresh70_v2delta.json`:
+  `44` rows over `11` seeds, with `24` good, `6` neutral, and `14` bad.
+- Retrained and exported
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v3.pt`, then
+  promoted it to
+  `submission/models/ecml_multicandidate_listwise_ranker_online_prefix_v3.pt`.
+- The useful operating point is listwise margin `0.09`. It recovers `3559`
+  while keeping `3560` and `3565` neutral. Seed `3518` needed additional
+  stop-to-forward guards because high-margin `STOP_MOVING->MOVE_FORWARD`
+  proposals improved reward but reduced Success.
+- Added promoted default guards:
+  `ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN=1.0`,
+  `ECML_SEQUENCE_STOP_TO_FORWARD_MAX_DISTANCE_DELTA=100`, and
+  `ECML_SEQUENCE_STOP_TO_FORWARD_MAX_SLACK=80`.
+- Promoted default model stack:
+  base `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt`;
+  candidates `ecml_action_conflict_penalty_ppo_seed3700_u12.pt`,
+  `ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt`,
+  `ecml_aux_bc_counterfactual_v7_probe.pt`, and
+  `ecml_aux_bc_counterfactual_v7b_3435neg_u1.pt`.
+- Verified promoted defaults against `RerankPolicy(v4b)` on the combined
+  96-seed hard/holdout set (`26` hard seeds, `3500..3519`,
+  `3520..3569`): baseline `0.877367 / 0.916667`, sequence default
+  `0.887188 / 0.923611`, deltas `+0.009821` reward and `+0.006944`
+  Success. Reward W/L/T `5/0/91`; Success W/L/T `2/0/94`.
+- Current decision: promote v3 as the default submission policy, but treat it
+  as a conservative rescue overlay, not a final winning RL solution. Next
+  high-value step is a fresh unseen validation window and then RL candidate
+  generation targeted at conflicts the current overlay still leaves neutral.

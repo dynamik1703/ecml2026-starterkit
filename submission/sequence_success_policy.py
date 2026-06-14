@@ -29,24 +29,24 @@ except Exception:  # pragma: no cover - submission fallback for stripped package
 
 
 SUBMISSION_DIR = Path(__file__).resolve().parent
+DEFAULT_BASE_CHECKPOINT_PATH = str(
+    SUBMISSION_DIR / "models" / "ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt"
+)
 DEFAULT_SEQUENCE_MODEL_PATH = str(
     SUBMISSION_DIR / "models" / "ecml_success_only_sequence_with_rescue.pt"
 )
 DEFAULT_LISTWISE_MODEL_PATH = str(
-    SUBMISSION_DIR / "models" / "ecml_group_listwise_successheavy.pt"
+    SUBMISSION_DIR / "models" / "ecml_multicandidate_listwise_ranker_online_prefix_v3.pt"
 )
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
-    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_successdiv_seed610_u4.pt"),
-    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_terminal_stronger_u3.pt"),
-    str(SUBMISSION_DIR / "models" / "ecml_ppo_trajectory_targeted_seed901_u4.pt"),
-    str(SUBMISSION_DIR / "models" / "ecml_rescue_bc_1010_v1.pt"),
-    str(SUBMISSION_DIR / "models" / "ecml_ppo_successdiv_rescue_mix_seed2501_u6.pt"),
-    str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3600_u6.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
     str(
         SUBMISSION_DIR
         / "models"
         / "ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt"
     ),
+    str(SUBMISSION_DIR / "models" / "ecml_aux_bc_counterfactual_v7_probe.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_aux_bc_counterfactual_v7b_3435neg_u1.pt"),
 )
 
 
@@ -418,7 +418,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         base_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_BASE_CHECKPOINT")
             or checkpoint_path
-            or "./submission/checkpoint.pt"
+            or DEFAULT_BASE_CHECKPOINT_PATH
         )
         super().__init__(checkpoint_path=base_checkpoint_path)
         sequence_model_path = (
@@ -512,15 +512,15 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.stop_to_forward_min_raw_margin = self._env_float(
             "ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN",
-            float("-inf"),
+            1.0,
         )
         self.stop_to_forward_max_distance_delta = self._env_float(
             "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_DISTANCE_DELTA",
-            float("inf"),
+            100.0,
         )
         self.stop_to_forward_max_slack = self._env_float(
             "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_SLACK",
-            float("inf"),
+            80.0,
         )
         self.first_detour_min_prefix_conflicts = self._env_float(
             "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
@@ -665,7 +665,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             checkpoint_path=listwise_model_path,
             margin_threshold=self._env_float(
                 "ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD",
-                0.2,
+                0.09,
             ),
             score_std_coef=self._env_float(
                 "ECML_SEQUENCE_LISTWISE_SCORE_STD_COEF",
