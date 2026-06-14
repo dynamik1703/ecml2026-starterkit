@@ -415,10 +415,14 @@ class SequenceSuccessPolicy(RerankPolicy):
     """
 
     def __init__(self, checkpoint_path: str | None = None):
-        super().__init__(checkpoint_path="./submission/checkpoint.pt")
+        base_checkpoint_path = (
+            os.environ.get("ECML_SEQUENCE_BASE_CHECKPOINT")
+            or checkpoint_path
+            or "./submission/checkpoint.pt"
+        )
+        super().__init__(checkpoint_path=base_checkpoint_path)
         sequence_model_path = (
-            checkpoint_path
-            or os.environ.get("ECML_SEQUENCE_SUCCESS_MODEL")
+            os.environ.get("ECML_SEQUENCE_SUCCESS_MODEL")
             or DEFAULT_SEQUENCE_MODEL_PATH
         )
         listwise_model_path = (
@@ -1211,8 +1215,10 @@ class SequenceSuccessPolicy(RerankPolicy):
     ) -> None:
         if not self.trace_path:
             return
+        context = runtime_context.get()
         row = {
             "accepted": bool(accepted),
+            "seed": context.seed,
             "env_time": int(getattr(env, "_elapsed_steps", -1)),
             "agent_id": int(handle),
             "candidate_checkpoint": self.candidate_policy_paths.get(

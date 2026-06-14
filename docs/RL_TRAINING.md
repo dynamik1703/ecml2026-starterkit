@@ -4334,3 +4334,60 @@ Multi-candidate raw screen for Success-diversity:
   sample additional PPO checkpoints/seeds around known Success gains, mine
   counterfactual windows around failed agents, and keep the feature-rich
   `mine_diff_prefix_dataset.py` format as the selector training interface.
+- Screened additional Action-Conflict PPO proposal checkpoints on the 26 hard
+  seeds versus the v4b ActorCritic baseline. The strongest raw candidates were
+  `/private/tmp/ecml_action_conflict_penalty_ppo_seed3700_u12.pt`
+  (`+0.077666` reward, `+0.070513` Success, reward W/L/T `10/3/13`,
+  Success W/L/T `8/1/17`) and
+  `/private/tmp/ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt`
+  (`+0.087385` reward, `+0.057692` Success, reward W/L/T `10/5/11`,
+  Success W/L/T `7/2/17`). These are useful proposal generators, not safe
+  direct deployments.
+- Mined feature-rich diff-prefix rows for seed3700/seed3800 and combined them
+  with v7/v7b. The combined selector pool has `520` rows: `60` good,
+  `362` neutral, and `98` bad. This fixes the previous data gap where
+  v7/v7b contributed only `5` good rows total. A risk-heavy listwise ranker
+  exported to `/private/tmp/ecml_multicandidate_listwise_ranker_riskheavy.pt`
+  self-checks safely offline: best-row selection at margin `1.0` accepts
+  `9` good, `0` bad, for `+2.0` Success over the seed pool.
+- Added `--output-checkpoint` to
+  `tools/evaluate_sequence_rescue_ranker.py` so the listwise ranker can be
+  exported directly for `submission.sequence_success_policy.ListwiseSequenceScorer`.
+  The export now sanitizes `Path` objects before `torch.save`, otherwise
+  PyTorch `weights_only=True` loading rejects `pathlib.PosixPath` entries.
+- Important correction: the first online listwise comparison was invalid. It
+  compared `submission.sequence_success_policy.MyPolicy` against
+  `submission.my_policy.MyPolicy`, but `SequenceSuccessPolicy` inherited from
+  `RerankPolicy` and hard-coded `./submission/checkpoint.pt` as its base. The
+  apparent `+0.083464 / +0.051282` gain was exactly reproduced by comparing
+  `submission/checkpoint.pt` against v4b, so it was a base-policy mismatch, not
+  a listwise rescue effect.
+- Fixed the wrapper contract: `SequenceSuccessPolicy` now treats
+  `checkpoint_path` or `ECML_SEQUENCE_BASE_CHECKPOINT` as the base RL/Rerank
+  checkpoint, while `ECML_SEQUENCE_SUCCESS_MODEL` and
+  `ECML_SEQUENCE_LISTWISE_MODEL` are reserved for selector models. Also added
+  seed propagation to `submission.runtime_context` and writes `seed` into
+  sequence traces, which makes accepted rescue events auditable.
+- Correct isolated deployment numbers:
+  `RerankPolicy(v4b)` versus raw `ActorCritic(v4b)` on the 26 hard seeds is
+  already strong: `+0.059377` reward and `+0.057692` Success, reward W/L/T
+  `12/4/10`, Success W/L/T `6/0/20`.
+- Correct listwise overlay numbers:
+  `SequenceSuccessPolicy(v4b, margin=3.5)` versus `RerankPolicy(v4b)` is
+  exactly neutral (`0/0` delta, all 26 ties), because the selector accepts no
+  additional events over Rerank.
+- Lowering the real overlay threshold to margin `1.0` produces the first
+  actual learned-selector gain over Rerank: `+0.024453` reward and
+  `+0.019231` Success, reward W/L/T `2/0/24`, Success W/L/T `1/0/25`.
+  The gains are seed `3449` (`+0.527548` reward, `+0.5` Success) and seed
+  `3479` (`+0.108225` reward, Success-neutral). Accepted events with seed
+  trace are only on seeds `3464`, `3449`, and `3479`; the useful pattern is
+  mostly seed3700 `STOP_MOVING->MOVE_FORWARD` and `MOVE_RIGHT->MOVE_FORWARD`
+  rescue actions.
+- Updated decision: the current deployable stack is
+  `RerankPolicy(v4b)` plus a conservative listwise rescue overlay at margin
+  around `1.0`, not the high-margin `3.5` gate. The next high-value step is to
+  validate margin `0.5/0.75/1.0/1.25` against broader random and hidden-like
+  seeds with `RerankPolicy(v4b)` as the baseline. If the zero-Success-loss
+  property holds, make this the submission policy; if not, train a
+  success-regression veto head on the accepted-event trace families.

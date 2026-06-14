@@ -550,6 +550,88 @@ def print_metrics(metrics: list[dict[str, Any]], top_k: int) -> None:
         )
 
 
+def checkpoint_safe(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, list):
+        return [checkpoint_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [checkpoint_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): checkpoint_safe(item) for key, item in value.items()}
+    return value
+
+
+def export_ranker_checkpoint(
+    rows: list[dict[str, Any]],
+    static_feature_columns: list[str],
+    event_feature_columns: list[str],
+    args: argparse.Namespace,
+) -> None:
+    if args.output_checkpoint is None:
+        return
+
+    static_raw = static_feature_matrix(rows, static_feature_columns)
+    events_raw, event_mask = sequence_feature_matrix(
+        rows,
+        event_feature_columns,
+        args.max_events,
+    )
+    targets = target_values(rows, args)
+    pair_winners, pair_losers, pair_weights = grouped_pair_indices(
+        rows,
+        targets,
+        args,
+    )
+
+    _, static_mean, static_std = standardize(static_raw, static_raw)
+    static_x = (static_raw - static_mean) / static_std
+    events_x, event_mean, event_std = standardize_sequences(
+        train_events=events_raw,
+        train_mask=event_mask,
+        all_events=events_raw,
+    )
+    models = train_rank_ensemble(
+        split_seed=0,
+        train_static=static_x,
+        train_events=events_x,
+        train_event_mask=event_mask,
+        targets=targets,
+        pair_winners=pair_winners,
+        pair_losers=pair_losers,
+        pair_weights=pair_weights,
+        args=args,
+    )
+
+    args.output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "static_feature_columns": static_feature_columns,
+            "event_feature_columns": event_feature_columns,
+            "static_feature_mean": torch.as_tensor(static_mean, dtype=torch.float32),
+            "static_feature_std": torch.as_tensor(static_std, dtype=torch.float32),
+            "event_feature_mean": torch.as_tensor(event_mean, dtype=torch.float32),
+            "event_feature_std": torch.as_tensor(event_std, dtype=torch.float32),
+            "max_events": int(args.max_events),
+            "static_dim": int(static_x.shape[1]),
+            "event_dim": int(events_x.shape[2]),
+            "hidden_size": int(args.hidden_size),
+            "event_hidden_size": int(args.event_hidden_size),
+            "dropout": float(args.dropout),
+            "model_state_dicts": [model.state_dict() for model in models],
+            "train_rows": len(rows),
+            "train_pairs": len(pair_winners),
+            "args": {
+                key: checkpoint_safe(value)
+                for key, value in vars(args).items()
+                if key != "output_checkpoint"
+            },
+        },
+        args.output_checkpoint,
+    )
+    print(f"saved_checkpoint={args.output_checkpoint}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -616,6 +698,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=25)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-audit-csv", type=Path)
+    parser.add_argument(
+        "--output-checkpoint",
+        type=Path,
+        help=(
+            "Train a final listwise ranker ensemble on all rows and save a "
+            "checkpoint readable by submission.sequence_success_policy."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -691,6 +781,12 @@ def main() -> int:
         f"splits={','.join(str(seed) for seed in args.split_seeds)}"
     )
     print_metrics(aggregate, args.top_k)
+    export_ranker_checkpoint(
+        rows=train_rows,
+        static_feature_columns=static_feature_columns,
+        event_feature_columns=event_feature_columns,
+        args=args,
+    )
 
     if args.output_json:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)

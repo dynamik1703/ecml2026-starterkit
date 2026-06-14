@@ -11,6 +11,7 @@ class RuntimeContext:
     env: Any | None = None
     obs_builder: Any | None = None
     step: int | None = None
+    seed: int | None = None
     masks: dict[int, np.ndarray] = field(default_factory=dict)
 
 
@@ -25,6 +26,10 @@ def update(env: Any, obs_builder: Any, masks: dict[int, np.ndarray]) -> None:
         handle: np.asarray(mask, dtype=np.float32).copy()
         for handle, mask in masks.items()
     }
+
+
+def set_seed(seed: int | None) -> None:
+    _CONTEXT.seed = seed
 
 
 def get() -> RuntimeContext:

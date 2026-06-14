@@ -13,6 +13,8 @@ from typing import Any
 
 from flatland.envs.persistence import RailEnvPersister
 
+from submission import runtime_context
+
 
 DEFAULT_POLICY = "submission.hybrid_policy.MyPolicy"
 DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyObservationBuilder"
@@ -139,6 +141,7 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
         env.number_of_agents = args.num_agents
     env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
     observations, _ = env.reset(random_seed=seed)
+    runtime_context.set_seed(seed)
 
     reward_values: list[float] = []
     positions: dict[int, list[Any]] = defaultdict(list)
