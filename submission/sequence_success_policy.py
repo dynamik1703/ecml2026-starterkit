@@ -512,11 +512,15 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.forward_to_left_min_raw_margin = self._env_float(
             "ECML_SEQUENCE_FORWARD_TO_LEFT_MIN_RAW_MARGIN",
-            float("-inf"),
+            1.5,
         )
         self.stop_to_forward_min_raw_margin = self._env_float(
             "ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN",
             1.0,
+        )
+        self.stop_to_forward_nonfinite_no_head_on_min_raw_margin = self._env_float(
+            "ECML_SEQUENCE_STOP_TO_FORWARD_NONFINITE_NO_HEAD_ON_MIN_RAW_MARGIN",
+            3.0,
         )
         self.stop_to_forward_max_distance_delta = self._env_float(
             "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_DISTANCE_DELTA",
@@ -1004,6 +1008,15 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "stop_to_forward_low_confidence"
+            if accepted and self._low_confidence_stop_to_forward_without_head_on(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = (
+                    "stop_to_forward_nonfinite_no_head_on_low_confidence"
+                )
             if accepted and self._bad_stop_to_forward_distance_delta(
                 baseline_action,
                 candidate_action,
@@ -1104,6 +1117,15 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "stop_to_forward_low_confidence"
+            if accepted and self._low_confidence_stop_to_forward_without_head_on(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = (
+                    "stop_to_forward_nonfinite_no_head_on_low_confidence"
+                )
             if accepted and self._bad_stop_to_forward_distance_delta(
                 baseline_action,
                 candidate_action,
@@ -1308,6 +1330,33 @@ class SequenceSuccessPolicy(RerankPolicy):
         if not np.isfinite(distance_delta):
             return False
         return distance_delta > self.stop_to_forward_max_distance_delta
+
+    def _low_confidence_stop_to_forward_without_head_on(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(
+            self.stop_to_forward_nonfinite_no_head_on_min_raw_margin
+        ):
+            return False
+        if (
+            baseline_action != ReservationPolicy.STOP_MOVING
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            distance_delta = float(detail.get("candidate_distance_delta", 0.0))
+            head_on = float(detail.get("obs_route_intersection_head_on", 0.0))
+            margin = float(detail.get("candidate_raw_top_logit_margin", 0.0))
+        except Exception:
+            return False
+        return (
+            not np.isfinite(distance_delta)
+            and head_on <= 0.0
+            and margin < self.stop_to_forward_nonfinite_no_head_on_min_raw_margin
+        )
 
     def _bad_stop_to_forward_slack(
         self,

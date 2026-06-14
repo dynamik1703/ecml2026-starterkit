@@ -4514,3 +4514,33 @@ Fresh OOD check after v3 promotion:
 - The previous 96-seed hard/holdout suite is unchanged after this guard:
   `+0.009821` reward and `+0.006944` Success, reward W/L/T `5/0/91`,
   Success W/L/T `2/0/94`.
+
+Fresh OOD stop-forward/no-head-on guard:
+- A new unseen `3620..3719` window exposed another deployment blocker. Before
+  the additional guard, promoted defaults were almost reward-neutral but lost
+  Success: baseline `0.870275 / 0.926667`, sequence `0.870394 / 0.920000`,
+  deltas `+0.000118` reward and `-0.006667` Success. Reward W/L/T `2/2/96`;
+  Success W/L/T `0/4/96`.
+- Trace inspection showed that the bad accepted events were mainly
+  `STOP_MOVING->MOVE_FORWARD` with `candidate_distance_delta=inf`,
+  `obs_route_intersection_head_on=0`, low/no prefix conflicts, and only
+  moderate raw evidence. The old good stop-forward rescues (`3449`, `3485`,
+  `3592`) have a Head-on signal, while `3510` has finite distance delta.
+- Added promoted default
+  `ECML_SEQUENCE_STOP_TO_FORWARD_NONFINITE_NO_HEAD_ON_MIN_RAW_MARGIN=3.0`.
+  This rejects stop-forward rescues without measured Head-on pressure unless
+  the raw candidate policy is very confident. Also promoted
+  `ECML_SEQUENCE_FORWARD_TO_LEFT_MIN_RAW_MARGIN=1.5` to block weak first
+  forward-left detours.
+- Targeted check on known good and bad seeds
+  (`3449,3485,3510,3592,3634,3642,3648,3663,3689`) is clean after the guard:
+  reward W/L/T `6/0/3`, Success W/L/T `2/0/7`. The large good controls remain
+  (`3449`, `3510`, `3592`, `3485`, `3689`), while `3642`, `3648`, and `3663`
+  are neutral.
+- Full fresh `3620..3719` retest after the guard is loss-free:
+  baseline `0.870275 / 0.926667`, sequence `0.871364 / 0.926667`, deltas
+  `+0.001089` reward and `0.000000` Success. Reward W/L/T `2/0/98`; Success
+  W/L/T `0/0/100`.
+- Regression retests remain clean: `3570..3619` is unchanged at `+0.011839`
+  reward and `+0.003333` Success, and the 96-seed hard/holdout suite is
+  unchanged at `+0.009821` reward and `+0.006944` Success.
