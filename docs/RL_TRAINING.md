@@ -4213,3 +4213,39 @@ Multi-candidate raw screen for Success-diversity:
   mask will not reach the policy. Smoke test: the old base-observation command
   warned for v4b (`expected 84`, observed `41`); the corrected
   Action-Conflict-Obs command did not warn.
+- Added `tools/evaluate_policy_diff_event_head.py` to test whether the
+  corrected full-policy diff rows are separable as "use candidate action" vs
+  "keep baseline action" events. The seed-split bootstrap MLP test on the
+  Action-Conflict-Obs full-diff set (`194` positive, `151` negative, `114`
+  numeric features) failed the safety bar: at threshold `0.98` it still
+  accepted `95` validation events, only `39` positive and `56` negative.
+  Ablations without logits/action IDs and a conflict-feature-only run showed
+  the same issue. Conclusion: seed-level win/loss labels are too noisy for an
+  online event gate; many `MOVE_FORWARD->MOVE_RIGHT` rows appear in both
+  classes.
+- Ran a first causal one-step counterfactual probe focused on full-policy diff
+  events for seeds `3411,3432,3449,3485` with
+  `MyActionConflictObservationBuilder`. The probe evaluated `48` forced
+  alternatives and found reward W/L/T `4/28/16`, Success W/L/T `9/3/36`, and
+  no failed forced applications. Useful causal positives include seed `3411`
+  step `107` agent `2` `MOVE_FORWARD->MOVE_LEFT` (`+0.152705` reward,
+  `+0.166667` Success) and several seed `3432`
+  `MOVE_FORWARD->STOP_MOVING` Success rescues. Harmful examples include seed
+  `3449` `MOVE_FORWARD->STOP_MOVING` (`-0.045914` reward,
+  `-0.166667` Success) and many seed `3485` reward-only `STOP_MOVING`
+  regressions.
+- Added `tools/convert_counterfactual_to_aux_events.py` to convert those flat
+  one-step counterfactual rows into Aux-BC-compatible event rows. On the
+  48-row probe, the conservative conversion produced
+  `/private/tmp/ecml_actionobs_diff_counterfactual_probe_aux_successloss.csv`
+  with `13` events over `3` seeds: `10` positive rescue events and `3`
+  negative-baseline events. Including reward-only negatives produced
+  `/private/tmp/ecml_actionobs_diff_counterfactual_probe_aux_with_rewardneg.csv`
+  with `26` events over `4` seeds: `4` positive rescue events and `22`
+  negative-baseline events.
+- Updated decision: the next RL-improvement path should scale causal
+  counterfactual mining before more PPO. The conservative counterfactual Aux-BC
+  labels are small but much cleaner than weak full-trajectory win/loss labels.
+  First priority is to mine more hard seeds and train/evaluate v4b-initialized
+  PPO on causal rescue/avoidance labels, with direct v4b-vs-candidate gating on
+  the same hard seeds before any broad submission check.
