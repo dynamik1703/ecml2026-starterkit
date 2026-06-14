@@ -514,6 +514,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN",
             float("-inf"),
         )
+        self.stop_to_forward_max_distance_delta = self._env_float(
+            "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_DISTANCE_DELTA",
+            float("inf"),
+        )
+        self.stop_to_forward_max_slack = self._env_float(
+            "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_SLACK",
+            float("inf"),
+        )
         self.first_detour_min_prefix_conflicts = self._env_float(
             "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
             1.0,
@@ -985,6 +993,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "stop_to_forward_low_confidence"
+            if accepted and self._bad_stop_to_forward_distance_delta(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_bad_distance_delta"
+            if accepted and self._bad_stop_to_forward_slack(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_bad_slack"
             if accepted and self._low_conflict_first_detour(
                 baseline_action,
                 candidate_action,
@@ -1064,6 +1086,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "stop_to_forward_low_confidence"
+            if accepted and self._bad_stop_to_forward_distance_delta(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_bad_distance_delta"
+            if accepted and self._bad_stop_to_forward_slack(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_bad_slack"
             if accepted and self._low_conflict_first_detour(
                 baseline_action,
                 candidate_action,
@@ -1214,6 +1250,46 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return margin < self.stop_to_forward_min_raw_margin
+
+    def _bad_stop_to_forward_distance_delta(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.stop_to_forward_max_distance_delta):
+            return False
+        if (
+            baseline_action != ReservationPolicy.STOP_MOVING
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            distance_delta = float(detail.get("candidate_distance_delta", 0.0))
+        except Exception:
+            return False
+        if not np.isfinite(distance_delta):
+            return False
+        return distance_delta > self.stop_to_forward_max_distance_delta
+
+    def _bad_stop_to_forward_slack(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.stop_to_forward_max_slack):
+            return False
+        if (
+            baseline_action != ReservationPolicy.STOP_MOVING
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            slack = float(detail.get("slack", 0.0))
+        except Exception:
+            return False
+        return slack > self.stop_to_forward_max_slack
 
     def _low_conflict_first_detour(
         self,
