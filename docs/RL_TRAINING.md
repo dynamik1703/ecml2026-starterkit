@@ -4391,3 +4391,11 @@ Multi-candidate raw screen for Success-diversity:
   seeds with `RerankPolicy(v4b)` as the baseline. If the zero-Success-loss
   property holds, make this the submission policy; if not, train a
   success-regression veto head on the accepted-event trace families.
+- First local margin sweep on the same 26 hard seeds:
+  margins `0.75`, `1.0`, and `1.25` are identical: `+0.024453` reward,
+  `+0.019231` Success, reward W/L/T `2/0/24`, Success W/L/T `1/0/25`.
+  Margin `1.5` is exactly neutral because it blocks the useful `3449` and
+  `3479` accepted prefixes. Current default candidate for broader validation
+  is therefore `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD=1.25`: it is the
+  most conservative tested threshold that still keeps the real learned-selector
+  gain.
