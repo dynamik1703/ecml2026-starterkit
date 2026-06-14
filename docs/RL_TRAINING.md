@@ -4301,3 +4301,36 @@ Multi-candidate raw screen for Success-diversity:
   seed/prefix/action risk-value selector on rollout outcomes to accept only
   deviations whose context resembles the `3487` win and reject `3435`-style
   cascade risk.
+- Tested the two-stage selector idea with causal diff-prefix replay instead of
+  raw-policy deployment. `tools/evaluate_policy_diff_prefixes.py` on v7b over
+  the 12 hard seeds showed why this path is plausible: raw v7b was unsafe, but
+  prefix lengths `4/5` were Success-neutral versus v4b and recovered the
+  `3487` rescue (`+0.278374` reward, `+0.333333` Success), with `3435` as the
+  remaining Success-negative prefix family. However, the existing
+  `evaluate_sequence_rescue_ranker.py` could not learn a safe selector from
+  those simple rows because they contained only basic event details and almost
+  no state context.
+- Re-mined v7b prefixes with `tools/mine_diff_prefix_dataset.py`, which writes
+  per-event Action-Conflict/route-prefix/deadline features. On the 26 hard
+  seeds, v7b produced `130` prefix rows: `2` good, `100` neutral, and `28`
+  bad. The only good seed was `3487`; bad seeds were
+  `3435,3451,3466,3479,3496,3499`. Prefixes `4/5` each contained one good row
+  and six bad rows.
+- Repeated the feature-prefix mining for the more aggressive v7 checkpoint. On
+  the same 26 seeds, v7 produced `130` rows: `3` good, `78` neutral, and `49`
+  bad. The only good seed was `3466`; bad seeds were
+  `3401,3435,3440,3451,3461,3464,3479,3485,3489,3491,3496,3499`. Thus v7 and
+  v7b are complementary proposal sources (`3466` vs `3487` wins), but both are
+  sparse-rescue candidates with many reward-negative prefixes.
+- Combined v7+v7b feature-prefix ranker test: `260` rows total with only `5`
+  good rows from two seeds, `178` neutral, and `77` bad. The seed-split
+  Sequence ranker still accepted no good rows; conservative thresholds leaked
+  only reward-negative rows or selected baseline. Leaky self-fit on the 12-seed
+  v7b set could recover one positive prefix without bad leaks, so model
+  capacity exists, but positive support is far too thin for generalization.
+- Updated decision: do not integrate the selector yet. The next winning-solution
+  step should deliberately mine more positive prefix families from multiple
+  proposal policies, not just add more neutral/bad rows. Useful directions:
+  sample additional PPO checkpoints/seeds around known Success gains, mine
+  counterfactual windows around failed agents, and keep the feature-rich
+  `mine_diff_prefix_dataset.py` format as the selector training interface.
