@@ -4281,3 +4281,23 @@ Multi-candidate raw screen for Success-diversity:
   actions, but add a learned or rule-audited risk/value head that can reject
   v7/v7a-style drifts, especially `3435`-like cases where a single positive
   local label changes unrelated agents' terminal outcome.
+- v7a-vs-v4b action-diff mining on the 12 hard seeds produced `56` diffs.
+  The only v7a Success-loss seed versus v4b was `3435`; its first diff was
+  `MOVE_FORWARD->MOVE_LEFT`, followed by multiple `MOVE_FORWARD->MOVE_RIGHT`
+  diffs and one `MOVE_FORWARD->STOP_MOVING`. The v7a Success-win seed `3487`
+  also started with `MOVE_FORWARD->MOVE_RIGHT`, so transition identity alone
+  cannot safely reject bad RL deviations.
+- A quick v7b repair probe added all seven `3435` v7a-vs-v4b diffs as exact
+  `negative_baseline` labels on top of the 35 causal counterfactual events.
+  Collection produced `38` samples, `13` avoidance hits, `0` invalid labels,
+  and `1` baseline mismatch. v7b improved the v4b-relative Reward loss versus
+  v7a (`-0.037516` vs `-0.050006`) and strengthened the `3487` Success win
+  (`+0.221626` reward, `+0.333333` Success versus v4b), but it did not fix
+  `3435` (`-0.333333` Success versus v4b). Against Sequence, v7b remained
+  clearly worse: delta `-0.173994 / -0.111111`.
+- Updated decision after v7b: exact pointwise negative BC labels are not
+  enough to make raw PPO safe. The viable route is now a two-stage learned
+  system: keep v4b/v7-style PPO as an action proposal generator, then train a
+  seed/prefix/action risk-value selector on rollout outcomes to accept only
+  deviations whose context resembles the `3487` win and reject `3435`-style
+  cascade risk.
