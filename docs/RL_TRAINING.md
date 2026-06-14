@@ -4492,3 +4492,25 @@ Follow-up online-prefix v3 promotion:
   as a conservative rescue overlay, not a final winning RL solution. Next
   high-value step is a fresh unseen validation window and then RL candidate
   generation targeted at conflicts the current overlay still leaves neutral.
+
+Fresh OOD check after v3 promotion:
+- Evaluated promoted defaults versus `RerankPolicy(v4b)` on fresh seeds
+  `3570..3619`. Initial run improved reward but exposed a new Success-neutral
+  reward trap: summary `+0.011839` reward, `0.000000` Success, reward W/L/T
+  `5/0/45`, Success W/L/T `1/1/48`. The regression was seed `3606`, where
+  the selector accepted `STOP_MOVING->MOVE_LEFT` with very high listwise score
+  but weak raw candidate margin (`1.217`) and large distance delta (`315`).
+- Added `ECML_SEQUENCE_STOP_TO_LEFT_MIN_RAW_MARGIN` with promoted default
+  `3.0`. This mirrors the stop-to-forward confidence guard and blocks weak
+  stop-left deviations while preserving the fresh good stop-left events
+  (`3578`, `3579`, `3595`, `3612`) whose raw margins are `3.8..4.9`.
+- Retest on the changed fresh seeds
+  (`3578,3579,3592,3595,3606,3612`) is loss-free: reward W/L/T `5/0/1`,
+  Success W/L/T `1/0/5`.
+- Full fresh `3570..3619` retest after the guard:
+  baseline `0.849498 / 0.923333`, sequence `0.861337 / 0.926667`,
+  deltas `+0.011839` reward and `+0.003333` Success. Reward W/L/T `5/0/45`;
+  Success W/L/T `1/0/49`.
+- The previous 96-seed hard/holdout suite is unchanged after this guard:
+  `+0.009821` reward and `+0.006944` Success, reward W/L/T `5/0/91`,
+  Success W/L/T `2/0/94`.
