@@ -4399,3 +4399,27 @@ Multi-candidate raw screen for Success-diversity:
   is therefore `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD=1.25`: it is the
   most conservative tested threshold that still keeps the real learned-selector
   gain.
+- Broader check on fresh seeds `3500..3519` shows the margin-1.25 overlay is
+  not deployment-safe yet. Versus `RerankPolicy(v4b)`, it produced only
+  `+0.001260` reward and `-0.008333` Success, reward W/L/T `1/1/18`,
+  Success W/L/T `0/1/19`. The regression is seed `3518`: reward improves
+  `+0.091279`, but Success drops `-0.166667` (`failed_agent_ids`
+  `3 -> 3,4`). Seed `3516` is a reward-only loss (`-0.066083`, Success
+  neutral).
+- Added optional diagnostic guards to `SequenceSuccessPolicy`:
+  `ECML_SEQUENCE_FORWARD_TO_LEFT_MIN_RAW_MARGIN`,
+  `ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN`, and
+  `ECML_SEQUENCE_MAX_ACCEPTED_EVENTS_PER_AGENT`. These are disabled by
+  default. Quick ablations did not solve the OOD regression: removing seed3800
+  as a proposal source, requiring `MOVE_FORWARD->MOVE_LEFT` raw margin `0.1`,
+  limiting accepted events per agent to `2` or `1`, and requiring
+  `STOP_MOVING->MOVE_FORWARD` raw margin `1.0` all left the `3518` Success
+  loss. Raising the STOP->FORWARD raw threshold to `1.5` blocks the hard-seed
+  `3449` Success rescue entirely.
+- Updated decision: do not deploy the listwise overlay as default yet. The
+  current safe candidate remains `RerankPolicy(v4b)`. The learned overlay is
+  promising but needs a Success-regression veto trained on OOD negative
+  prefix families such as `3518`, not just threshold/heuristic tweaking. Next
+  useful data step: mine accepted overlay prefixes on random seeds, replay them
+  counterfactually, and add harmful high-margin prefixes as negative selector
+  labels.

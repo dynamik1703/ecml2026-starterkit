@@ -465,6 +465,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_MAX_ACCEPTED_EVENTS",
             1,
         )
+        self.max_accepted_events_per_agent = self._env_int(
+            "ECML_SEQUENCE_MAX_ACCEPTED_EVENTS_PER_AGENT",
+            -1,
+        )
         self.left_max_slack = self._env_float(
             "ECML_SEQUENCE_LEFT_MAX_SLACK",
             float("inf"),
@@ -501,6 +505,14 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.left_to_forward_min_margin = self._env_float(
             "ECML_SEQUENCE_LEFT_TO_FORWARD_MIN_MARGIN",
             0.5,
+        )
+        self.forward_to_left_min_raw_margin = self._env_float(
+            "ECML_SEQUENCE_FORWARD_TO_LEFT_MIN_RAW_MARGIN",
+            float("-inf"),
+        )
+        self.stop_to_forward_min_raw_margin = self._env_float(
+            "ECML_SEQUENCE_STOP_TO_FORWARD_MIN_RAW_MARGIN",
+            float("-inf"),
         )
         self.first_detour_min_prefix_conflicts = self._env_float(
             "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
@@ -814,6 +826,15 @@ class SequenceSuccessPolicy(RerankPolicy):
                 >= self.extra_candidate_max_accepted_events
             ):
                 return False
+        if (
+            self.max_accepted_events_per_agent >= 0
+            and sum(
+                int(event.get("agent_id", -1) == handle)
+                for event in self._accepted_event_details
+            )
+            >= self.max_accepted_events_per_agent
+        ):
+            return False
         if candidate_action not in (
             ReservationPolicy.MOVE_LEFT,
             ReservationPolicy.MOVE_FORWARD,
@@ -950,6 +971,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "left_to_forward_low_confidence"
+            if accepted and self._low_confidence_forward_to_left(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "forward_to_left_low_confidence"
+            if accepted and self._low_confidence_stop_to_forward(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_low_confidence"
             if accepted and self._low_conflict_first_detour(
                 baseline_action,
                 candidate_action,
@@ -1015,6 +1050,20 @@ class SequenceSuccessPolicy(RerankPolicy):
             ):
                 accepted = False
                 scores["reject_reason"] = "left_to_forward_low_confidence"
+            if accepted and self._low_confidence_forward_to_left(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "forward_to_left_low_confidence"
+            if accepted and self._low_confidence_stop_to_forward(
+                baseline_action,
+                candidate_action,
+                detail,
+            ):
+                accepted = False
+                scores["reject_reason"] = "stop_to_forward_low_confidence"
             if accepted and self._low_conflict_first_detour(
                 baseline_action,
                 candidate_action,
@@ -1127,6 +1176,44 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return margin < self.left_to_forward_min_margin
+
+    def _low_confidence_forward_to_left(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.forward_to_left_min_raw_margin):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action != ReservationPolicy.MOVE_LEFT
+        ):
+            return False
+        try:
+            margin = float(detail.get("candidate_raw_top_logit_margin", 0.0))
+        except Exception:
+            return False
+        return margin < self.forward_to_left_min_raw_margin
+
+    def _low_confidence_stop_to_forward(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.stop_to_forward_min_raw_margin):
+            return False
+        if (
+            baseline_action != ReservationPolicy.STOP_MOVING
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            margin = float(detail.get("candidate_raw_top_logit_margin", 0.0))
+        except Exception:
+            return False
+        return margin < self.stop_to_forward_min_raw_margin
 
     def _low_conflict_first_detour(
         self,
