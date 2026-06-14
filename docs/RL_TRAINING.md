@@ -4249,3 +4249,35 @@ Multi-candidate raw screen for Success-diversity:
   First priority is to mine more hard seeds and train/evaluate v4b-initialized
   PPO on causal rescue/avoidance labels, with direct v4b-vs-candidate gating on
   the same hard seeds before any broad submission check.
+- Scaled the causal full-diff counterfactual probe to 12 hard seeds
+  (`3411,3432,3435,3451,3443,3461,3449,3485,3487,3496,3464,3483`) with up to
+  four focused decisions per seed. The run produced `196` rows with reward
+  W/L/T `10/137/49`, Success W/L/T `24/8/164`, and `0` failed forced
+  applications. Conservative conversion yielded
+  `/private/tmp/ecml_actionobs_diff_counterfactual_12seed_v1_aux_successloss.csv`
+  with `35` events over `9` seeds: `27` positive rescue events and `8`
+  Success-/failure-negative baseline events. Including reward-only negatives
+  yielded `130` events (`10` positive, `120` negative), useful as a safety
+  pool but too negative-heavy for the first main Aux-BC pass.
+- v7 probe: v4b initialization, conservative 35-event causal Aux-BC, negative
+  baseline labels enabled, LR `4e-6`, Aux-BC coef `0.12`, Teacher CE/KL
+  `2.5/3.0`, two PPO updates over the 12 hard seeds. Collection was clean:
+  `31` samples, `31` rescue hits, `6` avoidance hits, `0` invalid labels, and
+  `0` baseline mismatches. Directly versus v4b on the 12 seeds, v7 improved
+  Success by `+0.027778` but lost Reward `-0.071137` (reward W/L/T `3/5/4`,
+  Success W/L/T `2/2/8`). Against Sequence it was not viable:
+  delta `-0.207615 / -0.083333`, with severe Success regressions on `3435`,
+  `3449`, `3485`, and `3487`.
+- v7a one-update probe used the same cache and hyperparameters but stopped
+  after one PPO update. It did not solve the drift: directly versus v4b,
+  Reward delta was `-0.050006` and Success delta `0.0` (reward W/L/T `1/4/7`,
+  Success W/L/T `1/1/10`), with a new Success win on `3487` but a hard Success
+  regression on `3435`. Against Sequence, v7a was worse than baseline by
+  `-0.186484 / -0.111111`.
+- Current decision: the causal labels are real and create real Success wins,
+  but raw PPO still generalizes a locally good rescue action into unsafe
+  trajectories. The next high-value change is not "more updates". It is a
+  policy-selection architecture: train the RL policy to propose legal rescue
+  actions, but add a learned or rule-audited risk/value head that can reject
+  v7/v7a-style drifts, especially `3435`-like cases where a single positive
+  local label changes unrelated agents' terminal outcome.
