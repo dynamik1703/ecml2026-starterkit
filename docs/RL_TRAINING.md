@@ -4883,3 +4883,32 @@ Scene-3 contrast expansion and v5 selector probe:
   margin), but the selector still cannot separate small reward-only losses like
   `3912` without sacrificing important gains. Keep the current v3 deployment
   and continue mining larger scene/topology contrast families.
+
+Automated online-prefix mining:
+- Added `tools/mine_online_sequence_prefixes.py` to automate the corrected
+  online Sequence-vs-Rerank(v4b) mining loop. It runs the deployable
+  `SequenceSuccessPolicy` against the `RerankPolicy(v4b)` baseline with
+  `MyActionConflictObservationBuilder`, captures accepted Sequence events via
+  `ECML_SEQUENCE_TRACE_PATH`, writes per-config compare JSON/CSV files, and
+  converts accepted changed seeds into prefix rows suitable for selector
+  retraining.
+- Smoke test on known hard-negative seed `3912 scene_3` produced the expected
+  single bad row: `compare_rows=1`, `prefix_rows=1`, categories `{'bad': 1}`,
+  reward W/L/T `0/1/0`, Success W/L/T `0/0/1`, mean deltas
+  `-0.020964 / 0.000000`.
+- Fresh `3980..3999` on `scene_3` produced `20` compare rows and `2` changed
+  final-prefix rows: `1` bad and `1` good. Aggregate comparison is slightly
+  reward-positive but Success-negative: baseline `0.788837 / 0.900000`,
+  sequence `0.795204 / 0.891667`, deltas `+0.006367 / -0.008333`, reward
+  W/L/T `1/1/18`, Success W/L/T `0/1/19`.
+- The bad row is seed `3988`: two accepted actions for agent `3`
+  (`STOP_MOVING->MOVE_LEFT` at time `169`, then `MOVE_LEFT->MOVE_FORWARD` at
+  time `217`) turn a full-success baseline into one failed agent
+  (`reward_delta=-0.006410`, `success_delta=-0.166667`). The good row is seed
+  `3996`: one `STOP_MOVING->MOVE_LEFT` for agent `0` at time `146`, improving
+  reward by `+0.133758` with unchanged Success.
+- Decision: add these rows to the next contrast-data pool but do not retrain or
+  promote immediately. This block strengthens the evidence that simple raw
+  confidence/margin is not enough: both good and bad cases include confident
+  detour-like actions, so the selector needs more outcome-labelled online
+  prefixes across scenes/topologies before another deployable export.
