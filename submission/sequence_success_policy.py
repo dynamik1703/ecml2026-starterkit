@@ -36,7 +36,9 @@ DEFAULT_SEQUENCE_MODEL_PATH = str(
     SUBMISSION_DIR / "models" / "ecml_success_only_sequence_with_rescue.pt"
 )
 DEFAULT_LISTWISE_MODEL_PATH = str(
-    SUBMISSION_DIR / "models" / "ecml_multicandidate_listwise_ranker_online_prefix_v3.pt"
+    SUBMISSION_DIR
+    / "models"
+    / "ecml_multicandidate_listwise_ranker_online_prefix_v6_scene3_multiscene.pt"
 )
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
@@ -677,7 +679,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             checkpoint_path=listwise_model_path,
             margin_threshold=self._env_float(
                 "ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD",
-                0.09,
+                1.0,
             ),
             score_std_coef=self._env_float(
                 "ECML_SEQUENCE_LISTWISE_SCORE_STD_COEF",

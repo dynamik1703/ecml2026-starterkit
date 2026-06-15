@@ -4996,3 +4996,17 @@ v6 online-prefix selector probe:
   rejected because of seed `4019`. A promotion should package the v6 checkpoint,
   change the default listwise margin to `1.0`, and then run a local submission
   smoke plus Docker build/eval before treating it as the new default.
+
+v6 promotion:
+- Packaged
+  `submission/models/ecml_multicandidate_listwise_ranker_online_prefix_v6_scene3_multiscene.pt`
+  and updated `submission.sequence_success_policy` defaults to load it with
+  listwise margin `1.0`.
+- Local no-env smoke versus `RerankPolicy(v4b)` on key Scene-3 seeds
+  `3912,3971,4019,4027` confirms the defaults are active: bad seeds `3912` and
+  `4019` are neutral, good seeds `3971` and `4027` remain active. Aggregate:
+  baseline `0.636472 / 0.791667`, promoted default `0.656354 / 0.875000`,
+  deltas `+0.019882 / +0.083333`, reward W/L/T `2/0/2`, Success W/L/T `2/0/2`.
+- Remaining required checks before final submission packaging: Docker build,
+  Docker smoke/eval, and one post-promotion scoreboard profile run to ensure no
+  environment-variable assumptions were left in the local comparisons.
