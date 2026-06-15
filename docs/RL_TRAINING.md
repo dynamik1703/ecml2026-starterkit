@@ -4985,3 +4985,14 @@ v6 online-prefix selector probe:
   loss-free window, one fresh 40-row multi-scene loss-free window, and retained
   Scene-5 key gains. The remaining promotion blocker is a larger fresh
   default/Scene-5 regression check plus a Docker/submission smoke if promoted.
+- Fresh default/Scene-5 validation on `4070..4109` at margin `1.0` is fully
+  neutral: baseline and v6 both `0.874537 / 0.929167`, reward and Success W/L/T
+  `0/0/40`. This removes the immediate default-scene regression concern, though
+  it also shows that v6's new gains are coming from the harder Scene-3 and
+  multi-scene cases rather than this default window.
+- Promotion-readiness assessment: v6 margin `1.0` is the strongest selector
+  candidate so far. It improves several fresh OOD windows without observed
+  losses at the tested operating point, while v6 margin `0.09` is explicitly
+  rejected because of seed `4019`. A promotion should package the v6 checkpoint,
+  change the default listwise margin to `1.0`, and then run a local submission
+  smoke plus Docker build/eval before treating it as the new default.
