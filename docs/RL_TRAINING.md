@@ -4972,3 +4972,16 @@ v6 online-prefix selector probe:
   regression check before promotion. The failure of v6 margin `0.09` on seed
   `4019` remains the warning sign: the selector can still prefer reward-gain
   actions that lose a train if the threshold is too permissive.
+- Fresh multi-scene validation on `4070..4079`, line length `2`, scenes
+  `scene_1..scene_4`, is also loss-free at margin `1.0`: baseline
+  `0.809845 / 0.900000`, v6 `0.820805 / 0.908333`, deltas
+  `+0.010960 / +0.008333`, reward W/L/T `2/0/38`, Success W/L/T `2/0/38`.
+  Changed rows are both good: seed `4074 scene_1`
+  (`STOP_MOVING->MOVE_RIGHT`, reward `+0.271751`, Success `+0.166667`) and
+  seed `4077 scene_3` (`STOP_MOVING->MOVE_FORWARD`, reward `+0.166667`,
+  Success `+0.166667`).
+- Updated validation status: v6 margin `1.0` now has targeted bad-seed safety,
+  one fresh Scene-3 20-seed loss-free window, one broader Scene-3 40-seed
+  loss-free window, one fresh 40-row multi-scene loss-free window, and retained
+  Scene-5 key gains. The remaining promotion blocker is a larger fresh
+  default/Scene-5 regression check plus a Docker/submission smoke if promoted.
