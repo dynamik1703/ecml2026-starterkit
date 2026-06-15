@@ -5061,3 +5061,34 @@ Low-margin proposal mining after v6 promotion:
   rows plus the explicit `4019` hard negative, then test whether v7 can recover
   those extra gains at a lower operating threshold without reopening the known
   Success-loss family.
+
+v7 low-margin selector probe:
+- Trained v7 with the v6 data plus low-margin proposal rows and the `4019`
+  hard negative. Training input after synthetic baseline candidates: `91` rows,
+  with non-baseline labels `38` good, `35` neutral, and `18` bad. Export:
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v7_lowmargin.pt`.
+- Offline audit is not as clean as v6: threshold `1.5` accepts `5` good and
+  `0` bad rows, but lower thresholds leak bad rows (`1.0`: `7` good, `2` bad;
+  `0.75`: `8` good, `3` bad; `0.5`: `10` good, `3` bad). This already makes
+  v7 riskier than the promoted v6 selector.
+- Online key checks:
+  - v7 margin `1.5` is safe but mostly too conservative: it keeps known
+    Scene-3 gains/bads safe and recovers `4126 scene_2` (`+0.223153` reward,
+    `+0.333333` Success), but misses low-margin Scene-3 gains `4118` and
+    `4128`.
+  - v7 margin `1.0` is also safe on the key check but still misses `4118` and
+    `4128`; it behaves like a small extension of v6 rather than a clear
+    replacement.
+  - v7 margin `0.5` recovers `4118`, `4128`, `4110`, and `4126`, but reopens
+    known bad seed `3988` (`reward_delta=-0.006410`,
+    `success_delta=-0.166667`). Reject this operating point.
+  - v7 margin `0.75` blocks `3988` on the key check and keeps `4126`, but still
+    misses `4118`, `4128`, and `4110`.
+- Full v7 margin `0.75` validation on the same `4110..4129` multi-scene block
+  where v6 was neutral is not promotion-safe: aggregate is slightly positive
+  (`+0.002259 / +0.002083`), but there is one bad row, seed `4112 scene_3`
+  (`STOP_MOVING->MOVE_RIGHT`, reward `-0.166667`, Success `-0.166667`), plus
+  two good rows, `4126 scene_2` and `4117 scene_3`.
+- Decision: do not promote v7. Keep v6 as packaged default. The useful output
+  from v7 is the new contrast set (`4126` good, `4117` good, `4112` bad), which
+  can feed a v8 hard-negative probe.
