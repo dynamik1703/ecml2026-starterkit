@@ -4839,3 +4839,15 @@ Scene-3 online-prefix retraining probe:
   scene/topology online-prefix contrast rows before another selector export,
   not add a hand-written `STOP_MOVING->MOVE_LEFT` distance guard, because known
   good stop-left rescues also include large or infinite distance deltas.
+
+Additional scene-axis mining after v4contrast:
+- Fresh `3920..3939` on `scene_2` and `scene_4` is exactly neutral:
+  `0/0/20` reward and Success for both scenes. This adds stability evidence
+  but no new online-prefix training rows.
+- Fresh `3920..3939` on `scene_3` is also exactly neutral:
+  baseline and sequence both `0.767806 / 0.825000`, reward and Success W/L/T
+  `0/0/20`.
+- Current implication: the `3912` reward-only loss is a real hard-negative but
+  currently isolated. Do not weaken the deployed selector or add a broad
+  stop-left heuristic for it. Continue mining targeted scene/topology windows
+  until we have a larger contrast family, then retrain the selector.
