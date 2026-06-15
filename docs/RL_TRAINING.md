@@ -5282,3 +5282,29 @@ Aux trigger tightening after broad holdout:
   contribution is sparse. The auxiliary selector is still useful for known
   `STOP_MOVING->MOVE_RIGHT` / `MOVE_FORWARD->MOVE_RIGHT` gains, but not yet a
   broad RL-quality jump.
+
+Current tightened-default aggregate:
+- Re-ran `4110..4129` and `4130..4149` where needed so the aggregate reflects
+  the current tightened default behavior. `4150..4169` is included because its
+  accepted auxiliary transitions are still allowed by the tightened default.
+- Aggregate over six 80-comparison windows (`4110..4229`, scenes `1..4`):
+  `480` comparisons, `10` changed rows, all good. Reward W/L/T `8/0/472`,
+  Success W/L/T `5/0/475`, mean deltas `+0.002511` reward and `+0.002431`
+  Success.
+
+| window | changed | reward W/L/T | Success W/L/T | reward mean | Success mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `4110..4129` | 1 | `1/0/79` | `1/0/79` | `+0.002789` | `+0.004167` |
+| `4130..4149` | 3 | `3/0/77` | `1/0/79` | `+0.005977` | `+0.002083` |
+| `4150..4169` | 2 | `2/0/78` | `0/0/80` | `+0.002270` | `0` |
+| `4170..4189` | 2 | `2/0/78` | `1/0/79` | `+0.004028` | `+0.004167` |
+| `4190..4209` | 1 | `0/0/80` | `1/0/79` | `0` | `+0.002083` |
+| `4210..4229` | 1 | `0/0/80` | `1/0/79` | `0` | `+0.002083` |
+
+- Accepted event sources across the aggregate: `7` primary-v6 listwise events
+  and `4` aux-v9 listwise events. Aux-v9 contributed `3`
+  `STOP_MOVING->MOVE_RIGHT` events and `1` `MOVE_FORWARD->MOVE_RIGHT` event.
+- Interpretation: tightened aux is now clean on the validated window set, but
+  it is a sparse additive component, not a broad replacement for stronger RL.
+  The current default is safer than the unrestricted aux promotion and modestly
+  better than v6 where right-detour rescues appear.
