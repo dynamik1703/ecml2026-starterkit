@@ -4805,3 +4805,8 @@ Profiled scoreboard and scene-axis stress:
   `candidate_distance_delta=77`. Treat this as new hard-negative selector data,
   not as a promoted guard yet, because the same scene block has larger
   reward-only gains on `3901`, `3903`, and `3913` with no Success losses.
+- Converted the `3912` trace plus corrected compare result into
+  `/private/tmp/ecml_online_prefix_scene3_3912.json`: `1` row, `1` seed,
+  `0` good, `0` neutral, `1` bad. The row is
+  `3912 scene_3 line_length=2 bad 1@81:a0:STOP_MOVING->MOVE_LEFT`; include it
+  in the next online-prefix selector retraining batch.
