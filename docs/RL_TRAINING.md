@@ -4615,3 +4615,13 @@ v8b prefix selector audit:
   and hard negatives, then train either a candidate-specific trajectory/prefix
   selector or a PPO/BC update that learns the complete rescue sequence rather
   than isolated one-step events.
+- Fresh OOD shard `3720..3729` weakens the case for v8b. The first attempted
+  broad `3720..3799` mine was too slow as a single job and was aborted; rerun
+  as a 10-seed shard, it produced `22` prefix rows over `9` changed seeds:
+  `20` neutral and `2` bad, with `0` good and `0` Success-positive rows. The
+  only non-neutral seed was `3724`, where prefix lengths `4` and `5` lost
+  `0.072088` reward without changing Success. Current implication: do not spend
+  more compute on v8b selector promotion unless a faster, broader miner finds
+  additional OOD positives. The more valuable next engineering step is an
+  incremental/parallel prefix miner plus a new RL candidate objective, not
+  another narrow v8b gate.
