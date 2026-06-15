@@ -4678,3 +4678,43 @@ Combined v8b selector check:
   partial from complete rescues, or a STOP-specific observation/reward setup
   that separates productive waiting (`3603`) from STOP traps. More listwise
   threshold tuning is low expected value.
+
+Sequence-completion PPO/BC probe v9:
+- Added `--prefer-longer-positive-prefix` to
+  `tools/convert_diff_prefix_to_rescue_events.py`. With
+  `--best-prefix-per-seed`, equal-utility positive prefixes now optionally keep
+  the longer prefix. This preserves completion events for cases like `3734`,
+  where prefix lengths `1..3` have the same outcome but the longer prefix
+  exposes more useful action labels.
+- Built `/private/tmp/ecml_v8b_sequence_completion_aux.csv` from the combined
+  v8b rows (`focus24`, `3720..3729`, `3730..3739`) using
+  `--best-prefix-per-seed --prefer-longer-positive-prefix
+  --include-negative-baseline --success-weight 16 --failed-weight 4`.
+  Result: `66` event labels over `16` seeds: `12` positive rescue events and
+  `54` negative-baseline events. Positives are the full completion prefixes for
+  `3505` (`5` right-detour events), `3603` (`4` stop events), and `3734`
+  (`3` right-detour events).
+- Trained a conservative v9 probe from v4b with three PPO updates,
+  `teacher_ce=4.0`, `anchor_kl=8.0`, LR `1e-6`, and Aux-BC coefficient `0.08`.
+  Aux replay stats were mostly clean: `56` valid samples, `46` avoidance hits,
+  `0` misses, `10` invalid labels, and `1` baseline mismatch. Final
+  `anchor_kl=3.26e-05`, so the policy stayed close to the init.
+- Raw v9 versus current guarded Sequence on the 44 focus/OOD seeds is not
+  deployable: delta `-0.035559` reward and `-0.011364` Success, reward W/L/T
+  `2/13/29`, Success W/L/T `2/4/38`. It does hit the intended new positives
+  (`3505`: `+0.046348` reward, `+0.333333` Success; `3734`: `+0.089468`
+  reward, `+0.166667` Success), but it regresses large traps (`3449`, `3592`,
+  `3737`, `3487`, `3525`, `3595`, `3732`, `3677`).
+- Adding v9 as an extra Sequence candidate is safe but currently useless. On
+  the same 44 seeds versus v4b Rerank, current Sequence default and
+  Sequence+v9 are exactly identical: `+0.025853` reward, `+0.018939` Success,
+  reward W/L/T `6/0/38`, Success W/L/T `3/0/41`. Trace shows v9 produced
+  `47` candidate rows and `0` accepted events. The dominant rejection modes are
+  score/margin (`33`) and `first_detour_low_prefix_conflict` (`13`).
+- Current implication: sequence-completion Aux-BC moved the raw policy in the
+  right direction for `3505`/`3734`, but the existing online gate cannot
+  recognize these low-conflict completion rescues and the raw policy still has
+  too many STOP/partial-prefix regressions. The next useful step is not another
+  small PPO update; it is a gate/selector feature update that can evaluate a
+  full proposed completion prefix, especially low-conflict right-detour
+  sequences, while preserving the STOP-trap vetoes.

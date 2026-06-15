@@ -53,6 +53,14 @@ def row_utility(row: dict[str, Any], success_weight: float, failed_weight: float
     )
 
 
+def prefix_length(row: dict[str, Any]) -> int:
+    value = safe_float(row.get("prefix_len"))
+    if value == value:
+        return int(value)
+    details = row.get("event_details") or []
+    return len(details) if isinstance(details, list) else 0
+
+
 def negative_prefix(row: dict[str, Any], reward_epsilon: float) -> bool:
     reward_delta = safe_float(row.get("reward_delta"))
     success_delta = safe_float(row.get("success_delta"))
@@ -112,6 +120,7 @@ def event_rows(
     success_weight: float,
     failed_weight: float,
     positive_min_prefix_conflicts: float,
+    prefer_longer_positive_prefix: bool,
 ) -> list[dict[str, Any]]:
     if best_prefix_per_seed:
         best_positive_by_seed: dict[str, dict[str, Any]] = {}
@@ -122,11 +131,21 @@ def event_rows(
                 continue
             seed = str(row.get("seed", ""))
             previous = best_positive_by_seed.get(seed)
-            if previous is None or row_utility(
-                row,
-                success_weight,
-                failed_weight,
-            ) > row_utility(previous, success_weight, failed_weight):
+            current_utility = row_utility(row, success_weight, failed_weight)
+            previous_utility = (
+                row_utility(previous, success_weight, failed_weight)
+                if previous is not None
+                else float("-inf")
+            )
+            should_replace = current_utility > previous_utility
+            if (
+                prefer_longer_positive_prefix
+                and previous is not None
+                and abs(current_utility - previous_utility) <= 1e-9
+                and prefix_length(row) > prefix_length(previous)
+            ):
+                should_replace = True
+            if previous is None or should_replace:
                 best_positive_by_seed[seed] = row
         selected_positive_rows = set(map(id, best_positive_by_seed.values()))
     else:
@@ -287,6 +306,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--prefer-longer-positive-prefix",
+        action="store_true",
+        help=(
+            "When --best-prefix-per-seed sees equal-utility positive prefixes, "
+            "pick the longer prefix so completion events are preserved."
+        ),
+    )
+    parser.add_argument(
         "--include-negative-baseline",
         action="store_true",
         help=(
@@ -309,6 +336,7 @@ def main() -> int:
         success_weight=args.success_weight,
         failed_weight=args.failed_weight,
         positive_min_prefix_conflicts=args.positive_min_prefix_conflicts,
+        prefer_longer_positive_prefix=args.prefer_longer_positive_prefix,
     )
     write_csv(args.output_csv, converted)
     summary = {
