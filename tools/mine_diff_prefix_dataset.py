@@ -130,6 +130,23 @@ def safe_float(value: Any) -> float:
     return result if math.isfinite(result) else float("nan")
 
 
+def bounded_ratio(numerator: float, denominator: float) -> float:
+    if not math.isfinite(numerator) or not math.isfinite(denominator):
+        return float("nan")
+    return numerator / max(1.0, abs(denominator))
+
+
+def action_name_value(row: dict[str, Any], key: str) -> str:
+    value = row.get(key)
+    if value not in (None, ""):
+        return str(value).upper()
+    numeric = row.get(key.replace("_name", ""))
+    try:
+        return action_name(int(numeric)).upper()
+    except Exception:
+        return ""
+
+
 def add_delta_features(row: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(row)
     for suffix in PREFIX_SUFFIXES:
@@ -162,6 +179,50 @@ def add_delta_features(row: dict[str, Any]) -> dict[str, Any]:
         enriched[output_name] = safe_float(row.get(candidate_name)) - safe_float(
             row.get(base_name)
         )
+
+    distance = safe_float(row.get("distance"))
+    slack = safe_float(row.get("slack"))
+    distance_delta = safe_float(row.get("candidate_distance_delta"))
+    baseline_name = action_name_value(row, "baseline_action_name")
+    candidate_name = action_name_value(row, "candidate_action_name")
+    stop_to_move = baseline_name == "STOP_MOVING" and candidate_name.startswith("MOVE_")
+    enriched["candidate_distance_delta_per_distance"] = bounded_ratio(
+        distance_delta,
+        distance,
+    )
+    enriched["candidate_distance_delta_per_slack_abs"] = bounded_ratio(
+        distance_delta,
+        slack,
+    )
+    enriched["candidate_distance_delta_minus_slack"] = distance_delta - slack
+    enriched["candidate_distance_delta_exceeds_slack"] = float(
+        math.isfinite(distance_delta)
+        and math.isfinite(slack)
+        and distance_delta > slack
+    )
+    enriched["is_stop_to_move"] = float(stop_to_move)
+    enriched["is_stop_to_forward"] = float(
+        baseline_name == "STOP_MOVING" and candidate_name == "MOVE_FORWARD"
+    )
+    enriched["is_stop_to_left"] = float(
+        baseline_name == "STOP_MOVING" and candidate_name == "MOVE_LEFT"
+    )
+    enriched["is_stop_to_right"] = float(
+        baseline_name == "STOP_MOVING" and candidate_name == "MOVE_RIGHT"
+    )
+    enriched["stop_distance_delta_per_distance"] = (
+        bounded_ratio(distance_delta, distance) if stop_to_move else 0.0
+    )
+    enriched["stop_distance_delta_minus_slack"] = (
+        distance_delta - slack if stop_to_move else 0.0
+    )
+    enriched["stop_near_target_large_detour"] = float(
+        stop_to_move
+        and math.isfinite(distance)
+        and math.isfinite(distance_delta)
+        and distance <= 5.0
+        and distance_delta >= 50.0
+    )
     return enriched
 
 

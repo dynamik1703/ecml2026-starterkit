@@ -5133,3 +5133,35 @@ STOP-trap feature diagnosis:
   next improvement should add richer temporal/route-context features to the
   selector, or move toward a policy/planner that evaluates complete rescue
   sequences rather than accepting isolated high-confidence detours.
+
+v9 enriched selector probe:
+- Added derived temporal/route-context features for the selector traces:
+  normalized candidate-distance deltas, distance-vs-slack deltas, STOP-action
+  transition flags, STOP-specific distance ratios, and a
+  `stop_near_target_large_detour` feature. These are meant to separate cases
+  like `4112 scene_3` (`distance=2`, `candidate_distance_delta=155`, bad) from
+  useful large-detour rescues like `4126 scene_2`.
+- Added `tools/enrich_prefix_rows.py` to backfill those derived features into
+  existing mined prefix-row JSON files, then trained v9 on the enriched mixed
+  online-prefix dataset. Enriched input:
+  `/private/tmp/ecml_online_prefix_enriched_v9_input.json` with `65` rows
+  (`40` good, `6` neutral, `19` bad). Export:
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v9_enriched.pt`.
+- Offline audit improved the specific `4112` separation but is still not clean:
+  threshold `0.75` accepts `9` good and `3` bad rows; higher thresholds still
+  leak some bad rows. This means v9 is not promotion-safe from offline evidence
+  alone.
+- Online key checks at margin `0.75` are more promising:
+  - Scene-3 spot check on `4112,4117,4126,3988,4019,3971,4027` blocks the known
+    bad rows `4112`, `3988`, and `4019`, keeps older gains `3971` and `4027`,
+    and produces no losses on that check.
+  - Scene-2 spot check on `4126,4110` keeps the useful `4126` rescue
+    (`+0.223153` reward, `+0.333333` Success) but still misses `4110`.
+  - Full `4110..4129` multi-scene holdout (`80` comparisons across scenes
+    `1..4`) has exactly one changed row, `4126 scene_2`, and no losses:
+    reward W/L/T `1/0/79`, Success W/L/T `1/0/79`, aggregate deltas
+    `+0.002789` reward and `+0.004167` Success. On the same block, promoted
+    v6 at margin `1.0` was fully neutral.
+- Decision: keep v6 as the packaged default for now. v9 is the best current
+  candidate for a more aggressive rescue selector, but it needs fresh holdout
+  validation before promotion because the offline audit still shows bad leaks.
