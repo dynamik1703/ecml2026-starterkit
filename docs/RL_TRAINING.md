@@ -5287,9 +5287,9 @@ Current tightened-default aggregate:
 - Re-ran `4110..4129` and `4130..4149` where needed so the aggregate reflects
   the current tightened default behavior. `4150..4169` is included because its
   accepted auxiliary transitions are still allowed by the tightened default.
-- Aggregate over six 80-comparison windows (`4110..4229`, scenes `1..4`):
-  `480` comparisons, `10` changed rows, all good. Reward W/L/T `8/0/472`,
-  Success W/L/T `5/0/475`, mean deltas `+0.002511` reward and `+0.002431`
+- Aggregate over seven 80-comparison windows (`4110..4249`, scenes `1..4`):
+  `560` comparisons, `14` changed rows, all good. Reward W/L/T `9/1/550`,
+  Success W/L/T `9/0/551`, mean deltas `+0.002334` reward and `+0.003869`
   Success.
 
 | window | changed | reward W/L/T | Success W/L/T | reward mean | Success mean |
@@ -5300,10 +5300,15 @@ Current tightened-default aggregate:
 | `4170..4189` | 2 | `2/0/78` | `1/0/79` | `+0.004028` | `+0.004167` |
 | `4190..4209` | 1 | `0/0/80` | `1/0/79` | `0` | `+0.002083` |
 | `4210..4229` | 1 | `0/0/80` | `1/0/79` | `0` | `+0.002083` |
+| `4230..4249` | 4 | `1/1/78` | `4/0/76` | `+0.001274` | `+0.012500` |
 
-- Accepted event sources across the aggregate: `7` primary-v6 listwise events
+- Accepted event sources across the aggregate: `11` primary-v6 listwise events
   and `4` aux-v9 listwise events. Aux-v9 contributed `3`
   `STOP_MOVING->MOVE_RIGHT` events and `1` `MOVE_FORWARD->MOVE_RIGHT` event.
+- The only reward-loss row in the aggregate is a primary-v6
+  `STOP_MOVING->MOVE_RIGHT` on `4234 scene_4`: reward `-0.014360`, Success
+  `+0.166667`, failed agents `-1`. This is a Success-positive tradeoff rather
+  than an auxiliary selector regression.
 - Interpretation: tightened aux is now clean on the validated window set, but
   it is a sparse additive component, not a broad replacement for stronger RL.
   The current default is safer than the unrestricted aux promotion and modestly
