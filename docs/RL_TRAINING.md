@@ -4779,3 +4779,29 @@ Corrected fresh OOD validation after the low-conflict first-detour promotion:
   too slow for the interactive loop and was stopped. Future topology-axis
   validation should use smaller/failure-focused blocks first, then scale only
   if runtime is acceptable.
+
+Profiled scoreboard and scene-axis stress:
+- `tools/policy_scoreboard.py` now has
+  `--profile sequence-vs-rerank-v4b`, which expands to the correct deployable
+  comparison: `RerankPolicy` with
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` and
+  `MyActionConflictObservationBuilder` versus
+  `SequenceSuccessPolicy` with the same observation builder. Use this profile
+  for future local Sequence-vs-baseline scoreboards to avoid accidental
+  default-observation/default-checkpoint comparisons.
+- Profile smoke on `3800,3810,3819,3449` reproduced the corrected behavior:
+  baseline `0.677043 / 0.708333`, sequence `0.808930 / 0.833333`, deltas
+  `+0.131887` reward and `+0.125000` Success, reward W/L/T `1/0/3`,
+  Success W/L/T `1/0/3`.
+- Small scene-axis stress on fresh seeds `3900..3919`:
+  - `scene_1`: exactly neutral, `0/0/20` reward and Success.
+  - `scene_3`: baseline `0.752511 / 0.825000`, sequence
+    `0.769870 / 0.825000`, delta `+0.017360` reward and `0.000000`
+    Success. Reward W/L/T `3/1/16`; Success W/L/T `0/0/20`.
+- The only negative scene-stress row is seed `3912` on `scene_3`, a small
+  reward-only loss (`-0.020964`, Success unchanged). Trace shows one accepted
+  `STOP_MOVING->MOVE_LEFT` from PPO3700 at time `81` with high listwise margin
+  (`2.437`), high raw margin (`4.365`), slack `38`, and
+  `candidate_distance_delta=77`. Treat this as new hard-negative selector data,
+  not as a promoted guard yet, because the same scene block has larger
+  reward-only gains on `3901`, `3903`, and `3913` with no Success losses.

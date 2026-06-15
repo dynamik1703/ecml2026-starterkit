@@ -35,6 +35,36 @@ class Candidate:
     checkpoint: Path | None = None
 
 
+def sequence_vs_rerank_v4b_profile() -> tuple[list[Candidate], str]:
+    return (
+        [
+            Candidate(
+                name="rerank",
+                policy="submission.rerank_policy.MyPolicy",
+                obs_builder=(
+                    "submission.my_observation_builder."
+                    "MyActionConflictObservationBuilder"
+                ),
+                checkpoint=(
+                    repo_root()
+                    / "submission"
+                    / "models"
+                    / "ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt"
+                ),
+            ),
+            Candidate(
+                name="sequence",
+                policy="submission.sequence_success_policy.MyPolicy",
+                obs_builder=(
+                    "submission.my_observation_builder."
+                    "MyActionConflictObservationBuilder"
+                ),
+            ),
+        ],
+        "rerank",
+    )
+
+
 def parse_seed_blocks(values: list[str]) -> list[int]:
     seeds: list[int] = []
     for value in values:
@@ -325,10 +355,19 @@ def parse_args() -> argparse.Namespace:
         "--candidate",
         action="append",
         type=parse_candidate,
-        required=True,
         help=(
             "Candidate as name=module.Class[@checkpoint],obs=module.ObsBuilder. "
-            "Can be repeated. If obs is omitted, the starterkit default is used."
+            "Can be repeated. If obs is omitted, the starterkit default is used. "
+            "Required unless --profile is set."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        choices=["sequence-vs-rerank-v4b"],
+        help=(
+            "Preconfigured candidate set. sequence-vs-rerank-v4b compares the "
+            "submission Sequence policy against Rerank(v4b) with the "
+            "Action-Conflict observation builder."
         ),
     )
     parser.add_argument(
@@ -358,8 +397,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    candidates = list(args.candidate)
-    baseline_name = args.baseline or candidates[0].name
+    if args.profile == "sequence-vs-rerank-v4b":
+        profile_candidates, profile_baseline = sequence_vs_rerank_v4b_profile()
+        candidates = list(args.candidate or profile_candidates)
+        baseline_name = args.baseline or profile_baseline
+    else:
+        candidates = list(args.candidate or [])
+        baseline_name = args.baseline or (candidates[0].name if candidates else "")
+    if not candidates:
+        raise ValueError("Pass at least one --candidate or use --profile.")
     candidate_names = {candidate.name for candidate in candidates}
     if baseline_name not in candidate_names:
         raise ValueError(f"Unknown baseline candidate: {baseline_name}")
