@@ -25,6 +25,7 @@ class FastTreeObsBuilder(ObservationBuilder):
     )
     TRAJECTORY_PRIORITY_FEATURE_DIM = 12
     ACTION_CONFLICT_FEATURE_DIM = 15
+    GLOBAL_CONFLICT_FEATURE_DIM = 12
     ROUTE_CONFLICT_LOOKAHEAD_CELLS = 45
     SIDE_DETOUR_MARGIN = 4.0
     NEAR_TARGET_PRIORITY_DISTANCE = 20.0
@@ -47,10 +48,18 @@ class FastTreeObsBuilder(ObservationBuilder):
         with_route_conflict_features=False,
         with_trajectory_priority_features=False,
         with_action_conflict_features=False,
+        with_global_conflict_features=False,
     ):
         self.max_depth = max_depth
-        if with_trajectory_priority_features or with_action_conflict_features:
+        if (
+            with_trajectory_priority_features
+            or with_action_conflict_features
+            or with_global_conflict_features
+        ):
             with_route_conflict_features = True
+        if with_global_conflict_features:
+            with_trajectory_priority_features = True
+            with_action_conflict_features = True
         # Append an action mask after the feature block. Useful at inference
         # (no env access in the policy); training computes its own mask from
         # the env, so set with_action_mask=False there.
@@ -58,6 +67,7 @@ class FastTreeObsBuilder(ObservationBuilder):
         self.with_route_conflict_features = with_route_conflict_features
         self.with_trajectory_priority_features = with_trajectory_priority_features
         self.with_action_conflict_features = with_action_conflict_features
+        self.with_global_conflict_features = with_global_conflict_features
         self.feature_dim = self.BASE_OBSERVATION_DIM + (
             self.ROUTE_CONFLICT_FEATURE_DIM
             if with_route_conflict_features
@@ -69,6 +79,10 @@ class FastTreeObsBuilder(ObservationBuilder):
         ) + (
             self.ACTION_CONFLICT_FEATURE_DIM
             if with_action_conflict_features
+            else 0
+        ) + (
+            self.GLOBAL_CONFLICT_FEATURE_DIM
+            if with_global_conflict_features
             else 0
         )
         # handle -> index into agent.waypoints of last stop visited
@@ -932,6 +946,159 @@ class FastTreeObsBuilder(ObservationBuilder):
 
         return features
 
+    def _global_conflict_features(self, handle):
+        """Team-level route pressure features for MARL-style policies.
+
+        Layout:
+          0  active-agent fraction
+          1  active agents currently stopped or malfunctioning
+          2  agents with tight deadline slack (<20 steps)
+          3  agents already behind deadline
+          4  total negative team slack, clipped by episode horizon
+          5  fraction of other agents with tighter effective slack than us
+          6  own effective slack, clipped around the episode horizon
+          7  fraction of route-prefix pairs with any conflict
+          8  fraction of route-prefix pairs with head-on edge conflict
+          9  max ETA-overlap risk across route-prefix conflicts
+         10  fraction of other agents whose prefix conflicts with ours
+         11  fraction of own conflicts where the other train should go first
+        """
+        features = np.zeros(self.GLOBAL_CONFLICT_FEATURE_DIM, dtype=np.float32)
+        handles = list(self.env.get_agent_handles())
+        if not handles:
+            return features
+
+        max_steps = max(1, self.env._max_episode_steps)
+        num_agents = max(1, len(handles))
+        other_count = max(1, num_agents - 1)
+        max_pairs = max(1, num_agents * (num_agents - 1) // 2)
+
+        priority_keys = {}
+        slacks = {}
+        active_count = 0
+        blocked_count = 0
+        tight_slack_count = 0
+        late_count = 0
+        team_lateness = 0.0
+        for agent_handle in handles:
+            agent = self.env.agents[agent_handle]
+            is_active = self._state_matches(
+                agent.state,
+                "MOVING",
+                "STOPPED",
+                "MALFUNCTION",
+            )
+            active_count += int(is_active)
+            blocked_count += int(
+                is_active
+                and self._state_matches(agent.state, "STOPPED", "MALFUNCTION")
+            )
+            try:
+                key = self._priority_key(agent_handle)
+            except Exception:
+                key = (3, 1e9, 1e9, agent_handle)
+            priority_keys[agent_handle] = key
+            slack = float(key[1]) if np.isfinite(key[1]) else np.inf
+            slacks[agent_handle] = slack
+            tight_slack_count += int(np.isfinite(slack) and slack < 20.0)
+            late_count += int(np.isfinite(slack) and slack < 0.0)
+            if np.isfinite(slack):
+                team_lateness += max(0.0, -slack)
+
+        own_key = priority_keys.get(handle, (3, 1e9, 1e9, handle))
+        own_slack = slacks.get(handle, np.inf)
+        tighter_others = sum(
+            int(other != handle and priority_keys.get(other, own_key) < own_key)
+            for other in handles
+        )
+
+        prefixes = {
+            agent_handle: self._route_prefix(agent_handle)
+            for agent_handle in handles
+        }
+        prefix_positions = {}
+        prefix_edges = {}
+        for agent_handle, prefix in prefixes.items():
+            positions = {}
+            edges = {}
+            for node in prefix:
+                positions.setdefault(node["position"], node)
+                edges.setdefault((node["prev_position"], node["position"]), node)
+            prefix_positions[agent_handle] = positions
+            prefix_edges[agent_handle] = edges
+
+        pair_conflicts = 0
+        pair_head_on = 0
+        max_eta_risk = 0.0
+        own_conflicts = 0
+        own_priority_losses = 0
+        for left_index, left in enumerate(handles):
+            for right in handles[left_index + 1 :]:
+                candidate = self._best_route_intersection_candidate(
+                    prefix_positions[left],
+                    prefix_edges[left],
+                    prefixes[right],
+                )
+                if candidate is None:
+                    continue
+
+                pair_conflicts += 1
+                pair_head_on += int(bool(candidate["head_on"]))
+                left_step = float(candidate["own"]["step"])
+                right_step = float(candidate["other_node"]["step"])
+                left_eta = left_step / self._speed(self.env.agents[left])
+                right_eta = right_step / self._speed(self.env.agents[right])
+                eta_risk = max(
+                    0.0,
+                    1.0
+                    - abs(left_eta - right_eta)
+                    / self.ROUTE_CONFLICT_LOOKAHEAD_CELLS,
+                )
+                max_eta_risk = max(max_eta_risk, eta_risk)
+
+                if handle not in (left, right):
+                    continue
+                own_conflicts += 1
+                if handle == left:
+                    other = right
+                    own_eta = left_eta
+                    other_eta = right_eta
+                else:
+                    other = left
+                    own_eta = right_eta
+                    other_eta = left_eta
+                other_slack = slacks.get(other, np.inf)
+                own_priority_losses += int(
+                    other_eta < own_eta
+                    or (
+                        np.isfinite(other_slack)
+                        and np.isfinite(own_slack)
+                        and other_slack < own_slack
+                    )
+                )
+
+        features[0] = active_count / num_agents
+        features[1] = blocked_count / num_agents
+        features[2] = tight_slack_count / num_agents
+        features[3] = late_count / num_agents
+        features[4] = np.clip(
+            team_lateness / max(1.0, max_steps * num_agents),
+            0.0,
+            1.0,
+        )
+        features[5] = tighter_others / other_count
+        features[6] = (
+            0.5 + 0.5 * np.clip(own_slack / max_steps, -1.0, 1.0)
+            if np.isfinite(own_slack)
+            else 1.0
+        )
+        features[7] = min(pair_conflicts, max_pairs) / max_pairs
+        features[8] = min(pair_head_on, max_pairs) / max_pairs
+        features[9] = max_eta_risk
+        features[10] = min(own_conflicts, other_count) / other_count
+        features[11] = min(own_priority_losses, other_count) / other_count
+        return features
+
     def _route_prefix_for_action(self, action, handle):
         if action not in (self.MOVE_LEFT, self.MOVE_FORWARD, self.MOVE_RIGHT):
             return []
@@ -1443,6 +1610,20 @@ class FastTreeObsBuilder(ObservationBuilder):
         # 64..68  LEFT: valid, distance-delta, conflicts, head-on, opposing
         # 69..73  FORWARD: valid, distance-delta, conflicts, head-on, opposing
         # 74..78  RIGHT: valid, distance-delta, conflicts, head-on, opposing
+        #
+        # Optional global-conflict layout when with_global_conflict_features=True:
+        # 79      active-agent fraction
+        # 80      active agents stopped or malfunctioning
+        # 81      agents with tight deadline slack
+        # 82      agents already behind deadline
+        # 83      total negative team slack
+        # 84      fraction of other agents with tighter priority/slack
+        # 85      own effective slack
+        # 86      fraction of route-prefix pairs with any conflict
+        # 87      fraction of route-prefix pairs with head-on conflict
+        # 88      max ETA-overlap risk across route-prefix conflicts
+        # 89      fraction of other agents conflicting with our prefix
+        # 90      fraction of own conflicts where the other train should go first
 
         observation = np.zeros(self.BASE_OBSERVATION_DIM, dtype=np.float32)
         visited = []
@@ -1615,6 +1796,14 @@ class FastTreeObsBuilder(ObservationBuilder):
                 ]
             )
 
+        if self.with_global_conflict_features:
+            observation = np.concatenate(
+                [
+                    observation,
+                    self._global_conflict_features(handle),
+                ]
+            )
+
         if not self.with_action_mask:
             return observation
 
@@ -1683,3 +1872,23 @@ class ActionConflictObsBuilder(FastTreeObsBuilder):
 
 
 MyActionConflictObservationBuilder = ActionConflictObsBuilder
+
+
+class GlobalConflictObsBuilder(FastTreeObsBuilder):
+    OBSERVATION_DIM = (
+        FastTreeObsBuilder.BASE_OBSERVATION_DIM
+        + FastTreeObsBuilder.ROUTE_CONFLICT_FEATURE_DIM
+        + FastTreeObsBuilder.TRAJECTORY_PRIORITY_FEATURE_DIM
+        + FastTreeObsBuilder.ACTION_CONFLICT_FEATURE_DIM
+        + FastTreeObsBuilder.GLOBAL_CONFLICT_FEATURE_DIM
+    )
+
+    def __init__(self, max_depth=3, with_action_mask=True):
+        super().__init__(
+            max_depth=max_depth,
+            with_action_mask=with_action_mask,
+            with_global_conflict_features=True,
+        )
+
+
+MyGlobalConflictObservationBuilder = GlobalConflictObsBuilder

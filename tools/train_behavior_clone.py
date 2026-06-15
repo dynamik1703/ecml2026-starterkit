@@ -28,11 +28,15 @@ DEFAULT_TRAJECTORY_CONFLICT_OBS_BUILDER = (
 DEFAULT_ACTION_CONFLICT_OBS_BUILDER = (
     "submission.my_observation_builder.MyActionConflictObservationBuilder"
 )
+DEFAULT_GLOBAL_CONFLICT_OBS_BUILDER = (
+    "submission.my_observation_builder.MyGlobalConflictObservationBuilder"
+)
 DEFAULT_REWARDS = "flatland.envs.rewards.ECML2026Rewards"
 BASE_OBS_SIZE = 36
 ROUTE_CONFLICT_OBS_SIZE = 52
 TRAJECTORY_CONFLICT_OBS_SIZE = 64
 ACTION_CONFLICT_OBS_SIZE = 79
+GLOBAL_CONFLICT_OBS_SIZE = 91
 
 
 def repo_root() -> Path:
@@ -284,6 +288,14 @@ def parse_args() -> argparse.Namespace:
             "Includes trajectory-conflict plus per-action conflict features."
         ),
     )
+    parser.add_argument(
+        "--use-global-conflict-obs",
+        action="store_true",
+        help=(
+            "Use MyGlobalConflictObservationBuilder and obs_size=91. "
+            "Includes action-conflict plus global team conflict features."
+        ),
+    )
     parser.add_argument("--rewards", default=DEFAULT_REWARDS)
     parser.add_argument("--init-checkpoint", type=Path, default=repo_root() / "submission/checkpoint.pt")
     parser.add_argument("--output-checkpoint", type=Path, default=Path("/private/tmp/ecml_bc.pt"))
@@ -318,7 +330,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
-    if args.use_action_conflict_obs:
+    if args.use_global_conflict_obs:
+        if args.obs_builder == DEFAULT_OBS_BUILDER:
+            args.obs_builder = DEFAULT_GLOBAL_CONFLICT_OBS_BUILDER
+        if args.obs_size is None:
+            args.obs_size = GLOBAL_CONFLICT_OBS_SIZE
+        args.use_action_conflict_obs = True
+        args.use_trajectory_conflict_obs = True
+        args.use_route_conflict_obs = True
+    elif args.use_action_conflict_obs:
         if args.obs_builder == DEFAULT_OBS_BUILDER:
             args.obs_builder = DEFAULT_ACTION_CONFLICT_OBS_BUILDER
         if args.obs_size is None:
@@ -355,10 +375,19 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--use-trajectory-conflict-obs expects --obs-size "
             f"{TRAJECTORY_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
-    if args.use_action_conflict_obs and args.obs_size != ACTION_CONFLICT_OBS_SIZE:
+    if (
+        args.use_action_conflict_obs
+        and not args.use_global_conflict_obs
+        and args.obs_size != ACTION_CONFLICT_OBS_SIZE
+    ):
         raise ValueError(
             "--use-action-conflict-obs expects --obs-size "
             f"{ACTION_CONFLICT_OBS_SIZE}, got {args.obs_size}."
+        )
+    if args.use_global_conflict_obs and args.obs_size != GLOBAL_CONFLICT_OBS_SIZE:
+        raise ValueError(
+            "--use-global-conflict-obs expects --obs-size "
+            f"{GLOBAL_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
     return args
 

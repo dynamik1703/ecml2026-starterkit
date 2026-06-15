@@ -5313,3 +5313,29 @@ Current tightened-default aggregate:
   it is a sparse additive component, not a broad replacement for stronger RL.
   The current default is safer than the unrestricted aux promotion and modestly
   better than v6 where right-detour rescues appear.
+
+Global conflict observation v1:
+- Added `MyGlobalConflictObservationBuilder` as an additive experimental
+  observation path. It keeps the existing action-conflict layout and appends
+  `12` team-level route-pressure features, giving `91` policy features plus the
+  existing `5`-action mask (`96` total observation length with mask).
+- New global feature block (`79..90`): active-agent fraction, stopped or
+  malfunctioning active-agent fraction, tight-deadline fraction, late-agent
+  fraction, total negative team slack, own slack/priority rank, own effective
+  slack, global pairwise route-prefix conflict fraction, global head-on
+  conflict fraction, max ETA-overlap risk, own prefix-conflict fraction, and
+  own conflicts where the other train should likely go first.
+- Extended `tools/train_masked_ppo.py`, `tools/train_behavior_clone.py`, and
+  `tools/train_rescue_behavior_clone.py` with `--use-global-conflict-obs`
+  defaults (`obs_builder=MyGlobalConflictObservationBuilder`, `obs_size=91`).
+- Smokes:
+  - Syntax compile passed for the observation builder and all three training
+    tools.
+  - Env reset smoke on `scene_3`, seed `123`: each observation has length `96`,
+    with `91` feature values plus `5` mask values.
+  - Minimal PPO smoke with `--use-global-conflict-obs` completed one update and
+    saved `/private/tmp/ecml_global_obs_smoke2.pt`.
+- Decision: this is not a promoted submission change yet. It is the first
+  concrete step toward a less gate-centric RL/BC policy. Next step is to train a
+  BC or short PPO candidate using this observation and compare it as a
+  candidate policy under the existing sequence selector.
