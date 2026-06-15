@@ -4544,3 +4544,42 @@ Fresh OOD stop-forward/no-head-on guard:
 - Regression retests remain clean: `3570..3619` is unchanged at `+0.011839`
   reward and `+0.003333` Success, and the 96-seed hard/holdout suite is
   unchanged at `+0.009821` reward and `+0.006944` Success.
+
+Fresh counterfactual RL candidate v8:
+- Mined one-step counterfactuals from the current guarded Sequence policy on
+  24 hard/partial seeds selected from the latest validation windows
+  (`3449,3464,3485,3487,3488,3504,3505,3509,3525,3570,3575,3581,3592,3595,
+  3603,3611,3635,3638,3648,3669,3676,3677,3700,3715`). The mine focused on
+  failed agents and produced `148` forced-action rows: reward W/L/T
+  `12/74/62`, Success W/L/T `19/6/123`, and `0` failed forced applications.
+- Conservative conversion yielded
+  `/private/tmp/ecml_counterfactual_current_hard24_v2_aux_successloss.csv`
+  with `26` Aux-BC rows: `20` positive rescue events and `6`
+  negative-baseline events. The reward-negative variant had `16/70`
+  positive/negative and is too negative-heavy for the first pass.
+- v8 first used the old conflict-filtered Aux-BC pool plus the fresh
+  counterfactual labels. This was a mistake for the current default: cache
+  replay showed `83` baseline mismatches. Raw screen versus current Sequence on
+  the 24 focus seeds was unusable: delta `-0.438562` reward and `-0.284722`
+  Success, reward W/L/T `1/23/0`, Success W/L/T `5/17/2`.
+- v8b retrained from v4b using only the fresh counterfactual labels, lower
+  Aux-BC coefficient `0.05`, LR `2e-6`, strong Teacher CE/KL `4.0/6.0`, and
+  two PPO updates. Cache replay was clean: `26` samples, `26` hits,
+  `6` avoidance hits, `0` invalid labels, `0` baseline mismatches. Training
+  stayed close to the init (`anchor_kl=0.000341` after update 2).
+- Raw v8b is still not deployable but is a better proposal diagnostic. On the
+  24 focus seeds versus current Sequence, it scored `-0.073364` reward and
+  `-0.006944` Success, reward W/L/T `1/10/13`, Success W/L/T `2/2/20`. It
+  found a real new Success rescue on `3505`
+  (`+0.046348` reward, `+0.333333` Success) and a Success-only rescue on
+  `3603`, but regressed known Sequence gains such as `3449` and `3592`.
+- Adding v8b as a fifth `SequenceSuccessPolicy` candidate was exactly neutral
+  on the same 24 focus seeds. The online trace contained no accepted v8b
+  events; all gains remained the existing default Sequence gains
+  (`3449`, `3592`, `3595`, `3485`). This means the current selector is safe
+  but blind to v8b's new `3505` rescue.
+- Current decision: do not promote v8/v8b. The useful artifact is the clean
+  fresh counterfactual dataset and the v8b raw screen, which identify candidate
+  positives (`3505`, `3603`) and traps (`3449`, `3525`, `3592`). The next
+  high-value step is candidate-specific selector training/mining for v8b
+  prefixes, not another blind PPO update.
