@@ -5010,3 +5010,11 @@ v6 promotion:
 - Remaining required checks before final submission packaging: Docker build,
   Docker smoke/eval, and one post-promotion scoreboard profile run to ensure no
   environment-variable assumptions were left in the local comparisons.
+- Post-promotion `tools/policy_scoreboard.py --profile sequence-vs-rerank-v4b`
+  confirms the packaged defaults without environment overrides:
+  - Scene-3 key seeds `3912,3971,4019,4027`: sequence
+    `0.656354 / 0.875000`, rerank `0.636472 / 0.791667`, deltas
+    `+0.019882 / +0.083333`, reward W/L/T `2/0/2`, Success W/L/T `2/0/2`.
+  - Scene-5 key seeds `3449,3592,3740,3750,3826,3867`: sequence
+    `0.686580 / 0.777778`, rerank `0.433909 / 0.500000`, deltas
+    `+0.252671 / +0.277778`, reward W/L/T `5/0/1`, Success W/L/T `4/0/2`.
