@@ -40,6 +40,11 @@ DEFAULT_LISTWISE_MODEL_PATH = str(
     / "models"
     / "ecml_multicandidate_listwise_ranker_online_prefix_v6_scene3_multiscene.pt"
 )
+DEFAULT_AUX_LISTWISE_MODEL_PATH = str(
+    SUBMISSION_DIR
+    / "models"
+    / "ecml_multicandidate_listwise_ranker_online_prefix_v9_enriched.pt"
+)
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
     str(
@@ -433,7 +438,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         aux_listwise_model_path = os.environ.get(
             "ECML_SEQUENCE_AUX_LISTWISE_MODEL",
-            "",
+            DEFAULT_AUX_LISTWISE_MODEL_PATH,
         ).strip()
         candidate_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
@@ -496,6 +501,14 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.rejected_transitions = self._env_transition_set(
             "ECML_SEQUENCE_REJECT_TRANSITIONS",
             default="MOVE_RIGHT->MOVE_FORWARD",
+        )
+        self.aux_listwise_transitions = self._env_transition_set(
+            "ECML_SEQUENCE_AUX_LISTWISE_TRANSITIONS",
+            default=(
+                "STOP_MOVING->MOVE_LEFT,"
+                "STOP_MOVING->MOVE_RIGHT,"
+                "MOVE_FORWARD->MOVE_RIGHT"
+            ),
         )
         self.max_head_on_edge_conflicts = self._env_int(
             "ECML_SEQUENCE_MAX_HEAD_ON_EDGE_CONFLICTS",
@@ -1107,7 +1120,14 @@ class SequenceSuccessPolicy(RerankPolicy):
                 if accepted:
                     return True, scores
 
-            if self.aux_listwise_scorer is not None:
+            if (
+                self.aux_listwise_scorer is not None
+                and (
+                    not self.aux_listwise_transitions
+                    or (baseline_action, candidate_action)
+                    in self.aux_listwise_transitions
+                )
+            ):
                 aux_accepted, aux_scores = self.aux_listwise_scorer.score(score_row)
                 aux_scores["selector_source"] = "aux_listwise"
                 aux_accepted, aux_scores = self._apply_candidate_guards(

@@ -5233,3 +5233,17 @@ v6 primary + v9 auxiliary listwise probe:
   cost from evaluating a second model and the limited number of validated
   windows; both need broader validation before packaging v9 as an auxiliary
   model.
+
+Aux packaging/default smoke:
+- Copied the v9 enriched checkpoint into `submission/models/` and enabled it as
+  `DEFAULT_AUX_LISTWISE_MODEL_PATH`. Default submission behavior now loads v6
+  primary plus v9 auxiliary without requiring an env var.
+- To reduce runtime and risk, default aux scoring is restricted to validated
+  transition families: `STOP_MOVING->MOVE_LEFT`, `STOP_MOVING->MOVE_RIGHT`, and
+  `MOVE_FORWARD->MOVE_RIGHT`. Set `ECML_SEQUENCE_AUX_LISTWISE_TRANSITIONS` to
+  override this.
+- Packaged default smoke on seeds `4151,4153`, scenes `2,3`: `4` comparisons,
+  `2` changed rows, both good. Reward W/L/T `2/0/2`, Success W/L/T `0/0/4`,
+  aggregate deltas `+0.045406` reward and `0` Success. Both accepted rows have
+  `selector_source=aux_listwise`, confirming the packaged default uses the
+  auxiliary model as intended.
