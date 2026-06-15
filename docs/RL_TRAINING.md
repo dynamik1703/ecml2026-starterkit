@@ -5335,6 +5335,16 @@ Global conflict observation v1:
     with `91` feature values plus `5` mask values.
   - Minimal PPO smoke with `--use-global-conflict-obs` completed one update and
     saved `/private/tmp/ecml_global_obs_smoke2.pt`.
+  - Minimal BC smoke with `--use-global-conflict-obs` collected `3063` samples
+    from `2` episodes, trained one epoch (`accuracy=0.981064`), and saved
+    `/private/tmp/ecml_global_obs_bc_smoke.pt`.
+  - The BC-smoke checkpoint runs as a standalone policy on two `scene_3`
+    episodes (`reward_mean=0.279532`, `success_rate_mean=0.583333`); this is
+    only a liveness check, not a quality result.
+  - Current `SequenceSuccessPolicy` also runs with
+    `MyGlobalConflictObservationBuilder` on a one-episode smoke (`seed=5000`,
+    `scene_3`), confirming old and new checkpoints can coexist with the longer
+    observation vector.
 - Decision: this is not a promoted submission change yet. It is the first
   concrete step toward a less gate-centric RL/BC policy. Next step is to train a
   BC or short PPO candidate using this observation and compare it as a
