@@ -5023,3 +5023,12 @@ v6 promotion:
   submission-instantiation smoke passed: `SequenceSuccessPolicy` loads the v6
   checkpoint from `submission/models`, `listwise_loaded=True`, margin `1.0`,
   selector mode `listwise`, `max_accepted_events=1`, and `4` candidate policies.
+- Post-promotion fresh multi-scene holdout `4110..4129`, line length `2`,
+  scenes `scene_1..scene_4`, is exactly neutral: baseline and sequence both
+  `0.850926 / 0.918750`, reward and Success W/L/T `0/0/80`, with no accepted
+  prefix rows. Per-scene `scene_1`, `scene_2`, `scene_3`, and `scene_4` are all
+  `0/0/20`.
+- Interpretation: v6 margin `1.0` currently looks regression-resistant, but it
+  is conservative on broad random windows. Further score gains should come from
+  targeted failure/partial-success mining rather than more blind random
+  validation windows.
