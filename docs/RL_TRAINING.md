@@ -5184,3 +5184,22 @@ v9 fresh holdout vs promoted v6:
   dual-selector/ensemble that preserves v6 gains while allowing vetted v9 gains,
   or a v10 model trained explicitly on the union of v6/v9 positive cases plus
   the hard negatives that prevented v7/v8 promotion.
+
+v10 union retrain probe:
+- Built `/private/tmp/ecml_online_prefix_enriched_v10_union_input.json` from
+  the v9 enriched dataset plus fresh v6/v9 positives from `4130..4149`. Input
+  rows: `72` total (`47` good, `6` neutral, `19` bad).
+- Trained v10 with the same listwise architecture and hyperparameters as v9.
+  Export:
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v10_union.pt`.
+- Offline audit got worse in the exact way we must avoid. At threshold `2.5`
+  it still accepts `5` good and `1` bad; at threshold `3.0` it accepts `4`
+  good and `1` bad. The high-scoring bad family is seed `3565`, where reward is
+  slightly positive (`+0.055556`) but Success is negative (`-0.166667`) and one
+  extra agent fails. The top bad prefix is `STOP_MOVING->MOVE_FORWARD` at time
+  `281`; longer prefixes from the same episode are also highly ranked.
+- Decision: reject v10 without online promotion testing. A simple union retrain
+  overfits the newly added positives and weakens the Success-loss boundary. The
+  next useful direction is a conservative dual-selector/ensemble or a stricter
+  loss/architecture change that explicitly separates reward-only gains from
+  Success-risk cases.
