@@ -4851,3 +4851,35 @@ Additional scene-axis mining after v4contrast:
   currently isolated. Do not weaken the deployed selector or add a broad
   stop-left heuristic for it. Continue mining targeted scene/topology windows
   until we have a larger contrast family, then retrain the selector.
+
+Scene-3 contrast expansion and v5 selector probe:
+- Fresh `3940..3979` on `scene_3` produced useful additional contrast:
+  baseline `0.776521 / 0.891667`, sequence `0.780659 / 0.895833`, deltas
+  `+0.004138` reward and `+0.004167` Success. Reward W/L/T `3/0/37`;
+  Success W/L/T `2/1/37`.
+- Changed seeds are `3948`, `3961`, `3971`, and `3979`. The important bad row
+  is `3948`: reward improves `+0.016348`, but Success drops `-0.166667`.
+  Its accepted prefix is two events:
+  `MOVE_FORWARD->MOVE_RIGHT` from v7 at time `131`, then
+  `STOP_MOVING->MOVE_RIGHT` from PPO3800 at time `235`. Positives are
+  `3961` (`STOP_MOVING->MOVE_FORWARD`, Success +1 train), `3971`
+  (`STOP_MOVING->MOVE_FORWARD`, Success +1 train), and `3979`
+  (`STOP_MOVING->MOVE_LEFT`, reward-only gain).
+- Converted these into
+  `/private/tmp/ecml_online_prefix_scene3_3940_3979_changed4.json`: `4` rows,
+  `3` good and `1` bad. Retrained v5 with both Scene-3 contrast files
+  (`3901,3903,3912,3913` and `3948,3961,3971,3979`) and exported
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v5_scene3contrast8.pt`.
+- v5 at the deployed `0.09` margin retains the key Scene-5 gains
+  (`3449`, `3592`, `3740`, `3750`, `3826`, `3867`) but still has the two
+  Scene-3 losses (`3912` reward-only and `3948` Success loss). Raising v5 to
+  margin `1.5` neutralizes the `3948` Success loss while keeping Scene-5 key
+  gains, but `3912` remains a small reward-only loss. Raising to `2.0` keeps
+  only `3901` on the Scene-3 contrast set and still leaves `3912`; raising to
+  `2.5` neutralizes Scene-3 but loses major Scene-5 gains (`3449`, `3592`,
+  `3826`) and keeps only `3740`, `3750`, and `3867`.
+- Decision: do not promote v5. It confirms that more diverse contrast data
+  helps with the Success-loss boundary (`3948` can be neutralized by a moderate
+  margin), but the selector still cannot separate small reward-only losses like
+  `3912` without sacrificing important gains. Keep the current v3 deployment
+  and continue mining larger scene/topology contrast families.
