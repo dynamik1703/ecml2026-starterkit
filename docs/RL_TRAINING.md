@@ -4927,3 +4927,37 @@ Automated online-prefix mining:
   next selector-retraining batch should combine these all-good multi-scene rows
   with the Scene-3 bad/good contrast rows, then validate on both known gain
   seeds and the bad seeds `3912`, `3948`, and `3988`.
+
+v6 online-prefix selector probe:
+- Trained a v6 listwise selector with the same hyperparameters as v3/v5, adding
+  the new Scene-3 and multi-scene prefix files to
+  `/private/tmp/ecml_online_sequence_prefix_rows_hard26_fresh70_v2delta.json`.
+  Training input after synthetic baseline candidates: `81` rows, with
+  non-baseline labels `34` good, `6` neutral, and `17` bad. Export:
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v6_scene3_multiscene.pt`.
+- Offline selector audit is best around margin `1.25`: accepts `5` good and
+  `0` bad rows; margin `1.0` accepts `5` good and leaks `1` bad; margin `0.0`
+  is unsafe (`6` bad leaks, including Success-negative accepts). This offline
+  audit is directional only; online rollout validation is decisive.
+- Online targeted validation at margin `0.09` is not deployable: it preserves
+  the known bad seeds `3912`, `3948`, and `3988` as neutral and recovers several
+  good rows, but on fresh holdout `4010..4029 scene_3` it introduces a
+  Success-loss on seed `4019` (`reward_delta=+0.098080`,
+  `success_delta=-0.166667`). Do not run v6 at the old deployed `0.09` margin.
+- Margin `1.0` is the current best v6 operating point. On targeted Scene-3
+  seeds `3901,3903,3912,3913,3948,3961,3971,3979,3988,3996,4007`, it is
+  loss-free and improves two Success rows: reward W/L/T `2/0/9`, Success W/L/T
+  `2/0/9`, mean deltas `+0.015392 / +0.030303`. The hard bad seeds
+  `3912`, `3948`, and `3988` are neutral.
+- On fresh holdout `4010..4029 scene_3`, margin `1.0` blocks the fresh bad
+  seed `4019` while keeping the good `4027` Success rescue. Aggregate:
+  baseline `0.838654 / 0.925000`, v6 `0.839973 / 0.933333`, deltas
+  `+0.001319 / +0.008333`, reward W/L/T `1/0/19`, Success W/L/T `1/0/19`.
+- On Scene-5 key gains `3449,3592,3740,3750,3826,3867`, margin `1.0` keeps the
+  large known improvements: deltas `+0.252671 / +0.277778`, reward W/L/T
+  `5/0/1`, Success W/L/T `4/0/2`.
+- Margin `1.0` is still not promoted. It loses some newly mined reward-only
+  rows (`4003`, `4001`) compared with margin `0.09`, and it has only one fresh
+  20-seed holdout so far. Next validation should run v6 margin `1.0` on at
+  least two broader fresh windows, preferably one Scene-3 window and one
+  multi-scene window, before considering replacing the packaged v3 selector.
