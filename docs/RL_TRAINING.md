@@ -5165,3 +5165,22 @@ v9 enriched selector probe:
 - Decision: keep v6 as the packaged default for now. v9 is the best current
   candidate for a more aggressive rescue selector, but it needs fresh holdout
   validation before promotion because the offline audit still shows bad leaks.
+
+v9 fresh holdout vs promoted v6:
+- Fresh multi-scene block `4130..4149`, scenes `1..4`, final-prefix only:
+  - v9 margin `0.75`: `80` comparisons, `4` changed rows, all good. Reward
+    W/L/T `4/0/76`, Success W/L/T `1/0/79`, aggregate deltas `+0.006143`
+    reward and `+0.002083` Success.
+  - Promoted v6 default: `80` comparisons, `3` changed rows, all good. Reward
+    W/L/T `3/0/77`, Success W/L/T `1/0/79`, aggregate deltas `+0.005977`
+    reward and `+0.002083` Success.
+- Seed-level comparison:
+  - Shared gains: `4144 scene_1`, `4141 scene_3`.
+  - v9-only gains: `4141 scene_2`, `4143 scene_4`.
+  - v6-only gain missed by v9: `4132 scene_3`.
+- Interpretation: v9 generalizes better than expected on this fresh block and
+  is slightly ahead in aggregate reward, but it is not a strict replacement for
+  v6. The models are complementary. The next high-value direction is either a
+  dual-selector/ensemble that preserves v6 gains while allowing vetted v9 gains,
+  or a v10 model trained explicitly on the union of v6/v9 positive cases plus
+  the hard negatives that prevented v7/v8 promotion.
