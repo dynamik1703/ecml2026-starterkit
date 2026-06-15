@@ -5032,3 +5032,32 @@ v6 promotion:
   is conservative on broad random windows. Further score gains should come from
   targeted failure/partial-success mining rather than more blind random
   validation windows.
+
+Low-margin proposal mining after v6 promotion:
+- Selected failure/partial seeds from the neutral `4110..4129` multi-scene
+  holdout. There are `28` failure/partial rows across `80` comparisons, with
+  the hardest examples including `4121 scene_1` (`3` failed agents),
+  `4117 scene_3`, `4125 scene_3`, `4115 scene_1`, `4126 scene_2`, and
+  `4111 scene_2`.
+- Re-ran selected hard seeds with `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD=0.09`
+  as a proposal miner only, not as the promoted default. Scene-1 top failures
+  remained neutral (`0/0/5`, no prefix rows).
+- Scene-3 top failures produced two good reward-only prefix rows and no losses:
+  seed `4118` (`STOP_MOVING->MOVE_LEFT`, reward `+0.218790`) and seed `4128`
+  (`STOP_MOVING->MOVE_FORWARD`, reward `+0.166667`). Aggregate over the five
+  Scene-3 hard seeds: `+0.077091 / 0.000000`, reward W/L/T `2/0/3`, Success
+  W/L/T `0/0/5`.
+- Scene-2/4 hard seeds produced two good prefix rows, both in `scene_2`:
+  seed `4110` (`STOP_MOVING->MOVE_FORWARD`, reward `+0.074140`) and seed
+  `4126` (`STOP_MOVING->MOVE_RIGHT`, reward `+0.223153`, Success `+0.333333`).
+  Aggregate over twelve Scene-2/4 checks: `+0.024774 / +0.027778`, reward W/L/T
+  `2/0/10`, Success W/L/T `1/0/11`.
+- Mined known low-margin bad seed `4019 scene_3` into
+  `/private/tmp/ecml_online_prefix_lowmargin_scene3_4019_bad.json`: one bad row,
+  `STOP_MOVING->MOVE_FORWARD` at time `69`, reward `+0.098080`, Success
+  `-0.166667`, failed agents `+1`.
+- Implication: the next selector experiment should not simply lower the
+  promoted v6 threshold. Instead, train a v7 probe with the new low-margin good
+  rows plus the explicit `4019` hard negative, then test whether v7 can recover
+  those extra gains at a lower operating threshold without reopening the known
+  Success-loss family.
