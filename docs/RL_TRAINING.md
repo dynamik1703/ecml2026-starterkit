@@ -5247,3 +5247,8 @@ Aux packaging/default smoke:
   aggregate deltas `+0.045406` reward and `0` Success. Both accepted rows have
   `selector_source=aux_listwise`, confirming the packaged default uses the
   auxiliary model as intended.
+- Full packaged default holdout on `4150..4169`, scenes `1..4`: `80`
+  comparisons, `2` changed rows, both good. Reward W/L/T `2/0/78`, Success
+  W/L/T `0/0/80`, aggregate deltas `+0.002270` reward and `0` Success. This
+  matches the pre-packaging aux result while using the default configuration
+  with no env vars.
