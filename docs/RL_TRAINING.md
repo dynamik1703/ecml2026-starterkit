@@ -4754,3 +4754,28 @@ Low-conflict first-detour gate promotion:
   `5/0/91`, Success W/L/T `2/0/94`.
 - No-env smoke after promotion on seeds `3485,3581,3715,3740,3750` confirms
   the promoted default is active: reward W/L/T `5/0/0`, Success W/L/T `4/0/1`.
+
+Corrected fresh OOD validation after the low-conflict first-detour promotion:
+- Important evaluation correction: when comparing `SequenceSuccessPolicy` to
+  its deployable baseline, the baseline must be `RerankPolicy` loaded with
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` and
+  `submission.my_observation_builder.MyActionConflictObservationBuilder`.
+  A first `3800..3899` scoreboard accidentally compared against the default
+  `RerankPolicy`/default observation setup and produced a large false
+  regression. With `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD=999`, the sequence
+  trace accepted zero events on seed `3810` but still differed under the wrong
+  comparison, confirming the mismatch was the base/observation setup rather
+  than a sequence-gate decision.
+- Corrected probe on seeds `3800,3810,3819,3449,3592,3740,3750` versus
+  `RerankPolicy(v4b)` with Action-Conflict observations is loss-free and
+  recovers the known gains: reward W/L/T `4/0/3`, Success W/L/T `4/0/3`,
+  mean deltas `+0.203079` reward and `+0.238095` Success.
+- Corrected fresh `3800..3899` scoreboard is also loss-free:
+  baseline `0.864193 / 0.936667`, sequence `0.865494 / 0.936667`, deltas
+  `+0.001301` reward and `0.000000` Success. Reward W/L/T `2/0/98`;
+  Success W/L/T `0/0/100`. The changed seeds are reward-only gains `3826`
+  (`+0.094478`) and `3867` (`+0.035639`).
+- A broader `line_length=3` stress run on `3800..3849` was started but proved
+  too slow for the interactive loop and was stopped. Future topology-axis
+  validation should use smaller/failure-focused blocks first, then scale only
+  if runtime is acceptable.
