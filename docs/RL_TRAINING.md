@@ -4810,3 +4810,32 @@ Profiled scoreboard and scene-axis stress:
   `0` good, `0` neutral, `1` bad. The row is
   `3912 scene_3 line_length=2 bad 1@81:a0:STOP_MOVING->MOVE_LEFT`; include it
   in the next online-prefix selector retraining batch.
+
+Scene-3 online-prefix retraining probe:
+- Retrained the v3 listwise selector with the same hyperparameters plus
+  `/private/tmp/ecml_online_prefix_scene3_3912.json`, exporting
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v4_scene3.pt`.
+  The single negative lowered the online `3912` margin from `2.437` in v3 to
+  `1.531`, but did not block the event at the deployed `0.09` margin.
+- A stronger x10 duplicate-weight version exported to
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v4_scene3x10.pt`
+  lowered the same online margin further to `0.962`, but still did not block
+  `3912`. It retained the key Scene-5 gains, but this is not deployable because
+  it does not fix the target hard-negative.
+- Built a better local contrast set from changed `scene_3` seeds
+  `3901,3903,3912,3913`, converted to
+  `/private/tmp/ecml_online_prefix_scene3_changed4.json`: `4` rows, `3` good
+  and `1` bad. The good rows are reward-only gains on `3901`, `3903`, and
+  `3913`; the bad row is `3912`.
+- Retrained v4contrast with this contrast set and exported
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v4_scene3contrast.pt`.
+  At the deployed `0.09` margin it preserves the known key Scene-5 gains
+  (`3449`, `3592`, `3740`, `3750`, `3826`, `3867`) and preserves the net
+  positive Scene-3 changed-family result, but still accepts the `3912` small
+  reward-only loss. Raising its margin to `3.5` neutralizes `3912`, but also
+  neutralizes all tested Scene-3 and Scene-5 gains. Do not promote v4/v4contrast.
+- Assessment: the selector is not learning this OOD reward-only boundary from
+  one tiny scene family. The next data step should mine more diverse
+  scene/topology online-prefix contrast rows before another selector export,
+  not add a hand-written `STOP_MOVING->MOVE_LEFT` distance guard, because known
+  good stop-left rescues also include large or infinite distance deltas.
