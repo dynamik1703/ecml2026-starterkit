@@ -5018,3 +5018,8 @@ v6 promotion:
   - Scene-5 key seeds `3449,3592,3740,3750,3826,3867`: sequence
     `0.686580 / 0.777778`, rerank `0.433909 / 0.500000`, deltas
     `+0.252671 / +0.277778`, reward W/L/T `5/0/1`, Success W/L/T `4/0/2`.
+- Docker build could not be run in the current local environment because
+  `docker`, `podman`, and `colima` are not available on PATH. Local
+  submission-instantiation smoke passed: `SequenceSuccessPolicy` loads the v6
+  checkpoint from `submission/models`, `listwise_loaded=True`, margin `1.0`,
+  selector mode `listwise`, `max_accepted_events=1`, and `4` candidate policies.
