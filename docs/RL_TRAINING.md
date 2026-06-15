@@ -5092,3 +5092,23 @@ v7 low-margin selector probe:
 - Decision: do not promote v7. Keep v6 as packaged default. The useful output
   from v7 is the new contrast set (`4126` good, `4117` good, `4112` bad), which
   can feed a v8 hard-negative probe.
+
+v8 hard-negative probe:
+- Trained v8 by adding the v7 margin-`0.75` multi-scene rows to the v7 training
+  set, so the model sees `4126` good, `4117` good, and `4112` bad from the same
+  validation block. Export:
+  `/private/tmp/ecml_multicandidate_listwise_ranker_online_prefix_v8_hardneg4112.pt`.
+- Offline audit is worse than v7 and much worse than promoted v6. Even high
+  thresholds accept bad rows: threshold `2.0` accepts `2` good and `3` bad,
+  threshold `2.5` accepts `1` good and `3` bad, and threshold `3.0` still
+  accepts `3` bad and no good. Lower thresholds leak more bad rows.
+- Bad accepted rows include old hard-negative families, not only the new
+  `4112`: `3560` reward loss scores very high, `3518` Success loss is accepted
+  at low thresholds, and `4019` Success loss receives a high LCB (`1.714`) and
+  would leak through thresholds up to at least `1.5`. This means v8 degraded the
+  learned risk boundary rather than fixing it.
+- Decision: reject v8 without broad online validation. Keep promoted v6 as the
+  packaged default. The next useful direction is not another small ranker
+  retrain with duplicated hard negatives; we need either richer features for
+  STOP trap separation or a stronger policy generator/training objective that
+  can produce complete rescues rather than isolated detours.
