@@ -5112,3 +5112,24 @@ v8 hard-negative probe:
   retrain with duplicated hard negatives; we need either richer features for
   STOP trap separation or a stronger policy generator/training objective that
   can produce complete rescues rather than isolated detours.
+
+STOP-trap feature diagnosis:
+- Aggregated current prefix rows show a broad pattern: good STOP-rescues usually
+  have positive slack and fewer prefix-cell intersections, while many bad
+  STOP-traps have negative slack, later event times, and more prefix-cell
+  intersections. For example, `STOP->MOVE_FORWARD` good rows average slack
+  about `43`, while bad rows average about `-78`; `STOP->MOVE_LEFT` good rows
+  average slack about `48`, while bad rows average about `-83`.
+- This pattern is not sufficient for a simple guard. The new `4112 scene_3` bad
+  has positive slack (`28`), zero prefix-cell intersections, and no direct
+  conflict signal; its main suspicious feature is a large distance delta
+  (`155`) on `STOP->MOVE_RIGHT`.
+- A generic `STOP->MOVE_RIGHT` distance-delta guard is also unsafe: good and bad
+  rows overlap heavily. Good rows include `3913` (`203`), `4126` (`391`), and
+  `4117` (`153`), while bad rows include `3948` (`153`) and `4112` (`155`).
+  Similar overlap exists for `STOP->MOVE_LEFT`; a strict threshold would remove
+  useful rescues such as `4118`.
+- Conclusion: more hand-written scalar guards are unlikely to be robust. The
+  next improvement should add richer temporal/route-context features to the
+  selector, or move toward a policy/planner that evaluates complete rescue
+  sequences rather than accepting isolated high-confidence detours.
