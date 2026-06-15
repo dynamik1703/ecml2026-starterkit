@@ -4651,3 +4651,30 @@ Incremental prefix mining:
   (`focus24`, `3720..3729`, `3730..3739`) with strong Success-loss penalties,
   then only consider deployment if it selects `3505/3603/3734`-style positives
   without accepting the STOP trap families.
+
+Combined v8b selector check:
+- Combined v8b prefix rows from `focus24`, `3720..3729`, and `3730..3739`:
+  `112` candidate rows before adding the baseline candidate, with `6` good,
+  `66` neutral, and `40` bad. After adding baseline candidates, the selector
+  training set has `148` rows.
+- Trained the listwise sequence selector with stronger loss aversion
+  (`success_weight=16`, `success_loss_penalty=30`, `failure_penalty=12`,
+  `reward_loss_penalty=3`). This is still not deployable. At thresholds
+  `-1.0..0.2`, it accepts `4` good rows but also `8` bad rows, aggregate
+  `-0.559691` reward and `+1.0` Success. At higher thresholds it gets worse:
+  threshold `0.5` accepts `6` bad and no good, and threshold `1.5` still
+  accepts one bad `3592` prefix.
+- Accepted bad rows are mostly STOP trap families (`3592`, `3677`, `3595`,
+  `3485`) and the prefix-length trap on `3505`, where prefix length `5` is
+  good but prefix lengths `2..4` are bad. The model therefore has not learned
+  a reliable notion of "complete rescue sequence".
+- Simple diagnostic filters are also insufficient. `no STOP` gives `4` good,
+  `47` neutral, and `3` bad rows with `+0.833333` Success but still negative
+  reward sum (`-0.037775`) because it keeps the bad partial `3505` prefixes.
+  `has STOP` is strongly unsafe: `2` good, `19` neutral, and `37` bad rows,
+  with `-4.011663` reward and `-0.833333` Success.
+- Current decision: do not deploy a v8b selector. The useful learning signal is
+  now clear: we need either a sequence-completion objective that distinguishes
+  partial from complete rescues, or a STOP-specific observation/reward setup
+  that separates productive waiting (`3603`) from STOP traps. More listwise
+  threshold tuning is low expected value.
