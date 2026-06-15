@@ -4912,3 +4912,18 @@ Automated online-prefix mining:
   confidence/margin is not enough: both good and bad cases include confident
   detour-like actions, so the selector needs more outcome-labelled online
   prefixes across scenes/topologies before another deployable export.
+- Fresh multi-scene mining on seeds `4000..4009`, line length `2`, scenes
+  `scene_1..scene_4`, produced `40` compare rows and `3` final-prefix rows, all
+  good. Aggregate result: baseline `0.809804 / 0.870833`, sequence
+  `0.819821 / 0.870833`, deltas `+0.010017 / 0.000000`, reward W/L/T
+  `3/0/37`, Success W/L/T `0/0/40`.
+- Per-scene breakdown: `scene_1` was neutral; `scene_2` had seed `4003`
+  (`STOP_MOVING->MOVE_FORWARD`, reward `+0.089031`); `scene_3` had seed `4007`
+  (`STOP_MOVING->MOVE_LEFT`, reward `+0.244444`); `scene_4` had seed `4001`
+  (`STOP_MOVING->MOVE_LEFT`, then `MOVE_LEFT->MOVE_FORWARD`, reward
+  `+0.067204`). All three kept Success unchanged.
+- Implication: the online Sequence candidate still has useful reward-improving
+  actions across multiple scenes, not only the earlier Scene-5 key seeds. The
+  next selector-retraining batch should combine these all-good multi-scene rows
+  with the Scene-3 bad/good contrast rows, then validate on both known gain
+  seeds and the bad seeds `3912`, `3948`, and `3988`.
