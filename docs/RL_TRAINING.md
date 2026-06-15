@@ -5272,3 +5272,13 @@ Aux trigger tightening after broad holdout:
   W/L/T `1/0/79`, aggregate deltas `0` reward and `+0.002083` Success. The
   changed episode is `4195 scene_3`, with two primary-v6
   `STOP_MOVING->MOVE_FORWARD` accepts; no auxiliary loss family appeared.
+- Additional fresh tightened-default holdout on `4210..4229`, scenes `1..4`:
+  `80` comparisons, `1` changed row, good. Reward W/L/T `0/0/80`, Success
+  W/L/T `1/0/79`, aggregate deltas `0` reward and `+0.002083` Success. The
+  changed episode is `4216 scene_3`, a primary-v6
+  `STOP_MOVING->MOVE_FORWARD` accept; no auxiliary loss family appeared.
+- Interim read: after removing `STOP_MOVING->MOVE_LEFT`, the tightened default
+  is clean on the follow-up blocks tested so far, but the marginal auxiliary
+  contribution is sparse. The auxiliary selector is still useful for known
+  `STOP_MOVING->MOVE_RIGHT` / `MOVE_FORWARD->MOVE_RIGHT` gains, but not yet a
+  broad RL-quality jump.
