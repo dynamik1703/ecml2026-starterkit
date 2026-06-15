@@ -5203,3 +5203,27 @@ v10 union retrain probe:
   next useful direction is a conservative dual-selector/ensemble or a stricter
   loss/architecture change that explicitly separates reward-only gains from
   Success-risk cases.
+
+v6 primary + v9 auxiliary listwise probe:
+- Added optional `ECML_SEQUENCE_AUX_LISTWISE_MODEL` support. Default behavior
+  is unchanged: promoted v6 remains the only packaged selector unless this env
+  var is set. With aux enabled, v6 scores first; if v6 rejects, the auxiliary
+  selector scores the same candidate prefix and all existing safety guards are
+  applied again.
+- Tested with v6 default as primary and v9 enriched at default aux margin
+  `0.75`:
+  - Fresh block `4130..4149`, scenes `1..4`: `80` comparisons, `5` changed
+    rows, all good. Reward W/L/T `5/0/75`, Success W/L/T `1/0/79`, aggregate
+    deltas `+0.010310` reward and `+0.002083` Success. This preserves the v6
+    gains and adds the v9-only gains from the same block.
+  - Prior contrast block `4110..4129`, scenes `1..4`: `80` comparisons, `1`
+    changed row, all good. Reward W/L/T `1/0/79`, Success W/L/T `1/0/79`,
+    aggregate deltas `+0.002789` reward and `+0.004167` Success. The changed
+    row is `4126 scene_2` (`STOP_MOVING->MOVE_RIGHT`, reward `+0.223153`,
+    Success `+0.333333`, failed agents `-2`).
+- Interpretation: the conservative ensemble is currently the strongest
+  short-term candidate. It improves over both v6 and v9 solo on the fresh block
+  and stays clean on the known contrast block. Remaining concerns are runtime
+  cost from evaluating a second model and the limited number of validated
+  windows; both need broader validation before packaging v9 as an auxiliary
+  model.

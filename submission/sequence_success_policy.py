@@ -431,6 +431,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             os.environ.get("ECML_SEQUENCE_LISTWISE_MODEL")
             or DEFAULT_LISTWISE_MODEL_PATH
         )
+        aux_listwise_model_path = os.environ.get(
+            "ECML_SEQUENCE_AUX_LISTWISE_MODEL",
+            "",
+        ).strip()
         candidate_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
             or ",".join(DEFAULT_CANDIDATE_CHECKPOINT_PATHS)
@@ -457,6 +461,15 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.listwise_scorer = (
             self._load_listwise_scorer(listwise_model_path)
             if Path(listwise_model_path).exists()
+            else None
+        )
+        self.aux_listwise_scorer = (
+            self._load_listwise_scorer(
+                aux_listwise_model_path,
+                env_prefix="ECML_SEQUENCE_AUX_LISTWISE",
+                default_margin_threshold=0.75,
+            )
+            if aux_listwise_model_path and Path(aux_listwise_model_path).exists()
             else None
         )
         self.selector_mode = os.environ.get(
@@ -674,19 +687,24 @@ class SequenceSuccessPolicy(RerankPolicy):
             ),
         )
 
-    def _load_listwise_scorer(self, listwise_model_path: str) -> ListwiseSequenceScorer:
+    def _load_listwise_scorer(
+        self,
+        listwise_model_path: str,
+        env_prefix: str = "ECML_SEQUENCE_LISTWISE",
+        default_margin_threshold: float = 1.0,
+    ) -> ListwiseSequenceScorer:
         return ListwiseSequenceScorer(
             checkpoint_path=listwise_model_path,
             margin_threshold=self._env_float(
-                "ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD",
-                1.0,
+                f"{env_prefix}_MARGIN_THRESHOLD",
+                default_margin_threshold,
             ),
             score_std_coef=self._env_float(
-                "ECML_SEQUENCE_LISTWISE_SCORE_STD_COEF",
+                f"{env_prefix}_SCORE_STD_COEF",
                 0.5,
             ),
             baseline_std_coef=self._env_float(
-                "ECML_SEQUENCE_LISTWISE_BASELINE_STD_COEF",
+                f"{env_prefix}_BASELINE_STD_COEF",
                 0.5,
             ),
         )
@@ -725,7 +743,11 @@ class SequenceSuccessPolicy(RerankPolicy):
         baseline_actions = super().act_many(handles, observations, **kwargs)
         if (
             not self.candidate_policies
-            or (self.sequence_scorer is None and self.listwise_scorer is None)
+            or (
+                self.sequence_scorer is None
+                and self.listwise_scorer is None
+                and self.aux_listwise_scorer is None
+            )
         ):
             return baseline_actions
         if (
@@ -933,6 +955,8 @@ class SequenceSuccessPolicy(RerankPolicy):
                 candidate_action=candidate_action,
                 extra_candidate=extra_candidate,
             )
+            if "selector_source" in scores:
+                detail["selector_source"] = str(scores["selector_source"])
         except Exception:
             return False
 
@@ -952,6 +976,107 @@ class SequenceSuccessPolicy(RerankPolicy):
             self._accepted_event_details.append(detail)
         return bool(accepted)
 
+    def _apply_candidate_guards(
+        self,
+        accepted: bool,
+        scores: dict[str, float],
+        detail: dict[str, Any],
+        baseline_action: int,
+        candidate_action: int,
+    ) -> tuple[bool, dict[str, float]]:
+        if accepted and self._low_value_same_edge_candidate(detail, scores):
+            accepted = False
+            scores["reject_reason"] = "same_edge_low_value"
+        if accepted and self._low_value_right_detour(
+            baseline_action,
+            candidate_action,
+            scores,
+        ):
+            accepted = False
+            scores["reject_reason"] = "right_detour_low_value"
+        if accepted and self._low_value_left_detour(
+            baseline_action,
+            candidate_action,
+            scores,
+        ):
+            accepted = False
+            scores["reject_reason"] = "left_detour_low_value"
+        if accepted and self._low_confidence_left_to_forward(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "left_to_forward_low_confidence"
+        if accepted and self._low_confidence_stop_to_left(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "stop_to_left_low_confidence"
+        if accepted and self._low_confidence_forward_to_left(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "forward_to_left_low_confidence"
+        if accepted and self._low_confidence_stop_to_forward(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "stop_to_forward_low_confidence"
+        if accepted and self._low_confidence_stop_to_forward_without_head_on(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = (
+                "stop_to_forward_nonfinite_no_head_on_low_confidence"
+            )
+        if accepted and self._bad_stop_to_forward_distance_delta(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "stop_to_forward_bad_distance_delta"
+        if accepted and self._bad_stop_to_forward_slack(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "stop_to_forward_bad_slack"
+        if accepted and self._low_conflict_first_detour(
+            baseline_action,
+            candidate_action,
+            detail,
+            scores,
+        ):
+            accepted = False
+            scores["reject_reason"] = "first_detour_low_prefix_conflict"
+        if accepted and self._crowded_right_detour(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "right_detour_crowded"
+        if accepted and self._low_conflict_right_detour(
+            baseline_action,
+            candidate_action,
+            detail,
+            scores,
+        ):
+            accepted = False
+            scores["reject_reason"] = "right_detour_low_conflict"
+        return accepted, scores
+
     def _score_and_guard_candidate(
         self,
         aggregate: dict[str, Any],
@@ -961,106 +1086,43 @@ class SequenceSuccessPolicy(RerankPolicy):
         extra_candidate: bool,
     ) -> tuple[bool, dict[str, float]]:
         if (
-            self.listwise_scorer is not None
+            (self.listwise_scorer is not None or self.aux_listwise_scorer is not None)
             and self.selector_mode in {"listwise", "listwise_primary"}
         ):
             score_row = dict(aggregate)
             score_row["prefix_len"] = len(self._accepted_event_details) + 1
             score_row["forced_applied"] = len(self._accepted_event_details) + 1
             score_row["event_details"] = [*self._accepted_event_details, detail]
-            accepted, scores = self.listwise_scorer.score(score_row)
-            if accepted and self._low_value_same_edge_candidate(detail, scores):
-                accepted = False
-                scores["reject_reason"] = "same_edge_low_value"
-            if accepted and self._low_value_right_detour(
-                baseline_action,
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_low_value"
-            if accepted and self._low_value_left_detour(
-                baseline_action,
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "left_detour_low_value"
-            if accepted and self._low_confidence_left_to_forward(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "left_to_forward_low_confidence"
-            if accepted and self._low_confidence_stop_to_left(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_left_low_confidence"
-            if accepted and self._low_confidence_forward_to_left(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "forward_to_left_low_confidence"
-            if accepted and self._low_confidence_stop_to_forward(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_low_confidence"
-            if accepted and self._low_confidence_stop_to_forward_without_head_on(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = (
-                    "stop_to_forward_nonfinite_no_head_on_low_confidence"
+            scores: dict[str, float] = {}
+            if self.listwise_scorer is not None:
+                accepted, scores = self.listwise_scorer.score(score_row)
+                scores["selector_source"] = "listwise"
+                accepted, scores = self._apply_candidate_guards(
+                    accepted=accepted,
+                    scores=scores,
+                    detail=detail,
+                    baseline_action=baseline_action,
+                    candidate_action=candidate_action,
                 )
-            if accepted and self._bad_stop_to_forward_distance_delta(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_bad_distance_delta"
-            if accepted and self._bad_stop_to_forward_slack(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_bad_slack"
-            if accepted and self._low_conflict_first_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "first_detour_low_prefix_conflict"
-            if accepted and self._crowded_right_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_crowded"
-            if accepted and self._low_conflict_right_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_low_conflict"
-            return accepted, scores
+                if accepted:
+                    return True, scores
+
+            if self.aux_listwise_scorer is not None:
+                aux_accepted, aux_scores = self.aux_listwise_scorer.score(score_row)
+                aux_scores["selector_source"] = "aux_listwise"
+                aux_accepted, aux_scores = self._apply_candidate_guards(
+                    accepted=aux_accepted,
+                    scores=aux_scores,
+                    detail=detail,
+                    baseline_action=baseline_action,
+                    candidate_action=candidate_action,
+                )
+                if aux_accepted:
+                    return True, aux_scores
+                if not scores:
+                    return False, aux_scores
+
+            return False, scores
 
         if self.sequence_scorer is None:
             return False, {}
@@ -1079,98 +1141,14 @@ class SequenceSuccessPolicy(RerankPolicy):
                     self.extra_candidate_right_detour_low_conflict_min_value
                 )
             accepted, scores = self.sequence_scorer.score(aggregate)
-            if accepted and self._low_value_same_edge_candidate(detail, scores):
-                accepted = False
-                scores["reject_reason"] = "same_edge_low_value"
-            if accepted and self._low_value_right_detour(
-                baseline_action,
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_low_value"
-            if accepted and self._low_value_left_detour(
-                baseline_action,
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "left_detour_low_value"
-            if accepted and self._low_confidence_left_to_forward(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "left_to_forward_low_confidence"
-            if accepted and self._low_confidence_stop_to_left(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_left_low_confidence"
-            if accepted and self._low_confidence_forward_to_left(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "forward_to_left_low_confidence"
-            if accepted and self._low_confidence_stop_to_forward(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_low_confidence"
-            if accepted and self._low_confidence_stop_to_forward_without_head_on(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = (
-                    "stop_to_forward_nonfinite_no_head_on_low_confidence"
-                )
-            if accepted and self._bad_stop_to_forward_distance_delta(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_bad_distance_delta"
-            if accepted and self._bad_stop_to_forward_slack(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "stop_to_forward_bad_slack"
-            if accepted and self._low_conflict_first_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "first_detour_low_prefix_conflict"
-            if accepted and self._crowded_right_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_crowded"
-            if accepted and self._low_conflict_right_detour(
-                baseline_action,
-                candidate_action,
-                detail,
-                scores,
-            ):
-                accepted = False
-                scores["reject_reason"] = "right_detour_low_conflict"
-            return accepted, scores
+            scores["selector_source"] = "sequence"
+            return self._apply_candidate_guards(
+                accepted=accepted,
+                scores=scores,
+                detail=detail,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+            )
         finally:
             self.sequence_scorer.min_success_probability = old_min_success
             self.right_detour_min_value = old_right_value
@@ -1515,6 +1493,8 @@ class SequenceSuccessPolicy(RerankPolicy):
         }
         if "reject_reason" in scores:
             row["reject_reason"] = str(scores["reject_reason"])
+        if "selector_source" in scores:
+            row["selector_source"] = str(scores["selector_source"])
         for key in (
             "slack",
             "distance",
