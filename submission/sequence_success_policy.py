@@ -534,6 +534,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
             1.0,
         )
+        self.first_detour_low_conflict_min_margin = self._env_float(
+            "ECML_SEQUENCE_FIRST_DETOUR_LOW_CONFLICT_MIN_LISTWISE_MARGIN",
+            0.09,
+        )
         self.right_detour_max_obs_intersections = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_MAX_OBS_INTERSECTIONS",
             0.5,
@@ -1035,6 +1039,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 baseline_action,
                 candidate_action,
                 detail,
+                scores,
             ):
                 accepted = False
                 scores["reject_reason"] = "first_detour_low_prefix_conflict"
@@ -1144,6 +1149,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 baseline_action,
                 candidate_action,
                 detail,
+                scores,
             ):
                 accepted = False
                 scores["reject_reason"] = "first_detour_low_prefix_conflict"
@@ -1382,6 +1388,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         baseline_action: int,
         candidate_action: int,
         detail: dict[str, Any],
+        scores: dict[str, float],
     ) -> bool:
         if self.first_detour_min_prefix_conflicts <= 0:
             return False
@@ -1401,7 +1408,18 @@ class SequenceSuccessPolicy(RerankPolicy):
                 float(detail.get("candidate_prefix_head_on_edge_conflicts", 0.0)),
                 float(detail.get("candidate_prefix_same_edge_conflicts", 0.0)),
             )
+            margin = float(
+                scores.get(
+                    "listwise_margin",
+                    scores.get("value_lcb", float("-inf")),
+                )
+            )
         except Exception:
+            return False
+        if (
+            prefix_conflicts < self.first_detour_min_prefix_conflicts
+            and margin >= self.first_detour_low_conflict_min_margin
+        ):
             return False
         return prefix_conflicts < self.first_detour_min_prefix_conflicts
 

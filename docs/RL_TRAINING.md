@@ -4718,3 +4718,39 @@ Sequence-completion PPO/BC probe v9:
   small PPO update; it is a gate/selector feature update that can evaluate a
   full proposed completion prefix, especially low-conflict right-detour
   sequences, while preserving the STOP-trap vetoes.
+
+Low-conflict first-detour gate promotion:
+- Added `ECML_SEQUENCE_FIRST_DETOUR_LOW_CONFLICT_MIN_LISTWISE_MARGIN`, promoted
+  default `0.09`. The old first-detour guard still blocks low-conflict first
+  detours, but now lets them through when the listwise margin is high enough.
+  This is more targeted than setting
+  `ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS=0`, and preserves the
+  existing score/risk guards.
+- v9 is not promoted. In the focused Sequence+v9 test, v9 produced `47`
+  candidate rows but `0` accepted events under the default gate. With the
+  first-detour guard disabled, v9 accepted only `2` events and actually removed
+  the existing `3485` reward gain. The useful improvement comes from the
+  existing candidate family once low-conflict high-margin first detours are
+  allowed.
+- Focus/OOD 44-seed check (`3449..3715` focus plus `3720..3739`) versus v4b
+  Rerank after the margin gate: baseline `0.681529 / 0.712121`, sequence
+  `0.712871 / 0.738636`, deltas `+0.031342` reward and `+0.026515` Success.
+  Reward W/L/T `8/0/36`; Success W/L/T `5/0/39`. New Success gains include
+  `3581`, `3715`, and `3737`; known gains (`3449`, `3592`) remain.
+- Fresh `3740..3799` is also loss-free and strongly positive: baseline
+  `0.870034 / 0.911111`, sequence `0.884665 / 0.927778`, deltas `+0.014631`
+  reward and `+0.016667` Success. Reward W/L/T `4/0/56`; Success W/L/T
+  `2/0/58`. Largest gains are `3750` (`+0.380611`, `+0.5` Success) and
+  `3740` (`+0.344484`, `+0.5` Success).
+- Fresh `3620..3719` remains clean and improves over the previous guarded
+  default: baseline `0.870275 / 0.926667`, sequence `0.872243 / 0.928333`,
+  deltas `+0.001968` reward and `+0.001667` Success. Reward W/L/T `3/0/97`;
+  Success W/L/T `1/0/99`.
+- Fresh `3570..3619` improves too: baseline `0.849498 / 0.923333`, sequence
+  `0.864409 / 0.930000`, deltas `+0.014911` reward and `+0.006667` Success.
+  Reward W/L/T `6/0/44`; Success W/L/T `2/0/48`.
+- The 96-seed hard/holdout suite is unchanged and still loss-free versus v4b
+  Rerank: deltas `+0.009821` reward and `+0.006944` Success, Reward W/L/T
+  `5/0/91`, Success W/L/T `2/0/94`.
+- No-env smoke after promotion on seeds `3485,3581,3715,3740,3750` confirms
+  the promoted default is active: reward W/L/T `5/0/0`, Success W/L/T `4/0/1`.
