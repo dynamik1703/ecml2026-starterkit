@@ -505,7 +505,6 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.aux_listwise_transitions = self._env_transition_set(
             "ECML_SEQUENCE_AUX_LISTWISE_TRANSITIONS",
             default=(
-                "STOP_MOVING->MOVE_LEFT,"
                 "STOP_MOVING->MOVE_RIGHT,"
                 "MOVE_FORWARD->MOVE_RIGHT"
             ),

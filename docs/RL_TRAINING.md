@@ -5252,3 +5252,18 @@ Aux packaging/default smoke:
   W/L/T `0/0/80`, aggregate deltas `+0.002270` reward and `0` Success. This
   matches the pre-packaging aux result while using the default configuration
   with no env vars.
+
+Aux trigger tightening after broad holdout:
+- Wider default holdout on `4170..4189`, scenes `1..4`, with aux transitions
+  including `STOP_MOVING->MOVE_LEFT`, exposed the risk: `80` comparisons, `6`
+  changed rows (`3` good, `3` bad), Reward W/L/T `4/2/74`, Success W/L/T
+  `1/2/77`. All bad rows came from `aux_listwise` on
+  `STOP_MOVING->MOVE_LEFT`; two of them lost Success.
+- Removed `STOP_MOVING->MOVE_LEFT` from the default aux transition set. The
+  default aux selector now only triggers on `STOP_MOVING->MOVE_RIGHT` and
+  `MOVE_FORWARD->MOVE_RIGHT`.
+- Retest on the same `4170..4189` block after tightening: `80` comparisons,
+  `2` changed rows, both good. Reward W/L/T `2/0/78`, Success W/L/T `1/0/79`,
+  aggregate deltas `+0.004028` reward and `+0.004167` Success. The remaining
+  rows are one primary-v6 `STOP_MOVING->MOVE_LEFT` gain (`4183 scene_1`) and
+  one aux-v9 `STOP_MOVING->MOVE_RIGHT` gain (`4183 scene_4`).
