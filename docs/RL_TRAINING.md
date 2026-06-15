@@ -4961,3 +4961,14 @@ v6 online-prefix selector probe:
   20-seed holdout so far. Next validation should run v6 margin `1.0` on at
   least two broader fresh windows, preferably one Scene-3 window and one
   multi-scene window, before considering replacing the packaged v3 selector.
+- First broader fresh validation is encouraging. On `4030..4069 scene_3`,
+  margin `1.0` is loss-free and finds three Success improvements:
+  baseline `0.797626 / 0.891667`, v6 `0.809355 / 0.916667`, deltas
+  `+0.011729 / +0.025000`, reward W/L/T `2/0/38`, Success W/L/T `3/0/37`.
+  The strongest gains are seed `4060` (`+0.368611` reward, `+0.500000`
+  Success) and seed `4056` (`+0.100529` reward, `+0.333333` Success).
+- Updated assessment: v6 margin `1.0` is now a serious candidate, but still
+  needs a multi-scene holdout and at least one larger Scene-5/default-scene
+  regression check before promotion. The failure of v6 margin `0.09` on seed
+  `4019` remains the warning sign: the selector can still prefer reward-gain
+  actions that lose a train if the threshold is too permissive.
