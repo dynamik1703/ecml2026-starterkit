@@ -5221,6 +5221,12 @@ v6 primary + v9 auxiliary listwise probe:
     aggregate deltas `+0.002789` reward and `+0.004167` Success. The changed
     row is `4126 scene_2` (`STOP_MOVING->MOVE_RIGHT`, reward `+0.223153`,
     Success `+0.333333`, failed agents `-2`).
+  - Fresh block `4150..4169`, scenes `1..4`: `80` comparisons, `2` changed
+    rows, both good. Reward W/L/T `2/0/78`, Success W/L/T `0/0/80`,
+    aggregate deltas `+0.002270` reward and `0` Success. Both accepted rows
+    came from `aux_listwise`: `4153 scene_2` (`STOP_MOVING->MOVE_RIGHT`,
+    reward `+0.081860`) and `4151 scene_3` (`MOVE_FORWARD->MOVE_RIGHT`,
+    reward `+0.099762`). Promoted v6 solo is fully neutral on this same block.
 - Interpretation: the conservative ensemble is currently the strongest
   short-term candidate. It improves over both v6 and v9 solo on the fresh block
   and stays clean on the known contrast block. Remaining concerns are runtime
