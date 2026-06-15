@@ -4583,3 +4583,35 @@ Fresh counterfactual RL candidate v8:
   positives (`3505`, `3603`) and traps (`3449`, `3525`, `3592`). The next
   high-value step is candidate-specific selector training/mining for v8b
   prefixes, not another blind PPO update.
+
+v8b prefix selector audit:
+- Mined changed prefixes for v8b versus the current guarded Sequence policy on
+  the same 24 hard/partial focus seeds, using prefix lengths `1..5` and full
+  prefix replay. The resulting dataset has `62` rows over `18` seeds:
+  `3` good, `35` neutral, and `24` bad.
+- The useful positives are sparse and prefix-length sensitive. Seed `3505`
+  becomes good only at prefix length `5` (`+0.046348` reward,
+  `+0.333333` Success), while prefixes `2..4` on the same seed are
+  reward-negative. Seed `3603` is good at prefix lengths `2` and `4`
+  (`+0.166667` Success), but turns bad at prefix length `5`.
+- Training the existing multicandidate listwise selector on the old rescue
+  pool and validating on the v8b prefix rows does not generalize: at normal
+  thresholds it accepts all `3` good rows but also `8` bad rows and
+  `3` Success-negative rows, for aggregate validation deltas of `-1.9244`
+  reward and `-0.5` Success.
+- A v8b-only self-fit selector is informative but still not deployable. At the
+  broad threshold range `-1.0..0.2`, it selects `5` non-baseline rows:
+  `2` good, `2` neutral, and `1` bad. Aggregate delta is `-0.050488` reward
+  and `+0.666667` Success. The bad leak is seed `3525`, prefix length `4`,
+  with two early `MOVE_FORWARD->MOVE_RIGHT` decisions followed by two
+  `MOVE_FORWARD->STOP_MOVING` decisions.
+- Simple filters are insufficient. Excluding `STOP_MOVING` keeps the `3505`
+  positive but also keeps earlier bad `3505` prefixes; allowing stop actions is
+  required for the `3603` positives but also opens many bad traps.
+- Current decision: do not relax the online Sequence gate and do not export a
+  v8b selector yet. v8b contains real RL-derived rescue signal, but the current
+  event/listwise selector lacks enough temporal context to choose the right
+  prefix length. The next high-value step is to mine more v8b-style positives
+  and hard negatives, then train either a candidate-specific trajectory/prefix
+  selector or a PPO/BC update that learns the complete rescue sequence rather
+  than isolated one-step events.
