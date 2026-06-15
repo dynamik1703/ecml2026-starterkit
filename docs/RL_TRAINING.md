@@ -5267,3 +5267,8 @@ Aux trigger tightening after broad holdout:
   aggregate deltas `+0.004028` reward and `+0.004167` Success. The remaining
   rows are one primary-v6 `STOP_MOVING->MOVE_LEFT` gain (`4183 scene_1`) and
   one aux-v9 `STOP_MOVING->MOVE_RIGHT` gain (`4183 scene_4`).
+- Additional fresh tightened-default holdout on `4190..4209`, scenes `1..4`:
+  `80` comparisons, `1` changed row, good. Reward W/L/T `0/0/80`, Success
+  W/L/T `1/0/79`, aggregate deltas `0` reward and `+0.002083` Success. The
+  changed episode is `4195 scene_3`, with two primary-v6
+  `STOP_MOVING->MOVE_FORWARD` accepts; no auxiliary loss family appeared.
