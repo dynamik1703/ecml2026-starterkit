@@ -5349,3 +5349,34 @@ Global conflict observation v1:
   concrete step toward a less gate-centric RL/BC policy. Next step is to train a
   BC or short PPO candidate using this observation and compare it as a
   candidate policy under the existing sequence selector.
+
+Global conflict BC v2 follow-up:
+- Trained `ecml_global_obs_bc_v2_mixed.pt` with
+  `MyGlobalConflictObservationBuilder`, no fixed `--scene`, `80` episodes,
+  `4` epochs, hidden size `128`, `3` hidden layers, seed `42`.
+- Collection stats: `198960` samples, teacher reward mean `0.913811`,
+  teacher Success mean `0.939583`, final BC accuracy `0.999467`.
+- On the initial 40-episode cross-scene holdout (`5200..5209`, scenes `1..4`),
+  standalone v2 reached reward `0.860358`, Success `0.916667`; the current
+  `SequenceSuccessPolicy` reference reached reward `0.848867`, Success
+  `0.900000`.
+- On a larger fresh 80-episode holdout (`5300..5319`, scenes `1..4`),
+  standalone v2 reached reward `0.866126`, Success `0.902083`; the current
+  `SequenceSuccessPolicy` reference reached reward `0.871191`, Success
+  `0.910417`.
+- Scene split on the larger holdout shows v2 is not yet a safe replacement:
+  it is strong on `scene_2` (`Success=0.966667`) but weak on `scene_1`
+  (`Success=0.841667`). The reference is more stable overall.
+- Adding v2 as an extra normal `SequenceSuccessPolicy` candidate was neutral on
+  the 40-episode `5200..5209` holdout: outputs were identical to the reference,
+  so the existing listwise guards did not accept any useful additional actions.
+- A direct `SequenceSuccessPolicy` teacher distillation attempt
+  (`ecml_global_obs_bc_v3_sequence_teacher.pt`, 40 mixed episodes) was rejected:
+  it reached only reward `0.705581`, Success `0.820833` on the same 40-episode
+  holdout. The stronger teacher appears harder to clone with simple one-step BC.
+- PPO from v2 is not promoted. An aggressive shaped run collapsed, and a
+  conservative KL-anchored run reached only reward `0.818177`, Success
+  `0.904167` on the 40-episode holdout, below v2's reward and Success.
+- Decision: keep v2 as the best learned GlobalObs artifact and use it as the
+  starting point for the next RL/DAgger iteration. Do not replace the current
+  default submission yet.
