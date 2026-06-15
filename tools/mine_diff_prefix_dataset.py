@@ -398,6 +398,34 @@ def write_json(
         handle.write("\n")
 
 
+def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows = []
+    with path.open() as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Failed to parse JSONL row {line_number} in {path}"
+                ) from exc
+    return rows
+
+
+def row_key(row: dict[str, Any]) -> tuple[int, int]:
+    return int(row["seed"]), int(row["prefix_len"])
+
+
+def append_jsonl_row(handle: Any, row: dict[str, Any]) -> None:
+    handle.write(json.dumps(row, sort_keys=True))
+    handle.write("\n")
+    handle.flush()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -462,6 +490,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--output-csv", type=Path)
     parser.add_argument("--output-json", type=Path)
+    parser.add_argument(
+        "--output-jsonl",
+        type=Path,
+        help="Write each accepted prefix row immediately as JSONL.",
+    )
+    parser.add_argument(
+        "--resume-jsonl",
+        action="store_true",
+        help=(
+            "Load existing --output-jsonl rows, skip completed seed/prefix pairs, "
+            "and append new rows."
+        ),
+    )
     parser.add_argument("--quiet", action="store_true")
     return parser.parse_args()
 
@@ -474,44 +515,80 @@ def main() -> int:
     seeds = selected_seeds(args)
     prefix_lengths = selected_prefix_lengths(args)
     rows: list[dict[str, Any]] = []
+    completed: set[tuple[int, int]] = set()
 
-    for seed in seeds:
-        baseline = run_policy_episode(
-            args,
-            seed,
-            args.baseline_policy,
-            args.baseline_checkpoint,
-        )
-        candidate = run_policy_episode(
-            args,
-            seed,
-            args.candidate_policy,
-            args.candidate_checkpoint,
-        )
-        if not args.quiet:
+    if args.resume_jsonl:
+        if args.output_jsonl is None:
+            raise ValueError("--resume-jsonl requires --output-jsonl")
+        rows = read_jsonl_rows(args.output_jsonl)
+        completed = {row_key(row) for row in rows}
+        if rows and not args.quiet:
             print(
-                f"seed={seed} baseline={baseline['normalized_reward']:.6g}/"
-                f"{baseline['success_rate']:.6g} candidate="
-                f"{candidate['normalized_reward']:.6g}/{candidate['success_rate']:.6g}",
+                f"resumed {len(rows)} rows from {args.output_jsonl}; "
+                f"skipping {len(completed)} completed seed/prefix pairs",
                 flush=True,
             )
 
-        for prefix_len in prefix_lengths:
-            forced = run_diff_prefix_episode(args, seed, prefix_len)
-            if args.only_changed and forced["forced_applied"] <= 0:
+    jsonl_handle = None
+    if args.output_jsonl is not None:
+        args.output_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if args.resume_jsonl else "w"
+        jsonl_handle = args.output_jsonl.open(mode)
+
+    try:
+        for seed in seeds:
+            pending_prefix_lengths = [
+                prefix_len
+                for prefix_len in prefix_lengths
+                if (int(seed), int(prefix_len)) not in completed
+            ]
+            if not pending_prefix_lengths:
+                if not args.quiet:
+                    print(f"seed={seed} already complete; skipping", flush=True)
                 continue
-            if args.require_full_prefix and forced["forced_applied"] < prefix_len:
-                continue
-            row = compare_row(args, seed, prefix_len, baseline, candidate, forced)
-            rows.append(row)
+
+            baseline = run_policy_episode(
+                args,
+                seed,
+                args.baseline_policy,
+                args.baseline_checkpoint,
+            )
+            candidate = run_policy_episode(
+                args,
+                seed,
+                args.candidate_policy,
+                args.candidate_checkpoint,
+            )
             if not args.quiet:
                 print(
-                    f"  prefix={prefix_len} applied={row['forced_applied']} "
-                    f"forced={row['forced_reward']:.6g}/{row['forced_success']:.6g} "
-                    f"delta={row['reward_delta']:.6g}/{row['success_delta']:.6g} "
-                    f"label={row['outcome_category']}",
+                    f"seed={seed} baseline={baseline['normalized_reward']:.6g}/"
+                    f"{baseline['success_rate']:.6g} candidate="
+                    f"{candidate['normalized_reward']:.6g}/{candidate['success_rate']:.6g}",
                     flush=True,
                 )
+
+            for prefix_len in pending_prefix_lengths:
+                forced = run_diff_prefix_episode(args, seed, prefix_len)
+                if args.only_changed and forced["forced_applied"] <= 0:
+                    continue
+                if args.require_full_prefix and forced["forced_applied"] < prefix_len:
+                    continue
+                row = compare_row(args, seed, prefix_len, baseline, candidate, forced)
+                rows.append(row)
+                completed.add(row_key(row))
+                if jsonl_handle is not None:
+                    append_jsonl_row(jsonl_handle, row)
+                if not args.quiet:
+                    print(
+                        f"  prefix={prefix_len} applied={row['forced_applied']} "
+                        f"forced={row['forced_reward']:.6g}/{row['forced_success']:.6g} "
+                        f"delta={row['reward_delta']:.6g}/{row['success_delta']:.6g} "
+                        f"label={row['outcome_category']}",
+                        flush=True,
+                    )
+    finally:
+        if jsonl_handle is not None:
+            jsonl_handle.close()
 
     summaries = summarize_rows(rows)
     print("\nSummary:")

@@ -4625,3 +4625,29 @@ v8b prefix selector audit:
   additional OOD positives. The more valuable next engineering step is an
   incremental/parallel prefix miner plus a new RL candidate objective, not
   another narrow v8b gate.
+
+Incremental prefix mining:
+- Added `--output-jsonl` and `--resume-jsonl` to
+  `tools/mine_diff_prefix_dataset.py`. Each accepted prefix row is now flushed
+  immediately as JSONL, and interrupted runs can resume by skipping already
+  completed `(seed, prefix_len)` rows. This removes the previous
+  all-or-nothing failure mode where long OOD mines only wrote JSON/CSV at the
+  end.
+- Smoke-tested on seed `3720`, prefix lengths `1,2`: JSONL wrote `2` rows, and
+  a resume run skipped the completed seed/prefix pairs without recomputing the
+  rollouts.
+- Ran another v8b OOD shard on `3730..3739` with JSONL enabled. Result:
+  `28` rows over `9` changed seeds, with `3` good, `11` neutral, and `14` bad.
+  Prefix length `1` had a positive mean (`+0.009900` reward,
+  `+0.018519` Success), while longer prefixes were negative on average.
+- The useful positive is seed `3734`: prefix lengths `1..3` all improve
+  `+0.089468` reward and `+0.166667` Success, starting with
+  `MOVE_FORWARD->MOVE_RIGHT` for agent `5` at step `156`. Bad patterns remain
+  dominated by repeated or late `STOP_MOVING`, especially seeds `3730`, `3737`,
+  and `3738`.
+- Current implication: v8b does have additional OOD rescue signal, but it is
+  sparse and heavily contaminated by STOP traps. The next model step should
+  train/evaluate a candidate-specific selector on combined v8b rows
+  (`focus24`, `3720..3729`, `3730..3739`) with strong Success-loss penalties,
+  then only consider deployment if it selects `3505/3603/3734`-style positives
+  without accepting the STOP trap families.
