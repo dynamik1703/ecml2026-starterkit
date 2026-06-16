@@ -6117,6 +6117,19 @@ Multi-scene risk-head and raw-margin guard:
     (`MOVE_FORWARD->MOVE_LEFT`, risk candidate `0.2945`, risk delta `-0.3046`,
     raw margin `0.2473`, listwise margin `0.7642`), with identical final
     episode outcome.
+- Trace-all near-miss audit on fresh `6020..6024`, scenes `1..4`:
+  - `698` candidate decisions were traced; `3` were accepted, only `1` via
+    `risk_relax`.
+  - The window was again exactly neutral versus default:
+    `0.000000 reward / 0.000000 Success` over `20` episodes.
+  - For `MOVE_FORWARD->MOVE_LEFT`, `37` candidates had no existing
+    `reject_reason`. `10` passed risk improvement `>=0.25`, `7` also passed
+    candidate risk `<=0.50`, but only `1` also passed listwise margin `>=0.70`;
+    raw margin `>=0.10` blocked none of that final set.
+  - Interpretation from the audit: the strict relax path is not bottlenecked by
+    raw margin anymore; it is mostly bottlenecked by the listwise model. Lowering
+    that threshold would create many more actions, but without counterfactual
+    outcome labels this is not yet a justified promotion path.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
