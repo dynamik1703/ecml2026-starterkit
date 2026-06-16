@@ -5811,3 +5811,26 @@ Conservative aux-forbid ablation:
   strict selector, or (2) change the architecture/training target so the policy
   predicts action values/risk for all legal actions rather than relying on one
   unconstrained argmax policy.
+
+Aux-forbid checkpoint as selector candidate:
+- Tested the safer deployment idea: keep `SequenceSuccessPolicy` as the
+  baseline/selector and add `/private/tmp/ecml_aux_forbid_scene1_v1.pt` only as
+  an extra candidate checkpoint.
+- Default candidate list plus aux-forbid candidate was exactly identical to the
+  current default policy on scene-1 `5700..5719` and `5800..5819`:
+  `0` changed seeds in both windows.
+- Trace check: all accepted events still came from the existing candidate
+  checkpoints (`ecml_action_conflict_penalty_ppo_seed3700_u12.pt` and
+  `ecml_aux_bc_counterfactual_v7b_3435neg_u1.pt`). The aux-forbid candidate was
+  never accepted.
+- Isolated aux-forbid candidate behind the same selector was also identical to
+  a no-candidate sequence wrapper. With `TRACE_ALL=1`, it produced `8`
+  candidate diffs on `5700..5719` and `11` on `5800..5819`, but `0` accepted
+  events. The best scored nonzero listwise margins were still strongly
+  negative (`-2.691` on `5700`, `-2.948` on `5800`).
+- Interpretation: the selector is doing the right thing; it blocks this learned
+  PPO candidate. This makes the path safe, but not useful yet.
+- Decision: the next RL work should not be more tiny PPO fine-tunes of the same
+  ActorCritic. We need a learned action-value/risk model that is trained on
+  accepted/rejected candidate actions directly, so it can produce candidates in
+  the selector's feature distribution instead of broad raw-policy deviations.
