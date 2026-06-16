@@ -5763,3 +5763,51 @@ Aux-BC forbid loss for constrained PPO:
   toward internalized risk learning. It is not a deployable checkpoint yet; the
   next check is whether longer constrained PPO runs improve Success deltas on
   holdouts without repeating the raw AuxPPO regression pattern.
+
+First constrained-PPO forbid run:
+- Trained `/private/tmp/ecml_aux_forbid_scene1_v1.pt` from
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` on scene-1 seeds
+  `5700..5707`, `4` updates, `2` complete episodes/update,
+  `teacher_ce=2.5`, `anchor_kl=8.0`, `aux_bc_coef=0.08`,
+  `aux_bc_forbid_coef=0.20`, and low reward scale `0.02`.
+- Training stayed stable (`anchor_kl <= 0.000219`, rollout Success
+  `0.75..0.916667`), and the forbid loss was active
+  (`aux_forbid_loss` roughly `0.031..0.068`).
+- Holdout eval versus `SequenceSuccessPolicy`, raw ActorCritic candidate:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| aux-forbid v1 | `5700..5719` | `-0.025173` | `-0.016667` | `5/6/9` | `2/3/15` |
+| aux-forbid v1 | `5800..5819` | `-0.084742` | `-0.075000` | `7/9/4` | `3/5/12` |
+
+- Largest Success regressions: `5707` (`-0.333333` Success), `5713/5715`
+  (`-0.166667` each), and fresh-window failures `5807`, `5809`, `5810`,
+  `5816`, `5819`.
+- Decision: do not promote this checkpoint. The forbid loss is a useful
+  training primitive, but this weighting still changes too many argmax
+  decisions. Next constrained run must be much more conservative: lower LR and
+  aux coefficients, stronger teacher/anchor, and compare against the base v4b
+  drift before attempting broader RL training.
+
+Conservative aux-forbid ablation:
+- Trained `/private/tmp/ecml_aux_forbid_scene1_v2_conservative.pt` from the
+  same v4b base with smaller updates: seeds `5700..5703`, `2` updates,
+  `learning_rate=2e-6`, `teacher_ce=8.0`, `anchor_kl=50.0`,
+  `aux_bc_coef=0.02`, `aux_bc_forbid_coef=0.05`, `reward_scale=0.005`.
+- Training stayed extremely close to the anchor (`anchor_kl <= 0.0000041`) and
+  the forbid loss was active (`0.061..0.068`), but holdout eval was still
+  unsafe:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| aux-forbid v2 conservative | `5700..5719` | `-0.032172` | `-0.033333` | `3/5/12` | `0/4/16` |
+| aux-forbid v2 conservative | `5800..5819` | `-0.086205` | `-0.075000` | `5/11/4` | `1/4/15` |
+
+- Interpretation: the raw ActorCritic deployment path is very brittle. Tiny
+  parameter changes can flip rare but important argmax decisions and cause
+  Success regressions, even under strong teacher and anchor regularization.
+- Decision: stop promoting short raw-PPO checkpoints. The next promising path
+  is either (1) use learned RL checkpoints only as candidate generators behind a
+  strict selector, or (2) change the architecture/training target so the policy
+  predicts action values/risk for all legal actions rather than relying on one
+  unconstrained argmax policy.
