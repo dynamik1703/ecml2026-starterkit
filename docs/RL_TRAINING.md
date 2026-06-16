@@ -5703,3 +5703,42 @@ Scene-1 AuxPPO probes from v2 prefix labels:
   only where predicted Success-risk is below a calibrated threshold. The mined
   positive/negative prefix labels are still useful as offline risk supervision
   and as an auxiliary loss, but not sufficient as the main safeguard.
+
+Sequence Success-risk critic audit:
+- Trained a GRU sequence critic on focused v2 prefix candidates with three
+  heads: Success upside, unsafe / Success-regression risk, and reward-risk.
+  This uses the same mined prefix/event features as the ranker, but optimizes a
+  safety-first decision objective instead of only ranking expected benefit.
+- Cross-window validation `5400+5500+5600 -> 5700`:
+  - Dataset: `966` rows, train/validation `696/270`, good/neutral/bad
+    `242/300/154`, Success-positive `81`, unsafe `154`, reward-risk `136`.
+  - Strict threshold mode (`min_success=0.95`, `max_unsafe=0.001`) accepted
+    `4/4/1` good/neutral/bad with no Success-negative rows, but reward sum was
+    slightly negative (`-0.009009`).
+  - Planner mode with high unsafe penalty accepted `4/4/0`
+    good/neutral/bad, reward sum `+0.044226`, Success sum `0`.
+- Regression validation `5400+5500+5700 -> 5600`:
+  - Dataset: `966` rows, train/validation `726/240`, good/neutral/bad
+    `228/312/186`, Success-positive `84`, unsafe `186`, reward-risk `172`.
+  - Strict threshold mode (`max_unsafe=0.001`) accepted `3/0/0`
+    good/neutral/bad, reward sum `+0.234522`, Success sum `0`.
+  - More permissive unsafe thresholds leak Success-negative rows. Planner mode
+    finds larger Success gains, but also accepts Success regressions
+    (`accepted_success_negative=2` in the best-looking configs).
+- Ranker plus risk-veto deployment check:
+  - `5700` holdout: consensus-safe configs with no bad rows keep only one
+    small reward-positive candidate (`+0.011057`, Success delta `0`). Permissive
+    configs can recover Success-positive rows, but they also admit at least one
+    reward-bad candidate.
+  - `5600` holdout: consensus-safe configs again keep only one reward-positive
+    candidate (`+0.078174`, Success delta `0`). No Success-positive candidate
+    survives without relaxing safety.
+- Interpretation: the risk critic is useful for vetoing obvious regressions,
+  but as an external gate it collapses recall too much. This is not yet a
+  winner-level performance component.
+- Decision: keep the critic machinery, but move it inside training. The next
+  high-value RL step is constrained PPO / safety-critic PPO: train the policy
+  on reward and Success rescue labels while penalizing predicted unsafe action
+  probability, with the baseline policy as a KL anchor. The goal is not another
+  hand-written gate; the goal is to make the learned policy internalize the
+  risk boundary and improve recall without reintroducing Success regressions.
