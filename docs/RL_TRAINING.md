@@ -5476,3 +5476,38 @@ GlobalObs v2 prefix selector cross-window check:
 - Decision: this is the first evidence that a risk-aware v2 prefix selector can
   be useful. Next validation step is a third untouched window, then train on
   two windows and validate on the third. Do not package the selector yet.
+
+GlobalObs v2 prefix selector third-window validation:
+- Added third untouched comparison window `5500..5519`, scenes `1..4`, `80`
+  total episodes.
+- v2 versus current `SequenceSuccessPolicy`: reward mean `0.869027` vs
+  `0.863891` (`reward_delta_mean=+0.005137`), but Success `0.914583` vs
+  `0.929167` (`success_delta_mean=-0.014583`). W/L/T: reward `27/29/24`,
+  Success `7/12/61`.
+- Mined focused prefixes `1..6` on the 5500 window. Aggregate:
+
+| prefix_len | rows | good | neutral | bad | reward mean | Success mean |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 32 | 3 | 22 | 7 | `-0.008123` | `-0.015625` |
+| 2 | 32 | 5 | 20 | 7 | `+0.002035` | `-0.010417` |
+| 3 | 32 | 8 | 15 | 9 | `-0.007313` | `-0.005208` |
+| 4 | 32 | 13 | 12 | 7 | `+0.012822` | `+0.005208` |
+| 5 | 32 | 12 | 10 | 10 | `+0.004717` | `-0.005208` |
+| 6 | 32 | 16 | 6 | 10 | `+0.011800` | `0` |
+
+- Strict ranker trained on 5300+5400 prefix rows and validated on 5500:
+  - Threshold `2.5` or `3`: `accepted_good=1`, `accepted_neutral=4`,
+    `accepted_bad=0`, `accepted_success_positive=1`,
+    `accepted_success_negative=0`, reward delta sum `+0.208205`, Success delta
+    sum `+0.166667`.
+  - Threshold `4`: `accepted_good=0`, `accepted_neutral=2`,
+    `accepted_bad=0`.
+- Audit caveat: accepted rows are still sparse. The true positive is one
+  unique `scene_3 seed 5511` prefix (`STOP_MOVING->MOVE_LEFT` followed by
+  move-forward corrections); the neutral accept is one unique `scene_2 seed
+  5519` first-diff row repeated across split seeds.
+- Decision: the selector is safety-promising across three windows but still too
+  low-recall and too sparse for packaging. The next meaningful improvement is
+  more prefix data, especially independent positive families, then exporting
+  and wiring the selector only if zero-bad persists on a fourth untouched
+  window.
