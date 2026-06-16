@@ -11,6 +11,7 @@ import torch.nn as nn
 from flatland.envs.rail_env_action import RailEnvActions
 
 from submission import runtime_context
+from submission.my_policy import ActorCritic
 from submission.rerank_policy import RerankPolicy
 from submission.reservation_policy import ReservationPolicy
 
@@ -604,9 +605,35 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_EXTRA_CANDIDATE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
             -0.30,
         )
+        self.risk_head_policy = self._load_risk_head_policy(
+            os.environ.get("ECML_SEQUENCE_RISK_HEAD_CHECKPOINT", "").strip()
+        )
+        self.risk_head_max_candidate = self._env_float(
+            "ECML_SEQUENCE_RISK_HEAD_MAX_CANDIDATE",
+            float("inf"),
+        )
+        self.risk_head_max_candidate_minus_baseline = self._env_float(
+            "ECML_SEQUENCE_RISK_HEAD_MAX_CANDIDATE_MINUS_BASELINE",
+            float("inf"),
+        )
+        self.risk_head_min_baseline_minus_candidate = self._env_float(
+            "ECML_SEQUENCE_RISK_HEAD_MIN_BASELINE_MINUS_CANDIDATE",
+            float("-inf"),
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
+
+    @staticmethod
+    def _load_risk_head_policy(checkpoint_path: str) -> ActorCritic | None:
+        if not checkpoint_path or not Path(checkpoint_path).exists():
+            return None
+        try:
+            policy = ActorCritic(checkpoint_path=checkpoint_path)
+            policy.eval()
+            return policy
+        except Exception:
+            return None
 
     @staticmethod
     def _candidate_checkpoint_paths(default_path: str) -> list[str]:
@@ -967,6 +994,13 @@ class SequenceSuccessPolicy(RerankPolicy):
                 candidate_action=candidate_action,
                 extra_candidate=extra_candidate,
             )
+            accepted, scores = self._apply_risk_head_guard(
+                accepted=accepted,
+                scores=scores,
+                observation=observation,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+            )
             if "selector_source" in scores:
                 detail["selector_source"] = str(scores["selector_source"])
         except Exception:
@@ -987,6 +1021,46 @@ class SequenceSuccessPolicy(RerankPolicy):
         if accepted:
             self._accepted_event_details.append(detail)
         return bool(accepted)
+
+    def _apply_risk_head_guard(
+        self,
+        accepted: bool,
+        scores: dict[str, float],
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+    ) -> tuple[bool, dict[str, float]]:
+        if self.risk_head_policy is None or observation is None:
+            return accepted, scores
+        try:
+            with torch.no_grad():
+                risk_logits = self.risk_head_policy.risk_logits(
+                    np.asarray(observation, dtype=np.float32)
+                )
+                risk_probs = torch.sigmoid(risk_logits).squeeze(0).cpu().numpy()
+            baseline_risk = float(risk_probs[int(baseline_action)])
+            candidate_risk = float(risk_probs[int(candidate_action)])
+        except Exception:
+            return accepted, scores
+
+        candidate_minus_baseline = candidate_risk - baseline_risk
+        baseline_minus_candidate = baseline_risk - candidate_risk
+        scores["risk_head_baseline"] = baseline_risk
+        scores["risk_head_candidate"] = candidate_risk
+        scores["risk_head_candidate_minus_baseline"] = candidate_minus_baseline
+        scores["risk_head_baseline_minus_candidate"] = baseline_minus_candidate
+        if not accepted:
+            return accepted, scores
+        if candidate_risk > self.risk_head_max_candidate:
+            scores["reject_reason"] = "risk_head_candidate_too_high"
+            return False, scores
+        if candidate_minus_baseline > self.risk_head_max_candidate_minus_baseline:
+            scores["reject_reason"] = "risk_head_regression"
+            return False, scores
+        if baseline_minus_candidate < self.risk_head_min_baseline_minus_candidate:
+            scores["reject_reason"] = "risk_head_insufficient_improvement"
+            return False, scores
+        return accepted, scores
 
     def _apply_candidate_guards(
         self,
@@ -1514,6 +1588,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             row["reject_reason"] = str(scores["reject_reason"])
         if "selector_source" in scores:
             row["selector_source"] = str(scores["selector_source"])
+        for key in (
+            "risk_head_baseline",
+            "risk_head_candidate",
+            "risk_head_candidate_minus_baseline",
+            "risk_head_baseline_minus_candidate",
+        ):
+            if key in scores:
+                row[key] = float(scores[key])
         for key in (
             "slack",
             "distance",
