@@ -5649,3 +5649,57 @@ GlobalObs v2 fifth-window prefix mining and selector check:
   optimize for Success-risk first, allow reward-only gains only after a
   calibrated risk head, or train an RL policy with explicit mined-prefix
   anti-regression loss.
+
+Scene-1 AuxPPO probes from v2 prefix labels:
+- Converted the focused `5700` scene-1 v2 prefixes into event-level Aux-BC
+  labels with conflict filtering:
+  `/private/tmp/ecml_v2_scene1_5700_conflict_aux_events.csv`.
+  Conversion settings: `--best-prefix-per-seed`,
+  `--prefer-longer-positive-prefix`, `--include-negative-baseline`,
+  `--positive-min-prefix-conflicts 1`, `success_weight=16`,
+  `failed_weight=4`.
+- Resulting labels: `50` event rows over `9` seeds:
+  `26` positive rescue events and `24` negative-baseline avoidance events.
+  Positives include `14` Success-positive labels; negatives include `7`
+  Success-negative avoidance labels.
+- Probe A: initialized from `ecml_global_obs_bc_v2_mixed.pt`, GlobalConflict
+  obs, `4` PPO updates, `aux_bc_coef=0.12`, `teacher_ce=2.0`,
+  `anchor_kl=6.0`, conservative LR `1e-5`.
+  - Aux replay: `1716` samples, `33` rescue hits, `8` avoidance hits,
+    `17` invalid labels, `9` baseline mismatches, `1683` anchor samples.
+  - Training stayed numerically stable, but rollout Success was noisy
+    (`0.777778`, `0.611111`, `0.666667`, `0.777778`).
+  - Scene-1 eval versus current `SequenceSuccessPolicy`:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v2 AuxPPO probe | `5700..5719` | `-0.030693` | `-0.033333` | `5/9/6` | `2/6/12` |
+| v2 AuxPPO probe | `5800..5819` | `-0.036764` | `-0.058333` | `9/8/3` | `4/8/8` |
+
+- Probe B: initialized from the more stable
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt`, ActionConflict obs, same
+  labels, `4` PPO updates, `aux_bc_coef=0.10`, `teacher_ce=2.5`,
+  `anchor_kl=8.0`, LR `1e-5`.
+  - Aux replay was identical: `1716` samples, `33` rescue hits,
+    `8` avoidance hits, `17` invalid labels, `9` baseline mismatches,
+    `1683` anchor samples.
+  - Training was more stable than Probe A (`0.833333`, `0.833333`,
+    `0.722222`, `0.833333` rollout Success), but raw policy eval was still
+    below the reference:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v4b AuxPPO probe | `5700..5719` | `-0.036849` | `-0.025000` | `6/8/6` | `2/5/13` |
+| v4b AuxPPO probe | `5800..5819` | `-0.073412` | `-0.033333` | `6/10/4` | `5/5/10` |
+
+- Interpretation: these probes confirm that the current Aux-BC/PPO machinery
+  can ingest mined rescue/avoidance labels and train stably, but it does not
+  solve Success safety as a raw policy. The v2-initialized probe mostly
+  preserves v2's failure pattern; the v4b-initialized probe is more stable in
+  training but still leaks fresh Success regressions.
+- Decision: do not promote either PPO probe. The next RL change should be
+  architectural/objective-level, not just more updates: train an explicit
+  Success-risk critic or constrained PPO objective, then allow policy updates
+  only where predicted Success-risk is below a calibrated threshold. The mined
+  positive/negative prefix labels are still useful as offline risk supervision
+  and as an auxiliary loss, but not sufficient as the main safeguard.
