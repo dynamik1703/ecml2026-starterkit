@@ -5579,3 +5579,28 @@ GlobalObs v2 prefix selector veto audit:
   window and a richer sequence/risk model that can distinguish the good
   `5312`-style multi-agent right-to-forward prefix from the bad `5603`-style
   one.
+
+GlobalObs v2 fifth-window standalone check:
+- Evaluated standalone `ecml_global_obs_bc_v2_mixed.pt` against the current
+  `SequenceSuccessPolicy` on a fifth untouched holdout: seeds `5700..5719`,
+  scenes `1..4`, `80` total episodes, using
+  `MyGlobalConflictObservationBuilder`.
+
+| block | reference reward | v2 reward | delta | reference Success | v2 Success | delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| scene_1 | `0.868142` | `0.838371` | `-0.029770` | `0.850000` | `0.816667` | `-0.033333` | `5/8/7` | `2/6/12` |
+| scene_2 | `0.917486` | `0.891510` | `-0.025975` | `0.950000` | `0.950000` | `0` | `6/7/7` | `1/1/18` |
+| scene_3 | `0.800175` | `0.822913` | `+0.022738` | `0.916667` | `0.891667` | `-0.025000` | `8/7/5` | `2/5/13` |
+| scene_4 | `0.887253` | `0.803671` | `-0.083582` | `0.941667` | `0.841667` | `-0.100000` | `4/8/8` | `0/7/13` |
+| aggregate | `0.868264` | `0.839116` | `-0.029147` | `0.914583` | `0.875000` | `-0.039583` | `23/30/27` | `5/19/56` |
+
+- The fifth window confirms the core risk: v2 has individual upside
+  (`scene_3 seed 5707` reward delta `+0.484795`, `scene_1 seed 5710` Success
+  delta `+0.333333`), but it is not a stable learned replacement. The largest
+  failures are Success-heavy, especially in `scene_4` (`seed 5711` Success
+  delta `-0.666667`, seeds `5705/5712` delta `-0.333333`).
+- Decision: do not spend time on packaging v2 as a broad policy. Treat v2 only
+  as a candidate generator for rare rescue prefixes. Next high-value step is
+  targeted prefix mining on the fifth-window Success wins/losses plus the
+  previous windows, followed by a much stricter sequence/risk selector or
+  direct RL training with an explicit anti-regression objective.
