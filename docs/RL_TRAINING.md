@@ -5989,3 +5989,37 @@ Risk-auxiliary PPO wiring:
   the stable baseline. This is still only wiring; the next meaningful test is
   a conservative multi-seed risk-aux PPO run and holdout evaluation against
   the current `SequenceSuccessPolicy`.
+
+First conservative risk-aux PPO probe:
+- Trained `/private/tmp/ecml_aux_risk_scene1_v1.pt` from
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` on scene-1 seeds
+  `5700..5707`, `4` updates, `2` complete episodes/update.
+- Risk supervision used `/private/tmp/ecml_rollout_mc_scene1_5700.csv` and
+  `/private/tmp/ecml_rollout_mc_scene1_5800.csv`, subsampled to `12000` rows:
+  `source_rows=116658`, `obs_columns=84`, `positive_fraction=0.16475`.
+- PPO constraints: `learning_rate=2e-6`, `teacher_ce=4.0`, `anchor_kl=25.0`,
+  `aux_risk_coef=0.08`, `reward_scale=0.01`, and small terminal
+  success/failure shaping. Training stayed close to anchor
+  (`anchor_kl <= 3.5e-05`), with active risk loss around `0.797..0.801`.
+- Raw ActorCritic holdout versus current `SequenceSuccessPolicy`:
+
+| checkpoint | window | reward delta | Success delta |
+| --- | ---: | ---: | ---: |
+| risk-aux v1 raw | `5700..5719` | `-0.024420` | `-0.016667` |
+| risk-aux v1 raw | `5800..5819` | `-0.087254` | `-0.058333` |
+
+- Added the checkpoint as a fifth candidate behind `SequenceSuccessPolicy`.
+  The policy output was exactly identical to default on both `5700..5719` and
+  `5800..5819` (`0` changed seeds).
+- Selector traces:
+  - `5700..5719`: `2` accepted events, both from existing candidates
+    (`ecml_action_conflict_penalty_ppo_seed3700_u12.pt` and
+    `ecml_aux_bc_counterfactual_v7b_3435neg_u1.pt`).
+  - `5800..5819`: `6` accepted events, all from existing
+    `ecml_action_conflict_penalty_ppo_seed3700_u12.pt`.
+  - The new risk-aux checkpoint contributed `0` accepted events.
+- Interpretation: risk-aux training did not yet create a useful action
+  candidate. The raw actor is still unsafe, and the selector correctly blocks
+  it. The risk signal is real, but it needs to enter the action-selection path
+  more directly, for example as a risk-aware candidate scorer or per-action
+  reranker, not only as a weak auxiliary gradient on the actor trunk.
