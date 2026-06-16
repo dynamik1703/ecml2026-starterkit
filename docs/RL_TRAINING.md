@@ -6126,10 +6126,19 @@ Multi-scene risk-head and raw-margin guard:
     `reject_reason`. `10` passed risk improvement `>=0.25`, `7` also passed
     candidate risk `<=0.50`, but only `1` also passed listwise margin `>=0.70`;
     raw margin `>=0.10` blocked none of that final set.
+  - Added `tools/sequence_trace_to_counterfactual_focus.py` to convert trace
+    JSONL rows into `counterfactual_decision_eval.py` focus CSVs. This makes
+    exact near-miss follow-up evaluations repeatable.
+  - Counterfactual follow-up on the `10` selected near-misses (`9` from
+    `scene_2 seed 6020`, `1` from `scene_3 seed 6020`) was fully neutral:
+    reward W/L/T `0/0/10`, Success W/L/T `0/0/10`,
+    `forced_not_applied=0`.
   - Interpretation from the audit: the strict relax path is not bottlenecked by
     raw margin anymore; it is mostly bottlenecked by the listwise model. Lowering
-    that threshold would create many more actions, but without counterfactual
-    outcome labels this is not yet a justified promotion path.
+    that threshold would create many more actions, but the first near-miss
+    counterfactual labels are neutral rather than useful. The next data step
+    should mine broader scenes/seeds specifically for good `MOVE_FORWARD` detour
+    counterfactuals, not relax the deployed selector blindly.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
