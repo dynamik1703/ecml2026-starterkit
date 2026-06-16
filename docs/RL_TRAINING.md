@@ -5957,3 +5957,35 @@ Broader compact MC-risk audit:
   experiment is a risk-auxiliary PPO run where the actor still learns from
   reward/teacher/anchor constraints, while an auxiliary head predicts
   rollout-level failure risk from compact policy state.
+
+Risk-auxiliary PPO wiring:
+- Extended `submission.my_policy.ActorCritic` with a checkpoint-compatible
+  per-action `risk_head`. Old checkpoints still load because missing
+  `risk_head.*` tensors keep their initialized values; inference is unchanged
+  because `act_many()` still uses only the masked policy logits.
+- Extended `tools/train_masked_ppo.py` with optional rollout-MC risk
+  supervision:
+  - `--aux-risk-csv` reads rollout rows collected with
+    `--include-observation-features`;
+  - `--aux-risk-target` supports `agent_failure` and `team_failure`;
+  - `--aux-risk-coef` adds weighted BCE on the selected action's risk logit;
+  - `--aux-risk-cache`, `--aux-risk-max-samples`, and class weights make the
+    path usable for larger MC datasets.
+- Smoke check:
+  - Loaded old v4b checkpoint with the new class:
+    `risk_head` shape `(5, 128)`.
+  - One-update PPO smoke from
+    `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` on
+    seed `5700` with `/private/tmp/ecml_rollout_mc_scene1_5700.csv`,
+    `aux_risk_coef=0.05`, and `2048` risk samples succeeded.
+  - Risk dataset stats: `source_rows=59454`, `obs_columns=84`,
+    `positive_fraction=0.182617`.
+  - Training log included `aux_risk_loss=0.802629`,
+    `aux_risk_pos=0.17`, `anchor_kl=6.01403e-09`, and wrote
+    `/private/tmp/ecml_aux_risk_smoke.pt`.
+- Interpretation: the infrastructure now supports a more RL-like direction:
+  the policy can internalize rollout failure risk through shared
+  representation learning while teacher/anchor losses keep actions close to
+  the stable baseline. This is still only wiring; the next meaningful test is
+  a conservative multi-seed risk-aux PPO run and holdout evaluation against
+  the current `SequenceSuccessPolicy`.

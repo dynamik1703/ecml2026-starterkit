@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib
 import importlib.util
 import sys
@@ -455,6 +456,148 @@ def ensure_aux_forbidden_actions(dataset: dict[str, torch.Tensor]) -> None:
     dataset["forbidden_actions"] = torch.full_like(dataset["actions"], -1)
 
 
+def safe_float(value: Any) -> float:
+    if value in (None, ""):
+        return float("nan")
+    try:
+        result = float(value)
+    except Exception:
+        return float("nan")
+    return result if np.isfinite(result) else float("nan")
+
+
+def finite_or_zero(value: Any) -> float:
+    result = safe_float(value)
+    return result if np.isfinite(result) else 0.0
+
+
+def mc_observation_columns(rows: list[dict[str, Any]]) -> list[str]:
+    def obs_index(name: str) -> int:
+        try:
+            return int(name.split("_", maxsplit=1)[1])
+        except Exception:
+            return 10**9
+
+    return sorted(
+        {key for row in rows for key in row if key.startswith("obs_")},
+        key=obs_index,
+    )
+
+
+def load_aux_risk_dataset(
+    args: argparse.Namespace,
+) -> tuple[dict[str, torch.Tensor] | None, dict[str, Any] | None]:
+    if args.aux_risk_coef == 0.0:
+        return None, None
+
+    if (
+        args.aux_risk_cache
+        and args.aux_risk_cache.exists()
+        and not args.aux_risk_refresh_cache
+    ):
+        payload = torch.load(args.aux_risk_cache, map_location="cpu")
+        return payload["dataset"], payload.get("stats")
+
+    rows: list[dict[str, Any]] = []
+    for csv_path in args.aux_risk_csv:
+        with csv_path.open(newline="") as handle:
+            rows.extend(csv.DictReader(handle))
+
+    obs_columns = mc_observation_columns(rows)
+    if not obs_columns:
+        raise ValueError(
+            "--aux-risk-csv requires rollout MC rows collected with "
+            "--include-observation-features"
+        )
+
+    observations = []
+    actions = []
+    labels = []
+    weights = []
+    skipped_invalid_action = 0
+    skipped_missing_target = 0
+    skipped_invalid_mask = 0
+    for row in rows:
+        action = safe_float(row.get("action"))
+        if not np.isfinite(action) or int(action) != action or not 0 <= int(action) < args.n_actions:
+            skipped_invalid_action += 1
+            continue
+        action_valid = safe_float(row.get("action_valid"))
+        if np.isfinite(action_valid) and action_valid < 0.5:
+            skipped_invalid_mask += 1
+            continue
+        if args.aux_risk_target == "team_failure":
+            target = 1.0 - finite_or_zero(row.get("team_success"))
+        else:
+            target = safe_float(row.get("agent_failure"))
+        if not np.isfinite(target):
+            skipped_missing_target += 1
+            continue
+        label = float(np.clip(target, 0.0, 1.0))
+        observations.append([finite_or_zero(row.get(column)) for column in obs_columns])
+        actions.append(int(action))
+        labels.append(label)
+        weights.append(
+            args.aux_risk_positive_weight
+            if label >= 0.5
+            else args.aux_risk_negative_weight
+        )
+
+    if not observations:
+        raise ValueError("--aux-risk-csv produced no valid risk samples")
+
+    observations_array = np.asarray(observations, dtype=np.float32)
+    actions_array = np.asarray(actions, dtype=np.int64)
+    labels_array = np.asarray(labels, dtype=np.float32)
+    weights_array = np.asarray(weights, dtype=np.float32)
+
+    if args.aux_risk_max_samples > 0 and len(actions_array) > args.aux_risk_max_samples:
+        rng = np.random.default_rng(args.seed + 1701)
+        keep = rng.choice(
+            len(actions_array),
+            size=args.aux_risk_max_samples,
+            replace=False,
+        )
+        observations_array = observations_array[keep]
+        actions_array = actions_array[keep]
+        labels_array = labels_array[keep]
+        weights_array = weights_array[keep]
+
+    weights_array = weights_array / max(1e-6, float(weights_array.mean()))
+    dataset = {
+        "observations": torch.as_tensor(observations_array, dtype=torch.float32),
+        "actions": torch.as_tensor(actions_array, dtype=torch.long),
+        "labels": torch.as_tensor(labels_array, dtype=torch.float32),
+        "weights": torch.as_tensor(weights_array, dtype=torch.float32),
+    }
+    stats = {
+        "samples": int(len(actions_array)),
+        "source_rows": int(len(rows)),
+        "obs_columns": int(len(obs_columns)),
+        "positive_fraction": float(labels_array.mean()),
+        "target": args.aux_risk_target,
+        "skipped_invalid_action": skipped_invalid_action,
+        "skipped_invalid_mask": skipped_invalid_mask,
+        "skipped_missing_target": skipped_missing_target,
+    }
+    if args.aux_risk_cache:
+        args.aux_risk_cache.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "dataset": dataset,
+                "stats": stats,
+                "config": {
+                    "aux_risk_csv": [str(csv_path) for csv_path in args.aux_risk_csv],
+                    "target": args.aux_risk_target,
+                    "obs_size": args.obs_size,
+                    "n_actions": args.n_actions,
+                },
+            },
+            args.aux_risk_cache,
+        )
+    return dataset, stats
+
+
 def rollout_seed(
     args: argparse.Namespace,
     start_seed: int,
@@ -740,6 +883,7 @@ def ppo_update(
     rollout: dict[str, torch.Tensor],
     anchor_policy: ActorCritic | None,
     aux_bc_data: dict[str, torch.Tensor] | None,
+    aux_risk_data: dict[str, torch.Tensor] | None,
 ) -> dict[str, float]:
     observations = rollout["observations"]
     actions = rollout["actions"]
@@ -760,6 +904,8 @@ def ppo_update(
     aux_bc_valid_fractions = []
     aux_forbid_losses = []
     aux_forbid_valid_fractions = []
+    aux_risk_losses = []
+    aux_risk_positive_fractions = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -891,6 +1037,41 @@ def ppo_update(
                     loss = loss + args.aux_bc_forbid_coef * aux_forbid_loss
                     aux_forbid_losses.append(float(aux_forbid_loss.item()))
 
+            if aux_risk_data is not None and args.aux_risk_coef != 0.0:
+                risk_observations = aux_risk_data["observations"]
+                risk_actions = aux_risk_data["actions"]
+                risk_labels = aux_risk_data["labels"]
+                risk_weights = aux_risk_data["weights"]
+                risk_count = risk_actions.shape[0]
+                if args.aux_risk_batch_size > 0 and args.aux_risk_batch_size < risk_count:
+                    risk_idx = torch.randint(
+                        low=0,
+                        high=risk_count,
+                        size=(args.aux_risk_batch_size,),
+                    )
+                else:
+                    risk_idx = torch.arange(risk_count)
+                selected_risk_logits = policy.risk_logits(
+                    risk_observations[risk_idx]
+                ).gather(
+                    1,
+                    risk_actions[risk_idx].unsqueeze(1),
+                ).squeeze(1)
+                risk_loss_values = F.binary_cross_entropy_with_logits(
+                    selected_risk_logits,
+                    risk_labels[risk_idx],
+                    reduction="none",
+                )
+                risk_weight_batch = risk_weights[risk_idx]
+                aux_risk_loss = (
+                    risk_loss_values * risk_weight_batch
+                ).sum() / risk_weight_batch.sum().clamp_min(1e-6)
+                loss = loss + args.aux_risk_coef * aux_risk_loss
+                aux_risk_losses.append(float(aux_risk_loss.item()))
+                aux_risk_positive_fractions.append(
+                    float(risk_labels[risk_idx].mean().item())
+                )
+
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
@@ -929,6 +1110,14 @@ def ppo_update(
         "aux_forbid_valid_fraction": (
             float(np.mean(aux_forbid_valid_fractions))
             if aux_forbid_valid_fractions
+            else float("nan")
+        ),
+        "aux_risk_loss": (
+            float(np.mean(aux_risk_losses)) if aux_risk_losses else float("nan")
+        ),
+        "aux_risk_positive_fraction": (
+            float(np.mean(aux_risk_positive_fractions))
+            if aux_risk_positive_fractions
             else float("nan")
         ),
     }
@@ -1197,6 +1386,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aux-bc-reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--aux-bc-success-weight", type=float, default=2.0)
     parser.add_argument("--aux-bc-failed-weight", type=float, default=0.75)
+    parser.add_argument(
+        "--aux-risk-csv",
+        nargs="+",
+        type=Path,
+        default=[],
+        help=(
+            "Optional rollout-MC CSVs collected with observation features. "
+            "Used for an auxiliary selected-action risk head."
+        ),
+    )
+    parser.add_argument(
+        "--aux-risk-coef",
+        type=float,
+        default=0.0,
+        help="Weight for the auxiliary Monte-Carlo risk loss. Disabled when 0.",
+    )
+    parser.add_argument(
+        "--aux-risk-target",
+        choices=["agent_failure", "team_failure"],
+        default="agent_failure",
+    )
+    parser.add_argument("--aux-risk-batch-size", type=int, default=512)
+    parser.add_argument("--aux-risk-positive-weight", type=float, default=4.0)
+    parser.add_argument("--aux-risk-negative-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--aux-risk-max-samples",
+        type=int,
+        default=0,
+        help="Deterministically subsample risk rows when >0.",
+    )
+    parser.add_argument("--aux-risk-cache", type=Path)
+    parser.add_argument("--aux-risk-refresh-cache", action="store_true")
     parser.add_argument("--normalize-advantages", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
@@ -1302,6 +1523,17 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
         and not args.aux_bc_cache.exists()
     ):
         raise ValueError("--aux-bc-cache does not exist and no --aux-bc-csv was given")
+    if args.aux_risk_coef != 0.0 and not args.aux_risk_csv and args.aux_risk_cache is None:
+        raise ValueError(
+            "--aux-risk-coef requires --aux-risk-csv or --aux-risk-cache"
+        )
+    if (
+        args.aux_risk_coef != 0.0
+        and not args.aux_risk_csv
+        and args.aux_risk_cache is not None
+        and not args.aux_risk_cache.exists()
+    ):
+        raise ValueError("--aux-risk-cache does not exist and no --aux-risk-csv was given")
     return args
 
 
@@ -1353,6 +1585,7 @@ def main() -> int:
             parameter.requires_grad_(False)
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.learning_rate)
     aux_bc_data, aux_bc_stats = load_aux_bc_dataset(args)
+    aux_risk_data, aux_risk_stats = load_aux_risk_dataset(args)
     if aux_bc_data is not None and aux_bc_stats is not None:
         print(
             "aux_bc "
@@ -1367,6 +1600,17 @@ def main() -> int:
             f"anchor_samples={aux_bc_stats['anchor_samples']} "
             f"coef={args.aux_bc_coef} "
             f"forbid_coef={args.aux_bc_forbid_coef}",
+            flush=True,
+        )
+    if aux_risk_data is not None and aux_risk_stats is not None:
+        print(
+            "aux_risk "
+            f"samples={aux_risk_stats['samples']} "
+            f"source_rows={aux_risk_stats['source_rows']} "
+            f"obs_columns={aux_risk_stats['obs_columns']} "
+            f"target={aux_risk_stats['target']} "
+            f"positive_fraction={aux_risk_stats['positive_fraction']:.6g} "
+            f"coef={args.aux_risk_coef}",
             flush=True,
         )
 
@@ -1385,6 +1629,7 @@ def main() -> int:
             rollout,
             anchor_policy,
             aux_bc_data,
+            aux_risk_data,
         )
         teacher_loss_text = (
             f" teacher_loss={loss_stats['teacher_loss']:.6g}"
@@ -1407,6 +1652,12 @@ def main() -> int:
             f" aux_forbid_loss={loss_stats['aux_forbid_loss']:.6g}"
             f" aux_forbid_valid={loss_stats['aux_forbid_valid_fraction']:.3g}"
             if not np.isnan(loss_stats["aux_forbid_loss"])
+            else ""
+        )
+        aux_risk_text = (
+            f" aux_risk_loss={loss_stats['aux_risk_loss']:.6g}"
+            f" aux_risk_pos={loss_stats['aux_risk_positive_fraction']:.3g}"
+            if not np.isnan(loss_stats["aux_risk_loss"])
             else ""
         )
         action_conflict_text = (
@@ -1436,6 +1687,7 @@ def main() -> int:
             f"{anchor_kl_text}"
             f"{aux_bc_text}"
             f"{aux_forbid_text}"
+            f"{aux_risk_text}"
             f"{action_conflict_text}",
             flush=True,
         )
@@ -1446,6 +1698,7 @@ def main() -> int:
             "model": policy.state_dict(),
             "config": vars(args),
             "aux_bc_stats": aux_bc_stats,
+            "aux_risk_stats": aux_risk_stats,
         },
         args.output_checkpoint,
     )
