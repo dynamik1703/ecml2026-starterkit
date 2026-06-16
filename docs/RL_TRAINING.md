@@ -5866,3 +5866,55 @@ v2 focus action-event head audit:
   train a centralized action-value/risk critic from full rollouts or use
   constrained policy improvement with explicit per-seed Success-regression
   constraints, not static thresholding on mined counterfactual labels.
+
+Rollout-level Monte-Carlo risk critic prototype:
+- Added `tools/collect_rollout_mc_dataset.py` to record every selected
+  agent-step action during full policy rollouts. Each row includes scene/seed,
+  agent state, selected action, action mask, optional observation features,
+  immediate reward, final per-agent success/failure, final team success,
+  normalized episode reward, and number of failed agents.
+- Added `tools/evaluate_rollout_mc_critic.py` to train a compact binary MLP
+  on these selected-action rows and evaluate whether early rollout rows can
+  predict final `agent_failure` or `team_failure`.
+- Smoke dataset on scene-1 seeds `5700..5701`:
+  - `5766` action rows.
+  - Mean reward `0.976585`, mean team success `0.916667`.
+  - Same-train/validation smoke critic reached `AUC=0.9635` and
+    `AP=0.870806`, which only validates the tool path, not generalization.
+- Cross-seed scene-1 data:
+
+| window | rows | mean reward | mean team success | failed-agent rows |
+| --- | ---: | ---: | ---: | ---: |
+| `5700..5719` | `59454` | `0.868142` | `0.85` | `9953` |
+| `5800..5819` | `57204` | `0.810620` | `0.85` | `8837` |
+
+- Cross-seed `agent_failure` critic with observation features:
+
+| train -> validation | features | AUC | AP | threshold precision | threshold recall | top-5% precision | top-5% recall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `5700 -> 5800` | `98` | `0.893529` | `0.761881` | `0.424027` | `0.770850` | `0.999650` | `0.323526` |
+| `5800 -> 5700` | `98` | `0.939444` | `0.835591` | `0.510843` | `0.833116` | `1.000000` | `0.298704` |
+
+- Cross-seed `agent_failure` critic without `obs_*` features:
+
+| train -> validation | features | AUC | AP | threshold precision | threshold recall | top-5% precision | top-5% recall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `5700 -> 5800` | `14` | `0.909704` | `0.789154` | `0.354406` | `0.890687` | `0.999301` | `0.323413` |
+| `5800 -> 5700` | `14` | `0.907749` | `0.781445` | `0.426375` | `0.858234` | `0.983518` | `0.293781` |
+
+- Interpretation: this is the strongest learned signal so far. The top-risk
+  rows generalize across seed windows and remain strong even with only compact
+  action/mask/policy metadata, which makes the signal much easier to integrate
+  into RL than the previous high-dimensional event-head attempts.
+- Caveat: current labels are Monte-Carlo outcome labels, not causal action
+  labels. Every row from an eventually failed agent is marked risky, even if
+  many earlier actions were harmless. This is still useful as a critic/feature
+  target, but not yet a direct veto policy.
+- Decision: promote this path. Next steps are:
+  1. collect broader rollout MC data over more scenes and seed windows;
+  2. add temporal features such as remaining distance, time-to-deadlock
+     proxies, and per-agent progress deltas;
+  3. train the risk critic as an auxiliary head inside PPO or as a candidate
+     scorer, not as a brittle external hard gate;
+  4. evaluate whether risk-aware action selection improves Success without
+     changing seeds that already solve cleanly.
