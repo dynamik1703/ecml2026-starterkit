@@ -5918,3 +5918,42 @@ Rollout-level Monte-Carlo risk critic prototype:
      scorer, not as a brittle external hard gate;
   4. evaluate whether risk-aware action selection improves Success without
      changing seeds that already solve cleanly.
+
+Broader compact MC-risk audit:
+- Collected compact rollout-MC data without `obs_*` features for
+  `scene_2..scene_4` on seed windows `5700..5719` and `5800..5819`, reusing
+  the scene-1 data above with `--drop-observation-features` at evaluation time.
+- Per-window summary:
+
+| scene/window | rows | mean reward | mean team success |
+| --- | ---: | ---: | ---: |
+| `scene_2 5700..5719` | `51330` | `0.917486` | `0.950000` |
+| `scene_2 5800..5819` | `51732` | `0.864046` | `0.966667` |
+| `scene_3 5700..5719` | `38844` | `0.800175` | `0.916667` |
+| `scene_3 5800..5819` | `35952` | `0.857292` | `0.958333` |
+| `scene_4 5700..5719` | `48516` | `0.887253` | `0.941667` |
+| `scene_4 5800..5819` | `50280` | `0.882119` | `0.933333` |
+
+- Multi-scene compact critic, `scene_1..scene_4`, seed-window split:
+
+| train -> validation | rows train/val | AUC | AP | top-5% precision | top-5% recall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `5700 -> 5800` | `198144 / 195168` | `0.917245` | `0.714598` | `0.914839` | `0.527975` |
+| `5800 -> 5700` | `195168 / 198144` | `0.923365` | `0.745616` | `0.952660` | `0.466005` |
+
+- Leave-one-scene-out compact critic:
+
+| train scenes | validation scene | rows train/val | AUC | AP | top-5% precision | top-5% recall |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `1,2,3` | `4` | `294516 / 98796` | `0.877504` | `0.598940` | `0.705466` | `0.488574` |
+| `1,2,4` | `3` | `318516 / 74796` | `0.881678` | `0.641149` | `0.838770` | `0.507687` |
+
+- Interpretation: compact MC-risk generalizes across both seed windows and
+  held-out scenes, but scene-holdout degradation is real. This is not yet a
+  safe standalone hard gate. It is a strong auxiliary learning signal and a
+  plausible soft scorer for candidate actions.
+- Updated direction: use this critic to make the RL policy risk-aware, not to
+  replace the existing sequence selector abruptly. The highest-value next
+  experiment is a risk-auxiliary PPO run where the actor still learns from
+  reward/teacher/anchor constraints, while an auxiliary head predicts
+  rollout-level failure risk from compact policy state.
