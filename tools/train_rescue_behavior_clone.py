@@ -141,6 +141,13 @@ def read_rescue_events(
                 env_time = int(float(row["env_time"]))
                 agent_id = int(float(row["agent_id"]))
                 forced_action = int(float(row["forced_action"]))
+                candidate_value = safe_float(row.get("candidate_action"))
+                if np.isfinite(candidate_value):
+                    candidate_action = int(candidate_value)
+                else:
+                    candidate_action = forced_action
+                if candidate_action < 0 or candidate_action >= ACTION_COUNT:
+                    candidate_action = forced_action
                 if forced_action < 0 or forced_action >= ACTION_COUNT:
                     continue
                 score = utility(row, args)
@@ -156,6 +163,7 @@ def read_rescue_events(
                         ),
                         "forced_action": forced_action,
                         "baseline_action": int(float(row.get("baseline_action", -1))),
+                        "candidate_action": candidate_action,
                         "utility": score,
                         "reward_delta": safe_float(row.get("reward_delta")),
                         "success_delta": safe_float(row.get("success_delta")),
@@ -199,14 +207,17 @@ def sample_weight_for_rescue(event: dict[str, Any], args: argparse.Namespace) ->
 def collect_training_samples(
     args: argparse.Namespace,
     rescue_events: dict[int, dict[tuple[int, int], dict[str, Any]]],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, Any]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, Any]]:
     policy = instantiate_policy(args.baseline_policy, args.baseline_checkpoint)
     observations_out: list[np.ndarray] = []
     actions_out: list[int] = []
     weights_out: list[float] = []
+    forbidden_actions_out: list[int] = []
     rescue_hits = 0
     rescue_misses = 0
     rescue_invalid = 0
+    forbidden_hits = 0
+    forbidden_invalid = 0
     rescue_baseline_mismatches = 0
     anchor_samples = 0
     anchor_action_counts: Counter[int] = Counter()
@@ -242,6 +253,20 @@ def collect_training_samples(
                         observations_out.append(np.asarray(observation, dtype=np.float32))
                         actions_out.append(forced_action)
                         weights_out.append(sample_weight_for_rescue(event, args))
+                        forbidden_action = -1
+                        if event.get("event_kind") == "negative_baseline":
+                            candidate_action = int(event.get("candidate_action", -1))
+                            if valid_action(
+                                observation,
+                                candidate_action,
+                                args.obs_size,
+                                args.n_actions,
+                            ):
+                                forbidden_action = candidate_action
+                                forbidden_hits += 1
+                            else:
+                                forbidden_invalid += 1
+                        forbidden_actions_out.append(forbidden_action)
                         rescue_hits += 1
                         if event.get("event_kind") == "negative_baseline":
                             avoidance_hits += 1
@@ -260,6 +285,7 @@ def collect_training_samples(
                 observations_out.append(np.asarray(observation, dtype=np.float32))
                 actions_out.append(action)
                 weights_out.append(args.anchor_weight)
+                forbidden_actions_out.append(-1)
                 anchor_samples += 1
                 anchor_action_counts[action] += 1
 
@@ -276,6 +302,8 @@ def collect_training_samples(
         "samples": len(observations_out),
         "rescue_hits": rescue_hits,
         "avoidance_hits": avoidance_hits,
+        "forbidden_hits": forbidden_hits,
+        "forbidden_invalid": forbidden_invalid,
         "rescue_misses": rescue_misses,
         "rescue_invalid": rescue_invalid,
         "rescue_baseline_mismatches": rescue_baseline_mismatches,
@@ -289,6 +317,7 @@ def collect_training_samples(
         torch.as_tensor(np.asarray(observations_out, dtype=np.float32)),
         torch.as_tensor(actions_out, dtype=torch.long),
         torch.as_tensor(weights_out, dtype=torch.float32),
+        torch.as_tensor(forbidden_actions_out, dtype=torch.long),
         stats,
     )
 
@@ -509,7 +538,13 @@ def main() -> int:
         f"anchor_seeds={','.join(str(seed) for seed in args.anchor_seed_list)}",
         flush=True,
     )
-    observations, actions, weights, collection_stats = collect_training_samples(
+    (
+        observations,
+        actions,
+        weights,
+        _forbidden_actions,
+        collection_stats,
+    ) = collect_training_samples(
         args,
         rescue_events,
     )
@@ -518,6 +553,8 @@ def main() -> int:
         f"samples={collection_stats['samples']} "
         f"rescue_hits={collection_stats['rescue_hits']} "
         f"avoidance_hits={collection_stats['avoidance_hits']} "
+        f"forbidden_hits={collection_stats['forbidden_hits']} "
+        f"forbidden_invalid={collection_stats['forbidden_invalid']} "
         f"rescue_misses={collection_stats['rescue_misses']} "
         f"rescue_invalid={collection_stats['rescue_invalid']} "
         f"baseline_mismatches={collection_stats['rescue_baseline_mismatches']} "

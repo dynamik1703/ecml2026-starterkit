@@ -369,10 +369,13 @@ def parse_seed_list(value: str | None) -> list[int]:
 def load_aux_bc_dataset(
     args: argparse.Namespace,
 ) -> tuple[dict[str, torch.Tensor] | None, dict[str, Any] | None]:
-    if not args.aux_bc_csv or args.aux_bc_coef == 0.0:
-        if args.aux_bc_cache and args.aux_bc_coef != 0.0 and args.aux_bc_cache.exists():
+    aux_enabled = args.aux_bc_coef != 0.0 or args.aux_bc_forbid_coef != 0.0
+    if not args.aux_bc_csv or not aux_enabled:
+        if args.aux_bc_cache and aux_enabled and args.aux_bc_cache.exists():
             payload = torch.load(args.aux_bc_cache, map_location="cpu")
-            return payload["dataset"], payload.get("stats")
+            dataset = payload["dataset"]
+            ensure_aux_forbidden_actions(dataset)
+            return dataset, payload.get("stats")
         return None, None
 
     if (
@@ -381,7 +384,9 @@ def load_aux_bc_dataset(
         and not args.aux_bc_refresh_cache
     ):
         payload = torch.load(args.aux_bc_cache, map_location="cpu")
-        return payload["dataset"], payload.get("stats")
+        dataset = payload["dataset"]
+        ensure_aux_forbidden_actions(dataset)
+        return dataset, payload.get("stats")
 
     from tools.train_rescue_behavior_clone import (
         collect_training_samples as collect_aux_bc_samples,
@@ -411,7 +416,7 @@ def load_aux_bc_dataset(
         failed_weight=args.aux_bc_failed_weight,
     )
     rescue_events = read_aux_bc_events(args.aux_bc_csv, aux_args)
-    observations, actions, weights, stats = collect_aux_bc_samples(
+    observations, actions, weights, forbidden_actions, stats = collect_aux_bc_samples(
         aux_args,
         rescue_events,
     )
@@ -420,6 +425,7 @@ def load_aux_bc_dataset(
         "observations": observations,
         "actions": actions,
         "weights": weights,
+        "forbidden_actions": forbidden_actions,
     }
     if args.aux_bc_cache:
         args.aux_bc_cache.parent.mkdir(parents=True, exist_ok=True)
@@ -441,6 +447,12 @@ def load_aux_bc_dataset(
             args.aux_bc_cache,
         )
     return dataset, stats
+
+
+def ensure_aux_forbidden_actions(dataset: dict[str, torch.Tensor]) -> None:
+    if "forbidden_actions" in dataset:
+        return
+    dataset["forbidden_actions"] = torch.full_like(dataset["actions"], -1)
 
 
 def rollout_seed(
@@ -746,6 +758,8 @@ def ppo_update(
     anchor_kls = []
     aux_bc_losses = []
     aux_bc_valid_fractions = []
+    aux_forbid_losses = []
+    aux_forbid_valid_fractions = []
     for _ in range(args.ppo_epochs):
         for start in range(0, batch_size, args.minibatch_size):
             batch_idx = indices[start : start + args.minibatch_size]
@@ -796,10 +810,14 @@ def ppo_update(
                 loss = loss + args.anchor_kl_coef * anchor_kl
                 anchor_kls.append(float(anchor_kl.item()))
 
-            if aux_bc_data is not None and args.aux_bc_coef != 0.0:
+            if (
+                aux_bc_data is not None
+                and (args.aux_bc_coef != 0.0 or args.aux_bc_forbid_coef != 0.0)
+            ):
                 aux_observations = aux_bc_data["observations"]
                 aux_actions = aux_bc_data["actions"]
                 aux_weights = aux_bc_data["weights"]
+                aux_forbidden_actions = aux_bc_data["forbidden_actions"]
                 aux_count = aux_actions.shape[0]
                 if args.aux_bc_batch_size > 0 and args.aux_bc_batch_size < aux_count:
                     aux_idx = torch.randint(
@@ -810,27 +828,68 @@ def ppo_update(
                 else:
                     aux_idx = torch.arange(aux_count)
                 aux_logits, _ = policy.masked_forward(aux_observations[aux_idx])
-                aux_action_batch = aux_actions[aux_idx]
-                aux_action_logits = aux_logits.gather(
-                    1,
-                    aux_action_batch.unsqueeze(1),
-                ).squeeze(1)
-                valid_aux = torch.isfinite(aux_action_logits)
-                aux_bc_valid_fractions.append(float(valid_aux.float().mean().item()))
-                if valid_aux.any():
-                    aux_loss_values = F.cross_entropy(
-                        aux_logits[valid_aux],
-                        aux_action_batch[valid_aux],
-                        reduction="none",
+                if args.aux_bc_coef != 0.0:
+                    aux_action_batch = aux_actions[aux_idx]
+                    aux_action_logits = aux_logits.gather(
+                        1,
+                        aux_action_batch.unsqueeze(1),
+                    ).squeeze(1)
+                    valid_aux = torch.isfinite(aux_action_logits)
+                    aux_bc_valid_fractions.append(float(valid_aux.float().mean().item()))
+                    if valid_aux.any():
+                        aux_loss_values = F.cross_entropy(
+                            aux_logits[valid_aux],
+                            aux_action_batch[valid_aux],
+                            reduction="none",
+                        )
+                        aux_weight_batch = aux_weights[aux_idx][valid_aux]
+                        aux_bc_loss = (
+                            aux_loss_values * aux_weight_batch
+                        ).sum() / aux_weight_batch.sum().clamp_min(1e-6)
+                    else:
+                        aux_bc_loss = aux_logits.new_tensor(0.0)
+                    loss = loss + args.aux_bc_coef * aux_bc_loss
+                    aux_bc_losses.append(float(aux_bc_loss.item()))
+
+                if args.aux_bc_forbid_coef != 0.0:
+                    forbidden_action_batch = aux_forbidden_actions[aux_idx]
+                    forbidden_mask = forbidden_action_batch >= 0
+                    aux_forbid_valid_fractions.append(
+                        float(forbidden_mask.float().mean().item())
                     )
-                    aux_weight_batch = aux_weights[aux_idx][valid_aux]
-                    aux_bc_loss = (
-                        aux_loss_values * aux_weight_batch
-                    ).sum() / aux_weight_batch.sum().clamp_min(1e-6)
-                else:
-                    aux_bc_loss = aux_logits.new_tensor(0.0)
-                loss = loss + args.aux_bc_coef * aux_bc_loss
-                aux_bc_losses.append(float(aux_bc_loss.item()))
+                    if forbidden_mask.any():
+                        forbidden_logits = aux_logits[forbidden_mask]
+                        forbidden_actions = forbidden_action_batch[forbidden_mask]
+                        selected_logits = forbidden_logits.gather(
+                            1,
+                            forbidden_actions.unsqueeze(1),
+                        ).squeeze(1)
+                        valid_forbidden = torch.isfinite(selected_logits)
+                        if valid_forbidden.any():
+                            forbidden_logits = forbidden_logits[valid_forbidden]
+                            forbidden_actions = forbidden_actions[valid_forbidden]
+                            forbidden_probs = torch.softmax(
+                                forbidden_logits,
+                                dim=1,
+                            ).gather(
+                                1,
+                                forbidden_actions.unsqueeze(1),
+                            ).squeeze(1)
+                            forbid_loss_values = -torch.log1p(
+                                -forbidden_probs.clamp(max=1.0 - 1e-6)
+                            )
+                            forbid_weight_batch = aux_weights[aux_idx][forbidden_mask][
+                                valid_forbidden
+                            ]
+                            aux_forbid_loss = (
+                                forbid_loss_values * forbid_weight_batch
+                            ).sum() / forbid_weight_batch.sum().clamp_min(1e-6)
+                        else:
+                            aux_forbid_loss = aux_logits.new_tensor(0.0)
+                    else:
+                        aux_forbid_loss = aux_logits.new_tensor(0.0)
+                    loss = loss + args.aux_bc_forbid_coef * aux_forbid_loss
+                    aux_forbid_losses.append(float(aux_forbid_loss.item()))
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -862,6 +921,14 @@ def ppo_update(
         "aux_bc_valid_fraction": (
             float(np.mean(aux_bc_valid_fractions))
             if aux_bc_valid_fractions
+            else float("nan")
+        ),
+        "aux_forbid_loss": (
+            float(np.mean(aux_forbid_losses)) if aux_forbid_losses else float("nan")
+        ),
+        "aux_forbid_valid_fraction": (
+            float(np.mean(aux_forbid_valid_fractions))
+            if aux_forbid_valid_fractions
             else float("nan")
         ),
     }
@@ -1081,6 +1148,15 @@ def parse_args() -> argparse.Namespace:
         help="Weight for the auxiliary BC loss. Disabled when 0.",
     )
     parser.add_argument(
+        "--aux-bc-forbid-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Weight for penalizing event_kind=negative_baseline candidate "
+            "actions via -log(1 - pi(candidate_action)). Disabled when 0."
+        ),
+    )
+    parser.add_argument(
         "--aux-bc-batch-size",
         type=int,
         default=128,
@@ -1213,10 +1289,14 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     args.aux_bc_anchor_seed_list = parse_seed_list(args.aux_bc_anchor_seeds)
     if not args.aux_bc_anchor_seed_list:
         args.aux_bc_anchor_seed_list = list(args.training_seed_list)
-    if args.aux_bc_coef != 0.0 and not args.aux_bc_csv and args.aux_bc_cache is None:
-        raise ValueError("--aux-bc-coef requires --aux-bc-csv or --aux-bc-cache")
+    aux_enabled = args.aux_bc_coef != 0.0 or args.aux_bc_forbid_coef != 0.0
+    if aux_enabled and not args.aux_bc_csv and args.aux_bc_cache is None:
+        raise ValueError(
+            "--aux-bc-coef or --aux-bc-forbid-coef requires --aux-bc-csv "
+            "or --aux-bc-cache"
+        )
     if (
-        args.aux_bc_coef != 0.0
+        aux_enabled
         and not args.aux_bc_csv
         and args.aux_bc_cache is not None
         and not args.aux_bc_cache.exists()
@@ -1279,11 +1359,14 @@ def main() -> int:
             f"samples={aux_bc_stats['samples']} "
             f"rescue_hits={aux_bc_stats['rescue_hits']} "
             f"avoidance_hits={aux_bc_stats['avoidance_hits']} "
+            f"forbidden_hits={aux_bc_stats.get('forbidden_hits', 0)} "
+            f"forbidden_invalid={aux_bc_stats.get('forbidden_invalid', 0)} "
             f"rescue_misses={aux_bc_stats['rescue_misses']} "
             f"rescue_invalid={aux_bc_stats['rescue_invalid']} "
             f"baseline_mismatches={aux_bc_stats['rescue_baseline_mismatches']} "
             f"anchor_samples={aux_bc_stats['anchor_samples']} "
-            f"coef={args.aux_bc_coef}",
+            f"coef={args.aux_bc_coef} "
+            f"forbid_coef={args.aux_bc_forbid_coef}",
             flush=True,
         )
 
@@ -1320,6 +1403,12 @@ def main() -> int:
             if not np.isnan(loss_stats["aux_bc_loss"])
             else ""
         )
+        aux_forbid_text = (
+            f" aux_forbid_loss={loss_stats['aux_forbid_loss']:.6g}"
+            f" aux_forbid_valid={loss_stats['aux_forbid_valid_fraction']:.3g}"
+            if not np.isnan(loss_stats["aux_forbid_loss"])
+            else ""
+        )
         action_conflict_text = (
             " action_conflict_risk="
             f"{rollout_stats['action_conflict_weighted_risk_mean']:.6g}"
@@ -1346,6 +1435,7 @@ def main() -> int:
             f"{teacher_loss_text}"
             f"{anchor_kl_text}"
             f"{aux_bc_text}"
+            f"{aux_forbid_text}"
             f"{action_conflict_text}",
             flush=True,
         )

@@ -5742,3 +5742,24 @@ Sequence Success-risk critic audit:
   probability, with the baseline policy as a KL anchor. The goal is not another
   hand-written gate; the goal is to make the learned policy internalize the
   risk boundary and improve recall without reintroducing Success regressions.
+
+Aux-BC forbid loss for constrained PPO:
+- Implemented `--aux-bc-forbid-coef` in `tools/train_masked_ppo.py`.
+  Negative-baseline Aux-BC events now still train the safe baseline action, but
+  can additionally penalize the known bad candidate action with
+  `-log(1 - pi(candidate_action))`.
+- `tools/train_rescue_behavior_clone.py` now carries `candidate_action` through
+  the sampled dataset as `forbidden_actions`, while preserving backward
+  compatibility for old caches by defaulting missing forbidden actions to `-1`.
+- Smoke test on `/private/tmp/ecml_v2_scene1_5700_conflict_aux_events.csv`:
+  collection produced `177` samples, `33` rescue hits, `8` avoidance hits,
+  `6` valid forbidden candidate actions, `2` invalid forbidden candidates, and
+  `144` anchor samples.
+- Mini PPO smoke run from `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` with
+  `aux_bc_coef=0.01`, `aux_bc_forbid_coef=0.05`, one update on seed `5700`:
+  `success_rate=0.833333`, `aux_bc_loss=0.693308`,
+  `aux_forbid_loss=0.346903`, `aux_forbid_valid=0.0451`.
+- Interpretation: this is the first concrete step away from external gating
+  toward internalized risk learning. It is not a deployable checkpoint yet; the
+  next check is whether longer constrained PPO runs improve Success deltas on
+  holdouts without repeating the raw AuxPPO regression pattern.
