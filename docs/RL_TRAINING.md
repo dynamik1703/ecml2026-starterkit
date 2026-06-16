@@ -5540,3 +5540,42 @@ GlobalObs v2 prefix selector fourth-window rejection:
   data alone is not enough; the selector needs stronger risk features or a
   conservative rule prefilter, especially for high-reward/low-Success v2
   prefixes in hard scenes.
+
+GlobalObs v2 prefix selector veto audit:
+- Added `tools/evaluate_prefix_audit_veto_rules.py` to join ranker audit CSVs
+  with the mined prefix JSON rows and test explicit veto rules before any
+  online deployment. The tool reports both split-level accepted rows and
+  deduplicated unique candidates, because the same candidate is often accepted
+  by several bootstrap split seeds.
+- Tested simple veto candidates on the fourth-window failure:
+  `wide_multi_agent_prefix`, `long_multi_agent_prefix`,
+  `repeated_right_to_forward_span`, `early_multi_agent_burst`, and a combined
+  risk rule. On `5600`, `repeated_right_to_forward_span` removes the threshold
+  `4` leak (`scene_1 seed 5603`, prefix `3`,
+  `MOVE_RIGHT->MOVE_FORWARD` repeated over a 43-step span).
+- The same family is not deployable as a broad rule:
+  - On `5400`, `wide_multi_agent_prefix`/`combined_risk_v1` remove the only
+    accepted Success-positive candidates: two unique good rows, reward delta
+    sum `+1.121723`, Success delta sum `+0.666667`.
+  - The missing `5300` JSON prevents full feature-veto replay there, but the
+    accepted good row is `scene_1 seed 5312`, prefix `6`, six
+    `MOVE_RIGHT->MOVE_FORWARD` events across agents. A coarse repeated-forward
+    veto would likely remove it too. This is exactly the pattern conflict that
+    makes handcrafted vetoes brittle.
+- Pure strict thresholding is safer but very low recall across the available
+  ranker audits:
+
+| validation block | threshold | unique good | unique neutral | unique bad | Success +/- | reward sum | Success sum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| train 5300 -> val 5400 | `5` | 2 | 0 | 0 | `2/0` | `+1.121723` | `+0.666667` |
+| train 5400 -> val 5300 | `5` | 1 | 0 | 0 | `1/0` | `+0.279570` | `+0.166667` |
+| train 5300+5400 -> val 5500 | `5` | 0 | 0 | 0 | `0/0` | `0` | `0` |
+| train 5300+5400+5500 -> val 5600 | `5` | 0 | 0 | 0 | `0/0` | `0` | `0` |
+
+- Decision: do not add a hand-coded prefix veto to the policy. The only
+  packaging candidate from this audit is an extremely conservative rank-score
+  threshold around `5`, which has shown zero bad leakage so far but too little
+  recall to be a major performance lever. Next step should be a fifth untouched
+  window and a richer sequence/risk model that can distinguish the good
+  `5312`-style multi-agent right-to-forward prefix from the bad `5603`-style
+  one.
