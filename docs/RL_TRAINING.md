@@ -5418,3 +5418,25 @@ Global conflict BC v2 prefix diagnostics:
   `scene_1` hard negatives and balanced positive prefix sequences. Next useful
   model step is a risk-aware sequence selector trained on larger prefix traces,
   not another global PPO run.
+
+Scene-1 GlobalObs BC fine-tune check:
+- Fine-tuned from `ecml_global_obs_bc_v2_mixed.pt` on `scene_1`, `60`
+  episodes, seed `6400`, `3` epochs. Output checkpoint stayed in
+  `/private/tmp/ecml_global_obs_bc_v4_scene1_ft.pt` and was not promoted.
+- Collection stats: `164602` samples, teacher reward mean `0.896510`, teacher
+  Success mean `0.880556`, final BC accuracy `0.999800`. The relatively low
+  teacher Success already suggested limited ceiling for this fine-tune.
+- Evaluated on the same larger fresh holdout (`5300..5319`, scenes `1..4`):
+
+| candidate | scene_1 | scene_2 | scene_3 | scene_4 | aggregate |
+| --- | --- | --- | --- | --- | --- |
+| v2 Success | `0.841667` | `0.966667` | `0.866667` | `0.933333` | `0.902083` |
+| v4 Success | `0.841667` | `0.966667` | `0.858333` | `0.933333` | `0.900000` |
+| v2 reward | `0.836956` | `0.890717` | `0.835562` | `0.901270` | `0.866126` |
+| v4 reward | `0.855198` | `0.894254` | `0.836159` | `0.901270` | `0.871720` |
+
+- Interpretation: scene_1 reward improved, but scene_1 Success did not improve
+  and scene_3 Success regressed. v4 is therefore not a safe replacement despite
+  slightly higher aggregate reward than v2/reference on this slice.
+- Decision: reject v4 as a default policy. It may be useful later as a
+  reward-oriented specialist candidate, but only behind a stronger selector.
