@@ -5604,3 +5604,48 @@ GlobalObs v2 fifth-window standalone check:
   targeted prefix mining on the fifth-window Success wins/losses plus the
   previous windows, followed by a much stricter sequence/risk selector or
   direct RL training with an explicit anti-regression objective.
+
+GlobalObs v2 fifth-window prefix mining and selector check:
+- Mined focused v2 prefixes on the fifth window (`5700..5719`) using all
+  Success wins/losses plus large reward gains/losses per scene. This produced
+  `270` prefix rows over `45` selected scene/seed cases, prefixes `1..6`.
+
+| prefix_len | rows | good | neutral | bad | reward mean | Success mean | reward W/L | Success W/L |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 45 | 5 | 33 | 7 | `-0.022072` | `0` | `4/8` | `3/3` |
+| 2 | 45 | 8 | 26 | 11 | `-0.015136` | `0` | `8/11` | `4/5` |
+| 3 | 45 | 12 | 19 | 14 | `-0.022260` | `-0.011111` | `12/14` | `5/7` |
+| 4 | 45 | 11 | 16 | 18 | `-0.035992` | `-0.022222` | `11/18` | `6/9` |
+| 5 | 45 | 10 | 15 | 20 | `-0.045528` | `-0.029630` | `11/19` | `6/10` |
+| 6 | 45 | 14 | 11 | 20 | `-0.018872` | `-0.007407` | `15/19` | `6/9` |
+
+- Scene-level label split:
+  - `scene_1`: `27/14/19` good/neutral/bad, Success delta sum `+3.333333`.
+  - `scene_2`: `1/51/8`, Success delta sum `0`.
+  - `scene_3`: `25/31/34`, Success delta sum `-2.166667`.
+  - `scene_4`: `7/24/29`, Success delta sum `-4.333333`.
+- Interpretation: `scene_1` contains useful v2 rescue prefix labels; `scene_4`
+  is mostly hard negative. The data is valuable for risk training, but again
+  not for blindly increasing v2 usage.
+- Strict sequence-ranker check, train on `5400+5500+5600`, validate on `5700`:
+  - Threshold `4/5`: no accepts.
+  - Threshold `3`: `accepted_good=2`, `accepted_bad=1`,
+    `accepted_success_positive=1`, `accepted_success_negative=0`,
+    reward sum `+0.061789`, Success sum `+0.166667`.
+  - Threshold `2.5`: `accepted_good=8`, `accepted_bad=3`,
+    `accepted_success_positive=3`, `accepted_success_negative=0`,
+    reward sum `+0.343396`, Success sum `+0.500000`.
+  Lower thresholds still avoid Success-negative leakage on this window, but
+  leak reward-negative rows.
+- Regression check, train on `5400+5500+5700`, validate on `5600`:
+  - Threshold `2.5+`: no accepts, so the previous high-score 5600 leak is
+    suppressed by adding 5700 hard negatives.
+  - Threshold `2`: `accepted_good=3`, `accepted_bad=1`,
+    `accepted_success_positive=0`, `accepted_success_negative=1`,
+    Success sum `-0.166667`; therefore lower thresholds remain unsafe.
+- Decision: more hard-negative data helps safety but collapses recall. The
+  current learned prefix selector is still not a high-impact winner component.
+  Next model step should change the objective, not just add more rows:
+  optimize for Success-risk first, allow reward-only gains only after a
+  calibrated risk head, or train an RL policy with explicit mined-prefix
+  anti-regression loss.
