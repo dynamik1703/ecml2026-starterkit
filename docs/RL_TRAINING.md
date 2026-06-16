@@ -5511,3 +5511,32 @@ GlobalObs v2 prefix selector third-window validation:
   more prefix data, especially independent positive families, then exporting
   and wiring the selector only if zero-bad persists on a fourth untouched
   window.
+
+GlobalObs v2 prefix selector fourth-window rejection:
+- Added fourth untouched comparison window `5600..5619`, scenes `1..4`, `80`
+  total episodes.
+- v2 versus current `SequenceSuccessPolicy`: reward mean `0.836002` vs
+  `0.810109` (`reward_delta_mean=+0.025893`), but Success `0.883333` vs
+  `0.893750` (`success_delta_mean=-0.010417`). W/L/T: reward `34/23/23`,
+  Success `11/16/53`.
+- Mined focused prefixes `1..6` on the 5600 window. Aggregate:
+
+| prefix_len | rows | good | neutral | bad | reward mean | Success mean |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 40 | 6 | 31 | 3 | `+0.018086` | `+0.020833` |
+| 2 | 40 | 8 | 25 | 7 | `+0.013027` | `+0.012500` |
+| 3 | 40 | 13 | 17 | 10 | `+0.049680` | `+0.008333` |
+| 4 | 40 | 14 | 15 | 11 | `+0.036592` | `-0.012500` |
+| 5 | 40 | 18 | 11 | 11 | `+0.051494` | `0` |
+| 6 | 40 | 15 | 9 | 16 | `+0.034926` | `-0.020833` |
+
+- Strict ranker trained on 5300+5400+5500 prefix rows and validated on 5600:
+  - Threshold `5`: no accepts.
+  - Threshold `4`: `accepted_good=0`, `accepted_neutral=0`,
+    `accepted_bad=1`; Success delta sum `-0.166667`.
+  - Lower thresholds accepted more good rows but leaked many bad rows.
+- Decision: reject current v2-prefix selector for packaging. The previous
+  three-window safety did not generalize to the fourth untouched window. More
+  data alone is not enough; the selector needs stronger risk features or a
+  conservative rule prefilter, especially for high-reward/low-Success v2
+  prefixes in hard scenes.
