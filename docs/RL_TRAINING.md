@@ -6101,6 +6101,22 @@ Multi-scene risk-head and raw-margin guard:
     `0.800175 reward / 0.916667 Success`.
   - `scene_1 5800..5819`: retained the `5816` gain,
     window delta `+0.005177 reward / +0.008333 Success`.
+- Fresh canary, `5900..5919`, scenes `1..4`, multi-scene head plus raw-margin
+  guard:
+  - Aggregate delta over `80` episodes: `0.000000 reward / 0.000000 Success`.
+  - Per-scene reward W/L/T and Success W/L/T were `0/0/20` for all four scenes.
+  - One relax event was accepted in `scene_4 seed 5902`
+    (`MOVE_FORWARD->MOVE_LEFT`, risk candidate `0.2168`, risk delta `-0.2770`,
+    raw margin `0.4310`, listwise margin `0.9569`), but the final episode
+    outcome stayed identical to default.
+- Second fresh canary, `6000..6019`, scenes `1..4`, same settings:
+  - Aggregate delta over `80` episodes: `0.000000 reward / 0.000000 Success`.
+  - Per-scene reward W/L/T and Success W/L/T were again `0/0/20` for all four
+    scenes.
+  - One relax event was accepted in `scene_2 seed 6015`
+    (`MOVE_FORWARD->MOVE_LEFT`, risk candidate `0.2945`, risk delta `-0.3046`,
+    raw margin `0.2473`, listwise margin `0.7642`), with identical final
+    episode outcome.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
