@@ -5834,3 +5834,35 @@ Aux-forbid checkpoint as selector candidate:
   ActorCritic. We need a learned action-value/risk model that is trained on
   accepted/rejected candidate actions directly, so it can produce candidates in
   the selector's feature distribution instead of broad raw-policy deviations.
+
+v2 focus action-event head audit:
+- Re-ran `tools/evaluate_action_event_head.py` on the current v2 focused prefix
+  rows. This tests the action-value/risk direction directly: flatten prefix
+  rows into individual action events and train good/risk ensembles.
+- Split `5400+5500+5600 -> 5700`:
+  - Train/validation events: `2430/933`.
+  - Train good/neutral/bad: `975/851/604`; validation `234/347/352`.
+  - `153` numeric features.
+  - Best-looking strict rows were still catastrophic. Example
+    `min_good=0.5,max_risk=0.0005` accepted unique `3/1/22`
+    good/neutral/bad with `17` unique Success-negative events, reward sum
+    `-7.5217`, Success sum `-2.83333`.
+  - There was no configuration with at least one good unique accepted event and
+    zero unique Success-negative events.
+- Split `5400+5500+5700 -> 5600`:
+  - Train/validation events: `2526/837`.
+  - Train good/neutral/bad: `915/897/714`; validation `294/301/242`.
+  - Strict rows had positive aggregate reward in some settings but leaked
+    Success-negative events. Example `min_good=0.5,max_risk=0.001` accepted
+    unique `10/1/4` good/neutral/bad with `4` unique Success-negative events,
+    reward sum `+2.22486`, Success sum `+1.0`.
+  - Again there was no configuration with at least one good unique accepted
+    event and zero unique Success-negative events.
+- Interpretation: supervised event labels are still not enough. The action
+  interface is right, but the objective is wrong: it selects local-looking
+  actions that are globally unsafe under rollout.
+- Decision: stop spending time on standalone supervised action-event heads.
+  The next serious RL approach must use rollout-level credit assignment:
+  train a centralized action-value/risk critic from full rollouts or use
+  constrained policy improvement with explicit per-seed Success-regression
+  constraints, not static thresholding on mined counterfactual labels.
