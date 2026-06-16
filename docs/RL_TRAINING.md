@@ -5440,3 +5440,39 @@ Scene-1 GlobalObs BC fine-tune check:
   slightly higher aggregate reward than v2/reference on this slice.
 - Decision: reject v4 as a default policy. It may be useful later as a
   reward-oriented specialist candidate, but only behind a stronger selector.
+
+GlobalObs v2 prefix selector cross-window check:
+- Added a second fresh v2-vs-`SequenceSuccessPolicy` comparison window:
+  `5400..5419`, scenes `1..4`, `80` total episodes.
+- Aggregate: v2 reward mean `0.887016` vs reference `0.836401`
+  (`reward_delta_mean=+0.050615`), but v2 Success `0.897917` vs reference
+  `0.906250` (`success_delta_mean=-0.008333`). W/L/T: reward `37/22/21`,
+  Success `13/17/50`.
+- Mined focused v2 prefixes `1..6` on the 5400 window using all Success
+  regressions plus high-value non-regressions. Prefix aggregate:
+
+| prefix_len | rows | good | neutral | bad | reward mean | Success mean |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 44 | 8 | 32 | 4 | `-0.006790` | `0` |
+| 2 | 44 | 15 | 21 | 8 | `+0.010393` | `-0.003788` |
+| 3 | 44 | 22 | 16 | 6 | `+0.034048` | `+0.018939` |
+| 4 | 44 | 20 | 15 | 9 | `+0.033378` | `+0.003788` |
+| 5 | 44 | 22 | 11 | 11 | `+0.052608` | `+0.015152` |
+| 6 | 44 | 24 | 12 | 8 | `+0.064637` | `+0.015152` |
+
+- Cross-window sequence-ranker test:
+  - Train on 5300 prefix rows, validate on 5400 prefix rows: strict ranker at
+    threshold `2.5+` accepted zero bad rows and selected `4` split-level good
+    rows (`accepted_reward_delta_sum=+2.24345`,
+    `accepted_success_delta_sum=+1.33333`).
+  - Train on 5400 prefix rows, validate on 5300 prefix rows: strict ranker at
+    threshold `4` accepted zero bad rows and selected `5` split-level good rows
+    (`accepted_reward_delta_sum=+1.39785`,
+    `accepted_success_delta_sum=+0.83333`).
+- Caveat: the accepted audit rows are duplicated across ranker split seeds; in
+  each direction the safe accepted rows correspond to one very clear unique
+  seed/prefix family. This is a promising safety signal, not enough independent
+  coverage for deployment.
+- Decision: this is the first evidence that a risk-aware v2 prefix selector can
+  be useful. Next validation step is a third untouched window, then train on
+  two windows and validate on the third. Do not package the selector yet.
