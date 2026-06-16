@@ -639,6 +639,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_RISK_RELAX_MIN_LISTWISE_MARGIN",
             0.70,
         )
+        self.risk_relax_min_raw_margin = self._env_float(
+            "ECML_SEQUENCE_RISK_RELAX_MIN_RAW_MARGIN",
+            0.10,
+        )
         self.risk_relax_allow_reject_reason = bool(
             self._env_int("ECML_SEQUENCE_RISK_RELAX_ALLOW_REJECT_REASON", 0)
         )
@@ -1020,6 +1024,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 accepted=accepted,
                 scores=scores,
                 observation=observation,
+                detail=detail,
                 baseline_action=baseline_action,
                 candidate_action=candidate_action,
             )
@@ -1049,6 +1054,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         accepted: bool,
         scores: dict[str, float],
         observation: Any,
+        detail: dict[str, Any],
         baseline_action: int,
         candidate_action: int,
     ) -> tuple[bool, dict[str, float]]:
@@ -1074,6 +1080,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         if not accepted:
             if self._risk_head_relaxes_candidate(
                 scores=scores,
+                detail=detail,
                 baseline_action=baseline_action,
                 candidate_action=candidate_action,
             ):
@@ -1098,6 +1105,7 @@ class SequenceSuccessPolicy(RerankPolicy):
     def _risk_head_relaxes_candidate(
         self,
         scores: dict[str, float],
+        detail: dict[str, Any],
         baseline_action: int,
         candidate_action: int,
     ) -> bool:
@@ -1116,6 +1124,9 @@ class SequenceSuccessPolicy(RerankPolicy):
             )
             candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
             listwise_margin = float(scores.get("listwise_margin", float("-inf")))
+            raw_margin = float(
+                detail.get("candidate_raw_candidate_minus_baseline_logit", float("-inf"))
+            )
         except Exception:
             return False
         return (
@@ -1123,6 +1134,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             >= self.risk_relax_min_baseline_minus_candidate
             and candidate_risk <= self.risk_relax_max_candidate
             and listwise_margin >= self.risk_relax_min_listwise_margin
+            and raw_margin >= self.risk_relax_min_raw_margin
         )
 
     def _apply_candidate_guards(

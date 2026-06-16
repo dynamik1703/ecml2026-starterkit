@@ -6069,3 +6069,39 @@ Risk-head pretraining and selector relax:
   window. It is still scene-1-specific because the risk head was trained only
   on scene-1 MC data. Next useful step: train a multi-scene risk head and test
   strict risk-relax on `scene_1..scene_4`.
+
+Multi-scene risk-head and raw-margin guard:
+- Collected missing observation-feature rollout MC datasets for
+  `scene_2..scene_4`, windows `5700..5719` and `5800..5819`, using the same
+  `SequenceSuccessPolicy` baseline and `MyActionConflictObservationBuilder`.
+- Trained `/private/tmp/ecml_actor_risk_head_multiscene_5700.pt` from v4b on
+  `scene_1..scene_4`, `5700..5719`, and validated on `scene_1..scene_4`,
+  `5800..5819`:
+  - Before risk-head training: `AUC=0.383345`, `AP=0.110970`.
+  - After `12` epochs: `AUC=0.889485`, `AP=0.625807`,
+    `score_mean=0.204385`.
+- First multi-scene strict-relax test was not safe:
+  - `5800..5819`, scenes `1..4`: only `scene_1 seed 5816` changed,
+    aggregate `+0.001294 reward / +0.002083 Success`.
+  - `5700..5719`, scenes `1..4`: `scene_3 seed 5700` regressed by
+    `-0.376011 reward / -0.500000 Success`, aggregate
+    `-0.004700 reward / -0.006250 Success`.
+- Failure analysis:
+  - Bad `scene_3 seed 5700` relax event:
+    `MOVE_FORWARD->MOVE_LEFT`, risk candidate `0.2599`, risk delta `-0.2581`,
+    listwise margin `0.9152`, but raw candidate-vs-baseline logit margin only
+    `0.0033`.
+  - Good `scene_1 seed 5816` relax event:
+    `MOVE_FORWARD->MOVE_LEFT`, risk candidate `0.3060`, risk delta `-0.2603`,
+    listwise margin `0.7642`, raw margin `0.2636`.
+- Added a further default guard:
+  `ECML_SEQUENCE_RISK_RELAX_MIN_RAW_MARGIN=0.10`.
+- Focused re-test with multi-scene risk head:
+  - `scene_3 5700..5719`: exactly back to default,
+    `0.800175 reward / 0.916667 Success`.
+  - `scene_1 5800..5819`: retained the `5816` gain,
+    window delta `+0.005177 reward / +0.008333 Success`.
+- Interpretation: risk-relax is promising but extremely sensitive. The
+  current strict rule is acceptable as an experimental opt-in, not yet as a
+  default submission path. It needs a broader canary grid before enabling it in
+  the packaged policy.
