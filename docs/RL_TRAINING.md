@@ -5380,3 +5380,41 @@ Global conflict BC v2 follow-up:
 - Decision: keep v2 as the best learned GlobalObs artifact and use it as the
   starting point for the next RL/DAgger iteration. Do not replace the current
   default submission yet.
+
+Global conflict BC v2 prefix diagnostics:
+- Compared standalone `ecml_global_obs_bc_v2_mixed.pt` against the current
+  `SequenceSuccessPolicy` on the larger fresh holdout (`5300..5319`, scenes
+  `1..4`) with `tools/compare_policies.py`.
+- Aggregate over `80` episodes: v2 reward mean `0.866126` vs reference
+  `0.871191`, v2 Success `0.902083` vs reference `0.910417`; W/L/T:
+  reward `27/32/21`, Success `10/15/55`. This confirms v2 has real upside but
+  is not stable enough as a default replacement.
+- Focused v2 prefix mining on the `15` Success-regression seeds and `20`
+  high-value non-regression seeds. Mined adaptive candidate-vs-baseline
+  prefixes `1..6` with `tools/mine_diff_prefix_dataset.py`.
+- Prefix aggregate across `210` focused rows:
+
+| prefix_len | rows | good | neutral | bad | reward mean | Success mean |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 35 | 3 | 28 | 4 | `-0.005173` | `-0.028571` |
+| 2 | 35 | 7 | 22 | 6 | `+0.012057` | `+0.004762` |
+| 3 | 35 | 10 | 19 | 6 | `+0.023707` | `+0.014286` |
+| 4 | 35 | 10 | 15 | 10 | `-0.000040` | `-0.004762` |
+| 5 | 35 | 14 | 11 | 10 | `+0.011757` | `+0.019048` |
+| 6 | 35 | 18 | 7 | 10 | `+0.023963` | `0` |
+
+- Important qualitative finding: this is not a simple one-step gate problem.
+  Some seeds are prefix-fragile:
+  - `scene_1 seed 5313`: prefix 1 is good, prefix 2/3 are bad.
+  - `scene_1 seed 5316`: prefix 1 is bad, prefix 2/3 are good.
+  Therefore a selector must reason over short action sequences or online state
+  evolution, not only first-diff action features.
+- A strict listwise prefix ranker over prefix/event features was not safe:
+  with prefixes `1..6`, zero-bad acceptance occurred only at thresholds where
+  no nonbaseline prefix was accepted. Lower thresholds accepted useful good
+  prefixes but leaked bad rows.
+- Decision: do not deploy a v2-prefix selector yet. Next useful data step is
+  DAgger-style collection over broader fresh windows, with emphasis on
+  `scene_1` hard negatives and balanced positive prefix sequences. Next useful
+  model step is a risk-aware sequence selector trained on larger prefix traces,
+  not another global PPO run.
