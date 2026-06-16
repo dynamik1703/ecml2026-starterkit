@@ -6023,3 +6023,49 @@ First conservative risk-aux PPO probe:
   it. The risk signal is real, but it needs to enter the action-selection path
   more directly, for example as a risk-aware candidate scorer or per-action
   reranker, not only as a weak auxiliary gradient on the actor trunk.
+
+Risk-head pretraining and selector relax:
+- Added `tools/train_actor_risk_head.py`, which freezes the ActorCritic
+  trunk/policy/value heads and trains only `risk_head` from rollout-MC labels.
+  This isolates "learn a risk scorer" from "change the actor", avoiding raw
+  policy regressions while the scorer is being developed.
+- Trained `/private/tmp/ecml_actor_risk_head_scene1_5700.pt` from
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt`:
+  train CSV `/private/tmp/ecml_rollout_mc_scene1_5700.csv`, validation CSV
+  `/private/tmp/ecml_rollout_mc_scene1_5800.csv`, `12` epochs,
+  `batch_size=2048`, `lr=0.001`, positive/negative weights `4.0/1.0`.
+- Validation on scene-1 `5800` improved from `AUC=0.405114`,
+  `AP=0.200978` before training to `AUC=0.866990`, `AP=0.640618` after
+  training.
+- Added optional `SequenceSuccessPolicy` risk-head support:
+  - `ECML_SEQUENCE_RISK_HEAD_CHECKPOINT` loads a pretrained `risk_head`.
+  - With default thresholds, this only traces risk scores and does not change
+    behavior.
+  - `ECML_SEQUENCE_RISK_RELAX=1` enables a conservative relax path for rejected
+    candidates. Defaults are intentionally strict: only
+    `MOVE_FORWARD->MOVE_LEFT`, no existing `reject_reason`,
+    candidate risk `<=0.50`, risk improvement `>=0.25`, and listwise margin
+    `>=0.70`.
+- Risk trace audit on scene-1 `5800..5819`:
+  - `484` candidate decisions, `6` accepted and `478` rejected.
+  - Accepted candidates had mean `candidate-baseline risk=-0.184`; rejected
+    candidates had mean `+0.398`, so the pretrained risk head meaningfully
+    separates current accepts from most rejects.
+  - A looser relax rule was unsafe: on `5700..5719` it changed seeds `5701`
+    and `5707`, causing mean deltas `-0.017963 reward / -0.008333 Success`.
+- Strict risk-relax evaluation:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T | risk-relax accepts |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `5700..5719` | `0.000000` | `0.000000` | `0/0/20` | `0/0/20` | `0` |
+| `5800..5819` | `+0.005177` | `+0.008333` | `1/0/19` | `1/0/19` | `1` |
+
+- The single strict relax accept was seed `5816`, step `80`, agent `0`,
+  `MOVE_FORWARD->MOVE_LEFT`, candidate risk `0.4557`, risk delta `-0.2759`,
+  listwise margin `0.7642`; final episode delta was `+0.103535 reward` and
+  `+0.166667 Success`.
+- Interpretation: this is the first selector-side learned-risk intervention
+  that improves a holdout window without hurting the adjacent train-like
+  window. It is still scene-1-specific because the risk head was trained only
+  on scene-1 MC data. Next useful step: train a multi-scene risk head and test
+  strict risk-relax on `scene_1..scene_4`.

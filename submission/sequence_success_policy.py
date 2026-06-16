@@ -620,6 +620,28 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_RISK_HEAD_MIN_BASELINE_MINUS_CANDIDATE",
             float("-inf"),
         )
+        self.risk_relax_enabled = bool(
+            self._env_int("ECML_SEQUENCE_RISK_RELAX", 0)
+        )
+        self.risk_relax_transitions = self._env_transition_set(
+            "ECML_SEQUENCE_RISK_RELAX_TRANSITIONS",
+            default="MOVE_FORWARD->MOVE_LEFT",
+        )
+        self.risk_relax_min_baseline_minus_candidate = self._env_float(
+            "ECML_SEQUENCE_RISK_RELAX_MIN_BASELINE_MINUS_CANDIDATE",
+            0.25,
+        )
+        self.risk_relax_max_candidate = self._env_float(
+            "ECML_SEQUENCE_RISK_RELAX_MAX_CANDIDATE",
+            0.50,
+        )
+        self.risk_relax_min_listwise_margin = self._env_float(
+            "ECML_SEQUENCE_RISK_RELAX_MIN_LISTWISE_MARGIN",
+            0.70,
+        )
+        self.risk_relax_allow_reject_reason = bool(
+            self._env_int("ECML_SEQUENCE_RISK_RELAX_ALLOW_REJECT_REASON", 0)
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -1050,6 +1072,17 @@ class SequenceSuccessPolicy(RerankPolicy):
         scores["risk_head_candidate_minus_baseline"] = candidate_minus_baseline
         scores["risk_head_baseline_minus_candidate"] = baseline_minus_candidate
         if not accepted:
+            if self._risk_head_relaxes_candidate(
+                scores=scores,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+            ):
+                scores["selector_source"] = "risk_relax"
+                scores["risk_relax_original_reject_reason"] = str(
+                    scores.get("reject_reason", "")
+                )
+                scores.pop("reject_reason", None)
+                return True, scores
             return accepted, scores
         if candidate_risk > self.risk_head_max_candidate:
             scores["reject_reason"] = "risk_head_candidate_too_high"
@@ -1061,6 +1094,36 @@ class SequenceSuccessPolicy(RerankPolicy):
             scores["reject_reason"] = "risk_head_insufficient_improvement"
             return False, scores
         return accepted, scores
+
+    def _risk_head_relaxes_candidate(
+        self,
+        scores: dict[str, float],
+        baseline_action: int,
+        candidate_action: int,
+    ) -> bool:
+        if not self.risk_relax_enabled:
+            return False
+        if not self.risk_relax_allow_reject_reason and scores.get("reject_reason"):
+            return False
+        if (
+            self.risk_relax_transitions
+            and (baseline_action, candidate_action) not in self.risk_relax_transitions
+        ):
+            return False
+        try:
+            baseline_minus_candidate = float(
+                scores.get("risk_head_baseline_minus_candidate", float("-inf"))
+            )
+            candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
+            listwise_margin = float(scores.get("listwise_margin", float("-inf")))
+        except Exception:
+            return False
+        return (
+            baseline_minus_candidate
+            >= self.risk_relax_min_baseline_minus_candidate
+            and candidate_risk <= self.risk_relax_max_candidate
+            and listwise_margin >= self.risk_relax_min_listwise_margin
+        )
 
     def _apply_candidate_guards(
         self,
@@ -1586,6 +1649,10 @@ class SequenceSuccessPolicy(RerankPolicy):
         }
         if "reject_reason" in scores:
             row["reject_reason"] = str(scores["reject_reason"])
+        if "risk_relax_original_reject_reason" in scores:
+            row["risk_relax_original_reject_reason"] = str(
+                scores["risk_relax_original_reject_reason"]
+            )
         if "selector_source" in scores:
             row["selector_source"] = str(scores["selector_source"])
         for key in (
