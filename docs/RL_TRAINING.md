@@ -6191,6 +6191,39 @@ Multi-scene risk-head and raw-margin guard:
     class. The next useful implementation step is to export a small
     detour-specific value/risk model or rule-gated model, validate it on fresh
     seed windows, and only then consider an opt-in selector hook.
+- Exported an opt-in left-detour trace selector:
+  - Added `tools/merge_counterfactual_focus_labels.py` to merge trace focus
+    rows with counterfactual outcome labels.
+  - Built `/private/tmp/ecml_detour_left_trace_labels_6030_6040.csv` with `53`
+    exactly matched online trace-feature rows and trained
+    `/private/tmp/ecml_detour_left_trace_selector_v1.pt`.
+  - Packaged the model as
+    `submission/models/ecml_detour_left_trace_selector_v1.pt`.
+  - Added an opt-in `SequenceSuccessPolicy` hook:
+    `ECML_SEQUENCE_DETOUR_MODEL=<path>`. Defaults remain unchanged because no
+    detour model is loaded unless this env var is set.
+  - The hook only considers `MOVE_FORWARD->MOVE_LEFT` by default and keeps hard
+    guards near the mined distribution: risk improvement `>=0.15`, candidate
+    risk `<=0.65`, raw margin `>=0.05`, and candidate prefix cell intersections
+    `>=20`.
+  - With tuned opt-in thresholds
+    `ECML_SEQUENCE_DETOUR_MAX_BAD_PROBABILITY=0.50`,
+    `ECML_SEQUENCE_DETOUR_MAX_SUCCESS_REGRESSION_PROBABILITY=0.30`,
+    `ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY=0.30`, the packaged model
+    reproduces the known `scene_1 seed 6041` rescue:
+    `0.747423 / 0.833333 -> 0.909966 / 1.000000`.
+  - Same-window `6040..6049`, scenes `1..4`, with the tuned opt-in thresholds:
+    aggregate `+0.007888 reward / +0.004167 Success`, reward W/L/T `2/0/38`,
+    Success W/L/T `1/0/39`. Accepted detour-rescue events were in `scene_1`
+    only.
+  - Fresh holdout `6050..6059`, scenes `1..4`, same thresholds:
+    aggregate `+0.004109 reward / +0.000000 Success`, reward W/L/T `4/0/36`,
+    Success W/L/T `0/0/40`. Accepted detour-rescue events appeared in
+    `scene_1`, `scene_2`, and `scene_4`.
+  - Interpretation: this is the first learned opt-in selector hook with a
+    positive fresh holdout and no observed losses in the initial 40-episode
+    holdout. It is not ready as default; next step is broader fresh validation
+    and threshold tightening/promotion only if the loss-free pattern holds.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in

@@ -646,6 +646,35 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.risk_relax_allow_reject_reason = bool(
             self._env_int("ECML_SEQUENCE_RISK_RELAX_ALLOW_REJECT_REASON", 0)
         )
+        detour_model_path = os.environ.get("ECML_SEQUENCE_DETOUR_MODEL", "").strip()
+        self.detour_scorer = (
+            self._load_detour_scorer(detour_model_path)
+            if detour_model_path and Path(detour_model_path).exists()
+            else None
+        )
+        self.detour_transitions = self._env_transition_set(
+            "ECML_SEQUENCE_DETOUR_TRANSITIONS",
+            default="MOVE_FORWARD->MOVE_LEFT",
+        )
+        self.detour_min_baseline_minus_candidate = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MIN_BASELINE_MINUS_CANDIDATE",
+            0.15,
+        )
+        self.detour_max_candidate_risk = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MAX_CANDIDATE_RISK",
+            0.65,
+        )
+        self.detour_min_raw_margin = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MIN_RAW_MARGIN",
+            0.05,
+        )
+        self.detour_min_prefix_cell_intersections = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MIN_PREFIX_CELL_INTERSECTIONS",
+            20.0,
+        )
+        self.detour_allow_reject_reason = bool(
+            self._env_int("ECML_SEQUENCE_DETOUR_ALLOW_REJECT_REASON", 0)
+        )
         self._accepted_event_details: list[dict[str, Any]] = []
         self._seen_candidate_diff_policy_ids: set[int] = set()
         self._last_step: int | None = None
@@ -748,6 +777,34 @@ class SequenceSuccessPolicy(RerankPolicy):
             ),
             success_regression_std_coef=self._env_float(
                 "ECML_SEQUENCE_SUCCESS_REGRESSION_STD_COEF",
+                1.0,
+            ),
+        )
+
+    def _load_detour_scorer(self, detour_model_path: str) -> SequenceEnsembleScorer:
+        return SequenceEnsembleScorer(
+            checkpoint_path=detour_model_path,
+            min_utility=self._env_float("ECML_SEQUENCE_DETOUR_MIN_UTILITY", 0.0),
+            max_bad_probability=self._env_float(
+                "ECML_SEQUENCE_DETOUR_MAX_BAD_PROBABILITY",
+                0.20,
+            ),
+            min_success_probability=self._env_float(
+                "ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY",
+                0.10,
+            ),
+            value_std_coef=self._env_float("ECML_SEQUENCE_DETOUR_VALUE_STD_COEF", 2.0),
+            bad_std_coef=self._env_float("ECML_SEQUENCE_DETOUR_BAD_STD_COEF", 2.0),
+            success_std_coef=self._env_float(
+                "ECML_SEQUENCE_DETOUR_SUCCESS_STD_COEF",
+                0.0,
+            ),
+            max_success_regression_probability=self._env_float(
+                "ECML_SEQUENCE_DETOUR_MAX_SUCCESS_REGRESSION_PROBABILITY",
+                0.10,
+            ),
+            success_regression_std_coef=self._env_float(
+                "ECML_SEQUENCE_DETOUR_SUCCESS_REGRESSION_STD_COEF",
                 1.0,
             ),
         )
@@ -1090,6 +1147,14 @@ class SequenceSuccessPolicy(RerankPolicy):
                 )
                 scores.pop("reject_reason", None)
                 return True, scores
+            detour_accepted, scores = self._detour_rescue_relaxes_candidate(
+                scores=scores,
+                detail=detail,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+            )
+            if detour_accepted:
+                return True, scores
             return accepted, scores
         if candidate_risk > self.risk_head_max_candidate:
             scores["reject_reason"] = "risk_head_candidate_too_high"
@@ -1136,6 +1201,63 @@ class SequenceSuccessPolicy(RerankPolicy):
             and listwise_margin >= self.risk_relax_min_listwise_margin
             and raw_margin >= self.risk_relax_min_raw_margin
         )
+
+    def _detour_rescue_relaxes_candidate(
+        self,
+        scores: dict[str, float],
+        detail: dict[str, Any],
+        baseline_action: int,
+        candidate_action: int,
+    ) -> tuple[bool, dict[str, float]]:
+        if self.detour_scorer is None:
+            return False, scores
+        if not self.detour_allow_reject_reason and scores.get("reject_reason"):
+            return False, scores
+        if (
+            self.detour_transitions
+            and (baseline_action, candidate_action) not in self.detour_transitions
+        ):
+            return False, scores
+        try:
+            baseline_minus_candidate = float(
+                scores.get("risk_head_baseline_minus_candidate", float("-inf"))
+            )
+            candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
+            raw_margin = float(
+                detail.get("candidate_raw_candidate_minus_baseline_logit", float("-inf"))
+            )
+            prefix_cells = float(
+                detail.get("candidate_prefix_cell_intersections", float("-inf"))
+            )
+        except Exception:
+            return False, scores
+        if baseline_minus_candidate < self.detour_min_baseline_minus_candidate:
+            return False, scores
+        if candidate_risk > self.detour_max_candidate_risk:
+            return False, scores
+        if raw_margin < self.detour_min_raw_margin:
+            return False, scores
+        if prefix_cells < self.detour_min_prefix_cell_intersections:
+            return False, scores
+
+        score_row = {
+            **detail,
+            **scores,
+            "baseline_action": baseline_action,
+            "candidate_action": candidate_action,
+        }
+        try:
+            accepted, detour_scores = self.detour_scorer.score(score_row)
+        except Exception:
+            return False, scores
+        for key, value in detour_scores.items():
+            scores[f"detour_{key}"] = value
+        if not accepted:
+            return False, scores
+        scores["selector_source"] = "detour_rescue"
+        scores["detour_original_reject_reason"] = str(scores.get("reject_reason", ""))
+        scores.pop("reject_reason", None)
+        return True, scores
 
     def _apply_candidate_guards(
         self,
@@ -1665,6 +1787,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             row["risk_relax_original_reject_reason"] = str(
                 scores["risk_relax_original_reject_reason"]
             )
+        if "detour_original_reject_reason" in scores:
+            row["detour_original_reject_reason"] = str(
+                scores["detour_original_reject_reason"]
+            )
         if "selector_source" in scores:
             row["selector_source"] = str(scores["selector_source"])
         for key in (
@@ -1672,6 +1798,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "risk_head_candidate",
             "risk_head_candidate_minus_baseline",
             "risk_head_baseline_minus_candidate",
+            "detour_value_lcb",
+            "detour_bad_ucb",
+            "detour_success_lcb",
+            "detour_success_regression_ucb",
         ):
             if key in scores:
                 row[key] = float(scores[key])
