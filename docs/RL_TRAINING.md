@@ -6224,6 +6224,28 @@ Multi-scene risk-head and raw-margin guard:
     positive fresh holdout and no observed losses in the initial 40-episode
     holdout. It is not ready as default; next step is broader fresh validation
     and threshold tightening/promotion only if the loss-free pattern holds.
+- Follow-up validation of the opt-in detour selector:
+  - Added two extra hard support guards to the detour hook:
+    `ECML_SEQUENCE_DETOUR_MIN_SLACK` (default `110`) and
+    `ECML_SEQUENCE_DETOUR_MAX_OBS_ROUTE_OCCUPANCY_COUNT` (default `0.5`).
+    These target the observed fresh regressions where the candidate either had
+    low/negative slack or route occupancy already visible in the observation.
+  - Rechecked current-code fresh baseline versus detour-opt-in runs on
+    `6040..6049 scene_1`, `6050..6059 scene_1`, `6050..6059 scene_4`, and
+    `6060..6069 scene_1` with
+    `ECML_SEQUENCE_DETOUR_MAX_BAD_PROBABILITY=0.50`,
+    `ECML_SEQUENCE_DETOUR_MAX_SUCCESS_REGRESSION_PROBABILITY=0.30`, and
+    `ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY=0.30`.
+  - Result on the current code state: exactly neutral over `40` episodes
+    (reward W/L/T `0/0/40`, Success W/L/T `0/0/40`) because no
+    `detour_rescue` event was accepted; all accepted events in these reruns
+    came from the existing `listwise` selector.
+  - Important reproducibility note: the earlier `/private/tmp` detour runs
+    show accepted `detour_rescue` events and strong gains on the same seeds,
+    but this was not reproduced from the currently recorded command/env alone.
+    Treat those historical numbers as directional evidence, not as a stable
+    promotion result, until the full run configuration is captured in a
+    reusable eval script or manifest.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in

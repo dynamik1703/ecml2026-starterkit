@@ -672,6 +672,14 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_DETOUR_MIN_PREFIX_CELL_INTERSECTIONS",
             20.0,
         )
+        self.detour_min_slack = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MIN_SLACK",
+            110.0,
+        )
+        self.detour_max_obs_route_occupancy_count = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MAX_OBS_ROUTE_OCCUPANCY_COUNT",
+            0.5,
+        )
         self.detour_allow_reject_reason = bool(
             self._env_int("ECML_SEQUENCE_DETOUR_ALLOW_REJECT_REASON", 0)
         )
@@ -1229,6 +1237,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             prefix_cells = float(
                 detail.get("candidate_prefix_cell_intersections", float("-inf"))
             )
+            slack = float(detail.get("slack", float("-inf")))
+            obs_route_occupancy = float(
+                detail.get("obs_route_occupancy_count", 0.0)
+            )
         except Exception:
             return False, scores
         if baseline_minus_candidate < self.detour_min_baseline_minus_candidate:
@@ -1238,6 +1250,10 @@ class SequenceSuccessPolicy(RerankPolicy):
         if raw_margin < self.detour_min_raw_margin:
             return False, scores
         if prefix_cells < self.detour_min_prefix_cell_intersections:
+            return False, scores
+        if slack < self.detour_min_slack:
+            return False, scores
+        if obs_route_occupancy > self.detour_max_obs_route_occupancy_count:
             return False, scores
 
         score_row = {
