@@ -6171,6 +6171,26 @@ Multi-scene risk-head and raw-margin guard:
     some positive reward detours with zero bad leak in validation, but recall is
     still low and it misses the Success-winning case. This is a useful signal
     for a detour-specific learned selector, not yet a deployable policy change.
+- Follow-up `MOVE_FORWARD->MOVE_LEFT` mining on fresh `6040..6049`,
+  scenes `1..4`:
+  - Trace-all produced `963` candidate decisions; `102` were
+    `MOVE_FORWARD->MOVE_LEFT` without an existing reject reason.
+  - The same risk/raw filter selected `27` focus rows. Counterfactual labels:
+    reward W/L/T `2/3/23`, Success W/L/T `4/0/24`.
+  - Combined `6030` detours plus `6040` LEFT detours: `79` total labels,
+    reward W/L/T `11/4/64`, Success W/L/T `5/1/73`.
+    LEFT-only labels are now `54` events with Success W/L/T `5/1/48`.
+  - The Success-winning LEFT detours share a different profile from the current
+    listwise selector: average risk improvement `0.2368`, candidate risk
+    `0.3646`, listwise margin `-0.3884`, raw margin `0.4438`, and high forced
+    prefix cell intersections (`37.8`). The single Success-loss label also had
+    positive risk improvement but positive listwise margin.
+  - Interpretation: this is the strongest evidence so far for a separate
+    Success-prioritized detour-rescue selector. The current listwise model is
+    not just conservative here; its margin is directionally misleading for this
+    class. The next useful implementation step is to export a small
+    detour-specific value/risk model or rule-gated model, validate it on fresh
+    seed windows, and only then consider an opt-in selector hook.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
