@@ -6139,6 +6139,38 @@ Multi-scene risk-head and raw-margin guard:
     counterfactual labels are neutral rather than useful. The next data step
     should mine broader scenes/seeds specifically for good `MOVE_FORWARD` detour
     counterfactuals, not relax the deployed selector blindly.
+- Broader detour mining on fresh `6030..6039`, scenes `1..4`:
+  - Trace-all produced `490` candidate decisions; `6` accepted by the current
+    selector and `1` via `risk_relax`.
+  - Forward-detour pool without existing reject reason:
+    `78` `MOVE_FORWARD->MOVE_LEFT` and `147` `MOVE_FORWARD->MOVE_RIGHT`.
+  - Selected top risk/raw candidates with
+    risk improvement `>=0.15`, candidate risk `<=0.65`, raw margin `>=0.05`,
+    top `8` per scene/direction, then ran focused one-step counterfactuals.
+  - Counterfactual label result over `51` evaluated events:
+    reward W/L/T `9/1/41`, Success W/L/T `1/1/49`.
+    `LEFT` was much more useful than `RIGHT`: `LEFT` reward W/L/T `7/1/18`,
+    Success W/L/T `1/1/24`; `RIGHT` reward W/L/T `2/0/23`,
+    Success W/L/T `0/0/25`.
+  - Best useful labels:
+    `scene_4 seed 6038 step 91 agent 5 MOVE_FORWARD->MOVE_LEFT`
+    improved Success by `+0.166667`; `scene_3 seed 6038` produced five
+    positive `MOVE_FORWARD->MOVE_LEFT` reward labels.
+  - Important negative labels:
+    `scene_1 seed 6034 step 123 MOVE_FORWARD->MOVE_LEFT` improved reward
+    by `+0.157018` but reduced Success by `-0.166667`;
+    `scene_1 seed 6030 step 94 MOVE_FORWARD->MOVE_LEFT` reduced reward by
+    `-0.089112`.
+  - The old listwise model is not aligned for this detour-rescue class:
+    good detours often had negative listwise margins, while the two bad labels
+    had positive listwise margins.
+  - Old counterfactual-value training data did not generalize to this detour
+    holdout: a value ensemble trained on older hard/action-diff rows accepted
+    no new detour validation rows under strict thresholds.
+  - A seed-split value ensemble trained only on the new detour set can accept
+    some positive reward detours with zero bad leak in validation, but recall is
+    still low and it misses the Success-winning case. This is a useful signal
+    for a detour-specific learned selector, not yet a deployable policy change.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
