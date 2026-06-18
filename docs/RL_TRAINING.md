@@ -6246,6 +6246,24 @@ Multi-scene risk-head and raw-margin guard:
     Treat those historical numbers as directional evidence, not as a stable
     promotion result, until the full run configuration is captured in a
     reusable eval script or manifest.
+- Added `tools/evaluate_policy_ab_manifest.py` to make those comparisons
+  reproducible:
+  - It runs baseline and candidate through separate `evaluate_sampled.py`
+    subprocesses, so each side can have independent environment variables.
+  - It scrubs inherited `ECML_SEQUENCE_*` variables by default, then applies
+    only explicit `--shared-env`, `--baseline-env`, and `--candidate-env`
+    overrides.
+  - It writes per-side JSON/CSV/stdout/stderr, a joined comparison CSV, a
+    manifest with git status plus file hashes for referenced models/data, and
+    a compact candidate trace summary when `--candidate-trace` is set.
+  - Neutral smoke:
+    `tools/evaluate_policy_ab_manifest.py --episodes 2 --seed 6040 --scenes
+    scene_1 --candidate-trace` produced reward W/L/T `0/0/2`, Success W/L/T
+    `0/0/2`.
+  - Candidate-only detour smoke on `scene_1 seed 6041` with the detour model
+    and risk head recorded hashes for both model files and was neutral
+    (`0/0/1`, no accepted candidate trace events). This confirms the old
+    6041 rescue is still not reproducible under the current explicit env.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
