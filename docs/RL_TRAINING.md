@@ -6564,3 +6564,16 @@ Weighted disagreement distillation canary:
   Sequence-candidate behind the existing gate and trace accepted/regressed
   events, or PPO fine-tune from this checkpoint with a stronger terminal
   Success objective and strict holdout checkpoint selection.
+- Gated-candidate test: evaluated default `SequenceSuccessPolicy` against
+  the same policy with
+  `/private/tmp/ecml_bc_sequence_actionobs_weighted_v1.pt` appended to
+  `ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINTS` on `scene_1..4 6090..6109`.
+  Aggregate result was negative: reward delta mean `-0.005628`, Success delta
+  mean `-0.004167`, reward W/L/T `0/2/78`, Success W/L/T `0/2/78`.
+  Trace analysis showed the new checkpoint was accepted only twice, both on
+  `scene_1` as `MOVE_FORWARD -> MOVE_LEFT`, and both caused regressions:
+  seed `6102` reward `-0.332749` / Success `-0.166667`, seed `6104` reward
+  `-0.117481` / Success `-0.166667`.
+- Decision: do not append this checkpoint to the online Sequence candidate
+  list. The remaining useful path for this checkpoint is as an RL
+  initialization, not as an extra gated proposal source.
