@@ -6485,3 +6485,24 @@ ActionConflict-baseline correction:
   a training starting point, but the next winner-oriented run must optimize
   against the ActionConflict Sequence baseline or incorporate ActionConflict
   observations directly.
+
+ActionConflict PPO canary:
+- Trained `/private/tmp/ecml_ppo_actionobs_multiscene_v1.pt` from
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` with
+  `--use-action-conflict-obs`, multi-scene episode rotation, Teacher CE to the
+  Sequence policy, Anchor KL, terminal shaping, and light action-conflict
+  penalties. Training stayed numerically stable, but rollout Success was mixed.
+- Direct A/B against the ActionConflict Sequence baseline:
+  - `scene_1..4 6090..6109`: reward W/L/T `13/3/64`,
+    Success W/L/T `3/1/76`, reward delta mean `+0.015451`,
+    Success delta mean `+0.002083`.
+  - `scene_1..4 6110..6129`: reward W/L/T `7/5/68`,
+    Success W/L/T `2/3/75`, reward delta mean `+0.004012`,
+    Success delta mean `-0.010417`.
+- Decision: do not promote this ActionConflict PPO checkpoint. It confirms the
+  direct-RL direction is trainable, but the current constrained PPO objective is
+  too conservative/noisy to beat the existing ActionConflict Sequence policy.
+  The next useful RL step is not a longer version of this exact run; it needs a
+  stronger objective, e.g. explicit imitation/advantage labels from
+  ActionConflict Sequence wins/losses, or policy distillation plus RL fine-tune
+  that starts by matching the current Sequence policy before exploring.
