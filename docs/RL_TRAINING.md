@@ -6506,3 +6506,29 @@ ActionConflict PPO canary:
   stronger objective, e.g. explicit imitation/advantage labels from
   ActionConflict Sequence wins/losses, or policy distillation plus RL fine-tune
   that starts by matching the current Sequence policy before exploring.
+
+ActionConflict Sequence distillation canary:
+- Added `--training-scenes` to `tools/train_behavior_clone.py`, matching the
+  multi-scene rotation already used by the PPO trainer.
+- Trained `/private/tmp/ecml_bc_sequence_actionobs_v1.pt` from
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` using
+  `SequenceSuccessPolicy` as teacher, `MyActionConflictObservationBuilder`,
+  `40` multi-scene teacher episodes, class-balanced CE, and `5` epochs.
+  Collection stats were `100101` samples, `117` invalid teacher actions, and
+  only `30` teacher/reference disagreements. This means the current Sequence
+  teacher differs from the v4b actor rarely; naive all-action BC mostly
+  reinforces the existing actor and the class-balanced loss can over-amplify
+  rare actions.
+- Direct A/B against the ActionConflict Sequence baseline rejected the
+  checkpoint:
+  - `scene_1..4 6090..6109`: reward W/L/T `5/43/32`,
+    Success W/L/T `6/16/58`, reward delta mean `-0.090551`,
+    Success delta mean `-0.045833`.
+  - `scene_1..4 6110..6129`: reward W/L/T `4/40/36`,
+    Success W/L/T `2/22/56`, reward delta mean `-0.106351`,
+    Success delta mean `-0.093750`.
+- Decision: do not use naive class-balanced all-action distillation. If we
+  continue with distillation, it should be a weighted disagreement-focused
+  objective: rare Sequence deviations as high-weight labels plus broad
+  low-weight anchors to preserve the base actor, followed by ActionConflict
+  PPO fine-tuning.

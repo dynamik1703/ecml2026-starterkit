@@ -65,7 +65,11 @@ def action_id(action: Any) -> int:
     return int(action)
 
 
-def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
+def make_env(
+    args: argparse.Namespace,
+    seed: int,
+    scene: str | None = None,
+) -> tuple[Any, dict[int, Any]]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = load_symbol(args.rewards)()
     env, _ = RailEnvPersister.load_new(
@@ -74,13 +78,42 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
         rewards=rewards,
     )
     env.number_of_agents = args.num_agents
-    env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
+    env = load_sampling_env_generator()(
+        env,
+        line_length=args.line_length,
+        scene=args.scene if scene is None else scene,
+    )
     observations, _ = env.reset(random_seed=seed)
     return env, observations
 
 
 def observation_list(observations: dict[int, Any], handles: list[int]) -> list[Any]:
     return [observations[handle] for handle in handles]
+
+
+def parse_scene_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    scenes = []
+    valid_scenes = {"scene_1", "scene_2", "scene_3", "scene_4", "scene_5"}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item not in valid_scenes:
+            raise ValueError(
+                f"Unknown training scene {item!r}; expected one of "
+                f"{sorted(valid_scenes)}"
+            )
+        scenes.append(item)
+    return scenes
+
+
+def episode_scene(args: argparse.Namespace, episode: int) -> str | None:
+    training_scene_list = getattr(args, "training_scene_list", [])
+    if training_scene_list:
+        return str(training_scene_list[episode % len(training_scene_list)])
+    return args.scene
 
 
 def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
@@ -106,7 +139,7 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
 
     for episode in range(args.episodes):
         seed = args.seed + episode
-        env, observations = make_env(args, seed)
+        env, observations = make_env(args, seed, episode_scene(args, episode))
         reward_values: list[float] = []
         done = False
         while not done and env._elapsed_steps < env._max_episode_steps:
@@ -307,6 +340,13 @@ def parse_args() -> argparse.Namespace:
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
+    parser.add_argument(
+        "--training-scenes",
+        help=(
+            "Comma-separated scenes to cycle through while collecting teacher "
+            "episodes. Defaults to --scene when omitted."
+        ),
+    )
     parser.add_argument("--obs-size", type=int)
     parser.add_argument("--n-actions", type=int, default=5)
     parser.add_argument("--hidden-size", type=int, default=128)
@@ -389,6 +429,7 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--use-global-conflict-obs expects --obs-size "
             f"{GLOBAL_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
+    args.training_scene_list = parse_scene_list(args.training_scenes)
     return args
 
 
@@ -404,7 +445,13 @@ def main() -> int:
         f"teacher_policy={args.teacher_policy} "
         f"episodes={args.episodes} "
         f"num_agents={args.num_agents} "
-        f"line_length={args.line_length}",
+        f"line_length={args.line_length}"
+        + (
+            " training_scenes="
+            + ",".join(str(scene) for scene in args.training_scene_list)
+            if args.training_scene_list
+            else ""
+        ),
         flush=True,
     )
 
