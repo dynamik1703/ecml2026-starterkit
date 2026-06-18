@@ -6285,6 +6285,19 @@ Multi-scene risk-head and raw-margin guard:
     the candidate stream no longer presents the old `MOVE_FORWARD->MOVE_LEFT`
     rescue candidates, or to move the effort back to trainable policy/candidate
     generation.
+- Focused trace-all diagnosis for the old `scene_1 seed 6041` rescue:
+  - Re-ran a single manifest block with `--candidate-trace-all` under the same
+    explicit detour env.
+  - The candidate trace had `665` rows, `0` accepted events, `0`
+    `MOVE_FORWARD->MOVE_LEFT` rows, and `0` rows with detour scorer outputs.
+  - Around the old rescue step (`env_time` 52-59, agent 1), the current stream
+    only proposes `DO_NOTHING->MOVE_FORWARD` from
+    `ecml_action_conflict_successdiv_penalty_ppo_seed3800_u10.pt`; the old
+    `MOVE_FORWARD->MOVE_LEFT` proposal is absent.
+  - Conclusion: the current failure is candidate generation/repro state, not
+    detour thresholding. The next high-value direction is to improve or retrain
+    candidate policies so useful rescue actions are present, then evaluate them
+    with the manifest A/B tool.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
