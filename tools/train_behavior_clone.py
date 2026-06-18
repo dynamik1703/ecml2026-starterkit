@@ -116,7 +116,9 @@ def episode_scene(args: argparse.Namespace, episode: int) -> str | None:
     return args.scene
 
 
-def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+def collect_dataset(
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, Any]]:
     teacher = load_symbol(args.teacher_policy)()
     checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
     reference = ActorCritic(
@@ -129,13 +131,17 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
     reference.eval()
     observations_out: list[np.ndarray] = []
     actions_out: list[int] = []
+    sample_weights_out: list[float] = []
     invalid_teacher_actions = 0
     teacher_reference_disagreements = 0
     valid_teacher_samples = 0
     action_counts: Counter[int] = Counter()
     disagreement_action_counts: Counter[int] = Counter()
+    selected_reference_agreements = 0
+    selected_reference_disagreements = 0
     success_rates = []
     normalized_rewards = []
+    rng = np.random.default_rng(args.seed + 10_003)
 
     for episode in range(args.episodes):
         seed = args.seed + episode
@@ -175,9 +181,21 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
                         disagreement_action_counts[action] += 1
                     if args.disagreement_only and not disagrees:
                         continue
+                    if not disagrees and rng.random() > args.anchor_sample_rate:
+                        continue
+                    sample_weight = (
+                        args.disagreement_weight if disagrees else args.anchor_weight
+                    )
+                    if sample_weight <= 0.0:
+                        continue
                     observations_out.append(obs_array)
                     actions_out.append(action)
+                    sample_weights_out.append(float(sample_weight))
                     action_counts[action] += 1
+                    if disagrees:
+                        selected_reference_disagreements += 1
+                    else:
+                        selected_reference_agreements += 1
                 else:
                     invalid_teacher_actions += 1
 
@@ -210,14 +228,19 @@ def collect_dataset(args: argparse.Namespace) -> tuple[torch.Tensor, torch.Tenso
         "valid_teacher_samples": valid_teacher_samples,
         "invalid_teacher_actions": invalid_teacher_actions,
         "teacher_reference_disagreements": teacher_reference_disagreements,
+        "selected_reference_agreements": selected_reference_agreements,
+        "selected_reference_disagreements": selected_reference_disagreements,
         "action_counts": dict(sorted(action_counts.items())),
         "disagreement_action_counts": dict(sorted(disagreement_action_counts.items())),
+        "sample_weight_sum": float(np.sum(sample_weights_out)),
+        "sample_weight_mean": float(np.mean(sample_weights_out)),
         "teacher_reward_mean": float(np.mean(normalized_rewards)),
         "teacher_success_rate_mean": float(np.mean(success_rates)),
     }
     return (
         torch.as_tensor(np.asarray(observations_out, dtype=np.float32)),
         torch.as_tensor(actions_out, dtype=torch.long),
+        torch.as_tensor(sample_weights_out, dtype=torch.float32),
         stats,
     )
 
@@ -226,6 +249,7 @@ def train_behavior_clone(
     args: argparse.Namespace,
     observations: torch.Tensor,
     actions: torch.Tensor,
+    sample_weights: torch.Tensor,
 ) -> tuple[ActorCritic, dict[str, float]]:
     checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
     policy = ActorCritic(
@@ -252,18 +276,30 @@ def train_behavior_clone(
         )
     final_loss = 0.0
     final_accuracy = 0.0
+    final_weighted_accuracy = 0.0
 
     for epoch in range(args.epochs):
         permutation = torch.randperm(num_samples)
         losses = []
         correct = 0
+        weighted_correct = 0.0
         seen = 0
+        weight_seen = 0.0
         for start in range(0, num_samples, args.batch_size):
             batch_idx = permutation[start : start + args.batch_size]
             obs_batch = observations[batch_idx]
             action_batch = actions[batch_idx]
+            weight_batch = sample_weights[batch_idx]
             logits = policy.masked_logits(obs_batch)
-            loss = F.cross_entropy(logits, action_batch, weight=class_weights)
+            losses_by_sample = F.cross_entropy(
+                logits,
+                action_batch,
+                weight=class_weights,
+                reduction="none",
+            )
+            loss = (
+                losses_by_sample * weight_batch
+            ).sum() / weight_batch.sum().clamp_min(1e-8)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -272,20 +308,27 @@ def train_behavior_clone(
 
             losses.append(float(loss.item()))
             predictions = logits.argmax(dim=-1)
-            correct += int((predictions == action_batch).sum().item())
+            matches = predictions == action_batch
+            correct += int(matches.sum().item())
+            weighted_correct += float((matches.float() * weight_batch).sum().item())
             seen += int(action_batch.numel())
+            weight_seen += float(weight_batch.sum().item())
 
         final_loss = float(np.mean(losses))
         final_accuracy = correct / max(1, seen)
+        final_weighted_accuracy = weighted_correct / max(1e-8, weight_seen)
         print(
             f"epoch={epoch + 1}/{args.epochs} "
-            f"loss={final_loss:.6g} accuracy={final_accuracy:.6g}",
+            f"loss={final_loss:.6g} "
+            f"accuracy={final_accuracy:.6g} "
+            f"weighted_accuracy={final_weighted_accuracy:.6g}",
             flush=True,
         )
 
     return policy, {
         "loss": final_loss,
         "accuracy": final_accuracy,
+        "weighted_accuracy": final_weighted_accuracy,
     }
 
 
@@ -365,6 +408,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train only on valid states where the teacher disagrees with the init policy.",
     )
+    parser.add_argument(
+        "--disagreement-weight",
+        type=float,
+        default=1.0,
+        help="Per-sample loss weight for teacher/reference disagreements.",
+    )
+    parser.add_argument(
+        "--anchor-weight",
+        type=float,
+        default=1.0,
+        help="Per-sample loss weight for teacher/reference agreements.",
+    )
+    parser.add_argument(
+        "--anchor-sample-rate",
+        type=float,
+        default=1.0,
+        help="Probability of keeping teacher/reference agreement samples.",
+    )
     parser.add_argument("--max-class-weight", type=float, default=10.0)
     return parser.parse_args()
 
@@ -429,6 +490,12 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--use-global-conflict-obs expects --obs-size "
             f"{GLOBAL_CONFLICT_OBS_SIZE}, got {args.obs_size}."
         )
+    if not 0.0 <= args.anchor_sample_rate <= 1.0:
+        raise ValueError("--anchor-sample-rate must be in [0, 1].")
+    if args.anchor_weight < 0.0:
+        raise ValueError("--anchor-weight must be non-negative.")
+    if args.disagreement_weight < 0.0:
+        raise ValueError("--disagreement-weight must be non-negative.")
     args.training_scene_list = parse_scene_list(args.training_scenes)
     return args
 
@@ -455,20 +522,24 @@ def main() -> int:
         flush=True,
     )
 
-    observations, actions, collection_stats = collect_dataset(args)
+    observations, actions, sample_weights, collection_stats = collect_dataset(args)
     print(
         "collection "
         f"samples={collection_stats['samples']} "
         f"valid_teacher_samples={collection_stats['valid_teacher_samples']} "
         f"invalid_teacher_actions={collection_stats['invalid_teacher_actions']} "
         f"teacher_reference_disagreements={collection_stats['teacher_reference_disagreements']} "
+        f"selected_reference_agreements={collection_stats['selected_reference_agreements']} "
+        f"selected_reference_disagreements={collection_stats['selected_reference_disagreements']} "
+        f"sample_weight_sum={collection_stats['sample_weight_sum']:.6g} "
+        f"sample_weight_mean={collection_stats['sample_weight_mean']:.6g} "
         f"teacher_reward_mean={collection_stats['teacher_reward_mean']:.6g} "
         f"teacher_success_rate_mean={collection_stats['teacher_success_rate_mean']:.6g} "
         f"action_counts={collection_stats['action_counts']} "
         f"disagreement_action_counts={collection_stats['disagreement_action_counts']}",
         flush=True,
     )
-    policy, train_stats = train_behavior_clone(args, observations, actions)
+    policy, train_stats = train_behavior_clone(args, observations, actions, sample_weights)
 
     args.output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     torch.save(

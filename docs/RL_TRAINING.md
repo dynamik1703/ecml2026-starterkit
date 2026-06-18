@@ -6532,3 +6532,35 @@ ActionConflict Sequence distillation canary:
   objective: rare Sequence deviations as high-weight labels plus broad
   low-weight anchors to preserve the base actor, followed by ActionConflict
   PPO fine-tuning.
+
+Weighted disagreement distillation canary:
+- Extended `tools/train_behavior_clone.py` with per-sample weights:
+  `--disagreement-weight`, `--anchor-weight`, and `--anchor-sample-rate`.
+  Defaults preserve the previous behavior. This tests the more appropriate
+  objective for the current teacher: learn the rare
+  `SequenceSuccessPolicy`-vs-v4b disagreements strongly while keeping broad
+  low-weight anchors on normal v4b-like behavior.
+- Trained `/private/tmp/ecml_bc_sequence_actionobs_weighted_v1.pt` from
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` with
+  `MyActionConflictObservationBuilder`, `60` multi-scene teacher episodes,
+  `--disagreement-weight 50`, `--anchor-weight 0.02`,
+  `--anchor-sample-rate 0.1`, LR `2e-5`, and `8` epochs. Collection stats:
+  `148401` valid teacher samples, `177` invalid teacher actions, only `25`
+  teacher/reference disagreements, `14636` selected anchor agreements, and
+  weighted accuracy `0.902069`.
+- Direct A/B against the ActionConflict Sequence baseline:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6090..6109` | `+0.020358` | `+0.004167` | `20/8/52` | `7/4/69` |
+| `scene_1..4 6110..6129` | `+0.008062` | `-0.016667` | `17/17/46` | `4/9/67` |
+| combined `160` episodes | `+0.014210` | `-0.006250` | `37/25/98` | `11/13/136` |
+
+- Decision: do not deploy this checkpoint directly. It is materially better
+  than naive class-balanced distillation and finds broad reward improvements,
+  but it still causes too many Success regressions, especially on `scene_1`.
+  Keep it as a promising RL initialization or gated candidate. The next
+  high-value step is Success-safe integration: either add it as a
+  Sequence-candidate behind the existing gate and trace accepted/regressed
+  events, or PPO fine-tune from this checkpoint with a stronger terminal
+  Success objective and strict holdout checkpoint selection.
