@@ -1,0 +1,81 @@
+{
+  "config": {
+    "csv": [
+      "/private/tmp/ecml_detour_scene1_positive_rescue_events.csv"
+    ],
+    "base_state_pkl": "/Users/romanliessner/gitlab/ecml2026-starterkit/reinforcement-learning/sampling/level_0_scenario_1.pkl",
+    "baseline_policy": "submission.sequence_success_policy.MyPolicy",
+    "baseline_checkpoint": null,
+    "obs_builder": "submission.my_observation_builder.MyObservationBuilder",
+    "rewards": "flatland.envs.rewards.ECML2026Rewards",
+    "init_checkpoint": "submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt",
+    "output_checkpoint": "/private/tmp/ecml_detour_rescue_bc_scene1_v2_strong.pt",
+    "output_json": "/private/tmp/ecml_detour_rescue_bc_scene1_v2_strong.json",
+    "num_agents": 6,
+    "line_length": 2,
+    "scene": "scene_1",
+    "obs_size": 36,
+    "n_actions": 5,
+    "hidden_size": 128,
+    "num_hidden_layers": 3,
+    "use_trajectory_conflict_obs": false,
+    "use_action_conflict_obs": false,
+    "use_global_conflict_obs": false,
+    "epochs": 30,
+    "batch_size": 128,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.0,
+    "max_grad_norm": 0.5,
+    "anchor_seeds": "6041,6050,6054",
+    "anchor_stride": 8,
+    "anchor_weight": 0.05,
+    "reward_rescue_weight": 20.0,
+    "success_rescue_weight": 80.0,
+    "include_avoidance_events": false,
+    "avoidance_weight": 6.0,
+    "reward_epsilon": 1e-06,
+    "success_weight": 2.0,
+    "failed_weight": 0.75,
+    "anchor_seed_list": [
+      6041,
+      6050,
+      6054
+    ]
+  },
+  "collection_stats": {
+    "samples": 102,
+    "rescue_hits": 1,
+    "avoidance_hits": 0,
+    "forbidden_hits": 0,
+    "forbidden_invalid": 0,
+    "rescue_misses": 0,
+    "rescue_invalid": 4,
+    "rescue_baseline_mismatches": 0,
+    "anchor_samples": 101,
+    "rescue_action_counts": {
+      "1": 1
+    },
+    "anchor_action_counts": {
+      "0": 32,
+      "1": 14,
+      "2": 44,
+      "3": 7,
+      "4": 4
+    },
+    "rescue_seed_hits": {
+      "6041": 1
+    },
+    "seeds": [
+      6040,
+      6041,
+      6044,
+      6050,
+      6054
+    ]
+  },
+  "train_stats": {
+    "loss": 0.03389756754040718,
+    "accuracy": 0.8725490196078431,
+    "weighted_accuracy": 0.9923575146779849
+  }
+}

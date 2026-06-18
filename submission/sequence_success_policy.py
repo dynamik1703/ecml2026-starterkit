@@ -680,6 +680,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_DETOUR_MAX_OBS_ROUTE_OCCUPANCY_COUNT",
             0.5,
         )
+        self.detour_min_value_lcb = self._env_float(
+            "ECML_SEQUENCE_DETOUR_MIN_VALUE_LCB",
+            float("-inf"),
+        )
         self.detour_allow_reject_reason = bool(
             self._env_int("ECML_SEQUENCE_DETOUR_ALLOW_REJECT_REASON", 0)
         )
@@ -1269,6 +1273,13 @@ class SequenceSuccessPolicy(RerankPolicy):
         for key, value in detour_scores.items():
             scores[f"detour_{key}"] = value
         if not accepted:
+            return False, scores
+        if (
+            np.isfinite(self.detour_min_value_lcb)
+            and float(detour_scores.get("value_lcb", float("-inf")))
+            < self.detour_min_value_lcb
+        ):
+            scores["reject_reason"] = "detour_value_lcb_too_low"
             return False, scores
         scores["selector_source"] = "detour_rescue"
         scores["detour_original_reject_reason"] = str(scores.get("reject_reason", ""))

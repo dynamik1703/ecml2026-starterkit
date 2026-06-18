@@ -6302,3 +6302,52 @@ Multi-scene risk-head and raw-margin guard:
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
   the packaged policy.
+- BC fine-tune for candidate generation:
+  - Converted the positive `MOVE_FORWARD->MOVE_LEFT` rescue labels from
+    `/private/tmp/ecml_detour_left_trace_labels_6030_6040.csv` into a compact
+    rescue-event CSV and trained a small behavior-cloned `ActorCritic` from
+    `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt`.
+  - The stronger rescue-weighted run is packaged as
+    `submission/models/ecml_detour_rescue_bc_scene1_v2_strong.pt` with metadata
+    in `submission/models/ecml_detour_rescue_bc_scene1_v2_strong.json`.
+  - Offline logit check at the old critical state
+    `scene_1 seed 6041 env_time 56 agent 1` confirmed that this candidate
+    learned the desired action: base `v4b` still preferred `MOVE_FORWARD`,
+    while the new BC candidate preferred `MOVE_LEFT` with probability
+    approximately `0.998` under the valid action mask.
+  - Online with the normal listwise path, the candidate still did not rescue
+    because an earlier listwise-accepted event changes the trajectory before
+    the old critical state is reached.
+  - A detour-only A/B configuration fixed that causal issue by setting
+    `ECML_SEQUENCE_LISTWISE_MARGIN_THRESHOLD=999` and
+    `ECML_SEQUENCE_AUX_LISTWISE_MARGIN_THRESHOLD=999`, while keeping the
+    detour selector and risk head active. On `scene_1 seed 6041`, this accepted
+    one `detour_rescue` event and improved
+    reward/success `0.333333 / 0.333333 -> 0.742268 / 1.000000`.
+  - Same detour-only configuration over `scene_1 6040..6049` with
+    `ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY=0.50` gave
+    reward W/L/T `3/0/7`, Success W/L/T `2/1/7`,
+    reward delta mean `+0.088226`, Success delta mean `+0.100000`.
+  - Added an opt-in hard guard
+    `ECML_SEQUENCE_DETOUR_MIN_VALUE_LCB` to reject detour rescues whose
+    detour-specific value lower-confidence bound is too low. Default is
+    disabled (`-inf`), so existing behavior is unchanged unless the env var is
+    set.
+  - With `ECML_SEQUENCE_DETOUR_MIN_VALUE_LCB=-0.40`, the `scene_1 6040..6069`
+    check improved from reward W/L/T `4/1/25` to `3/0/27` and kept the same
+    Success mean. Accepted events dropped from five to three.
+  - Full manifest A/B over `scene_1..scene_4`, seeds `6040..6069`, `120`
+    total episodes, with the new BC candidate, detour-only listwise block,
+    `ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY=0.50`, and
+    `ECML_SEQUENCE_DETOUR_MIN_VALUE_LCB=-0.40`:
+    reward W/L/T `5/1/114`, Success W/L/T `3/2/115`,
+    reward delta mean `+0.010457`, Success delta mean `+0.011111`.
+    Only three accepted events remained, all
+    `scene_1 MOVE_FORWARD->MOVE_LEFT detour_rescue`.
+  - Interpretation: this is a real learned candidate-generation improvement,
+    but the effect is still small and concentrated in one scene family. It is
+    useful as an opt-in ablation and as evidence that BC can recover missing
+    rescue actions. It is not yet a winner-level default policy. The next RL/BC
+    step should mine more positive rescue labels across scenes, train a
+    broader candidate generator, and then validate it under the same
+    detour-only manifest protocol.
