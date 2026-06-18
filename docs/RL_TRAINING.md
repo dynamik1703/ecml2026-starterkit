@@ -6264,6 +6264,27 @@ Multi-scene risk-head and raw-margin guard:
     and risk head recorded hashes for both model files and was neutral
     (`0/0/1`, no accepted candidate trace events). This confirms the old
     6041 rescue is still not reproducible under the current explicit env.
+- Rebuilt the detour A/B reference with the manifest tool on commit
+  `8f107e8`:
+  - Blocks: `6040..6049`, `6050..6059`, and `6060..6069`, scenes
+    `scene_1..scene_4`, `120` total episodes.
+  - Candidate env: risk head
+    `/private/tmp/ecml_actor_risk_head_multiscene_5700.pt` plus packaged
+    `submission/models/ecml_detour_left_trace_selector_v1.pt`,
+    `ECML_SEQUENCE_DETOUR_MAX_BAD_PROBABILITY=0.50`,
+    `ECML_SEQUENCE_DETOUR_MAX_SUCCESS_REGRESSION_PROBABILITY=0.30`,
+    `ECML_SEQUENCE_DETOUR_MIN_SUCCESS_PROBABILITY=0.30`.
+  - File hashes captured by each manifest: base scenario
+    `e5bfd8b84a5d`, detour model `3b23bf0f80db`, risk head `705acd5e722e`.
+  - Aggregate result is exactly neutral: reward W/L/T `0/0/120`,
+    Success W/L/T `0/0/120`, reward delta mean `0`, Success delta mean `0`.
+  - Candidate trace accepted-source counts were `listwise=113` and
+    `aux_listwise=1`; no `detour_rescue` events were accepted in any block.
+  - Interpretation: the current explicit detour hook is not a performance
+    lever. The useful next step is not threshold tuning; it is to diagnose why
+    the candidate stream no longer presents the old `MOVE_FORWARD->MOVE_LEFT`
+    rescue candidates, or to move the effort back to trainable policy/candidate
+    generation.
 - Interpretation: risk-relax is promising but extremely sensitive. The
   current strict rule is acceptable as an experimental opt-in, not yet as a
   default submission path. It needs a broader canary grid before enabling it in
