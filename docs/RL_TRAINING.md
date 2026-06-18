@@ -6396,3 +6396,43 @@ Failure-unblock candidate and selector diagnosis:
   tooling gap, but shift the winning-solution effort toward a stronger learned
   selector objective or an end-to-end RL policy that internalizes rescue timing
   instead of relying on the current Listwise gate.
+
+Direct constrained-PPO candidate:
+- Trained a constrained PPO fine-tune from
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` on
+  scene-1 failure seeds `6071,6077,6088,6080`, using complete episodes,
+  low reward scale, terminal success/failure shaping, Teacher CE, Anchor KL,
+  and the new Aux-BC/Forbidden dataset. The run stayed close to the initial
+  actor (`anchor_kl` roughly `0.00077..0.00220`) and kept the auxiliary
+  forbidden loss active (`aux_forbid_loss` down to `0.0724`).
+- As a SequencePolicy candidate, the PPO checkpoint was still neutral on
+  `scene_1 seed6070 episodes=20`; the same Selector bottleneck remained.
+- Directly deploying the checkpoint through `submission.rerank_policy.MyPolicy`
+  changed the picture substantially:
+  - `scene_1 6070..6089`: reward W/L/T `17/2/1`,
+    Success W/L/T `18/0/2`, reward delta mean `+0.204746`,
+    Success delta mean `+0.375000`.
+  - `scene_1 6090..6109`: reward W/L/T `16/3/1`,
+    Success W/L/T `12/2/6`, reward delta mean `+0.106746`,
+    Success delta mean `+0.166667`.
+  - `scene_2..4 6070..6089`: reward W/L/T `43/15/2`,
+    Success W/L/T `44/5/11`, reward delta mean `+0.127917`,
+    Success delta mean `+0.250000`.
+  - `scene_1..4 6090..6109`: reward W/L/T `69/9/2`,
+    Success W/L/T `61/5/14`, reward delta mean `+0.182804`,
+    Success delta mean `+0.297917`.
+- This is the strongest RL result so far by a large margin. It also changes
+  the working hypothesis: the winner path should prioritize direct/constrained
+  PPO policies and use gates only as safety wrappers or diagnostics, not as
+  the primary action-selection mechanism.
+- Packaged the direct PPO checkpoint as `submission/checkpoint.pt`
+  (`sha256=727b147eb5a090939a4d112a3ab8b5a3db91d9c23ddde1166dace22fd4b2de86`)
+  and changed the Docker defaults to
+  `POLICY=submission.rerank_policy.MyPolicy` with
+  `OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder`, matching
+  the successful manifest evaluations.
+- Remaining risk: this checkpoint was trained on scene-1 failure seeds, so the
+  strong cross-scene results are encouraging but not a final proof. Before a
+  competition submission, run a larger canary grid, inspect the few Success-loss
+  seeds, and consider a second constrained PPO round using all-scene failure
+  seeds rather than scene 1 only.
