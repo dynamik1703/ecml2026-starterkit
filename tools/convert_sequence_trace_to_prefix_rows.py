@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,23 @@ SCORE_KEYS = {
 }
 
 
-def read_compare_rows(path: Path) -> dict[int, dict[str, Any]]:
+CompareKey = tuple[str, int]
+
+
+def compare_key(row: dict[str, Any]) -> CompareKey | None:
+    try:
+        seed = int(float(row["seed"]))
+    except Exception:
+        return None
+    return str(row.get("scene", "") or ""), seed
+
+
+def scene_from_trace_path(path: Path) -> str:
+    match = re.search(r"(scene_[1-5])", path.name)
+    return match.group(1) if match else ""
+
+
+def read_compare_rows(path: Path) -> dict[CompareKey, dict[str, Any]]:
     with path.open() as handle:
         payload = json.load(handle)
     rows = payload.get("rows", payload if isinstance(payload, list) else [])
@@ -41,21 +58,34 @@ def read_compare_rows(path: Path) -> dict[int, dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        try:
-            seed = int(row["seed"])
-        except Exception:
+        key = compare_key(row)
+        if key is None:
             continue
-        result[seed] = row
+        result[key] = row
+    return result
+
+
+def read_compare_csv_rows(path: Path) -> dict[CompareKey, dict[str, Any]]:
+    result = {}
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            key = compare_key(row)
+            if key is None:
+                continue
+            result[key] = row
     return result
 
 
 def read_trace_rows(paths: list[Path]) -> list[dict[str, Any]]:
     rows = []
     for path in paths:
+        path_scene = scene_from_trace_path(path)
         with path.open() as handle:
             for line in handle:
                 if line.strip():
-                    rows.append(json.loads(line))
+                    row = json.loads(line)
+                    row.setdefault("scene", path_scene)
+                    rows.append(row)
     return rows
 
 
@@ -163,7 +193,8 @@ def parse_args() -> argparse.Namespace:
             "compare_policies results into prefix rows for sequence ranker training."
         )
     )
-    parser.add_argument("--compare-json", type=Path, action="append", required=True)
+    parser.add_argument("--compare-json", type=Path, action="append", default=[])
+    parser.add_argument("--compare-csv", type=Path, action="append", default=[])
     parser.add_argument("--trace-jsonl", type=Path, action="append", required=True)
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--output-csv", type=Path)
@@ -177,23 +208,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    compare_rows: dict[int, dict[str, Any]] = {}
+    if not args.compare_json and not args.compare_csv:
+        raise ValueError("Pass at least one --compare-json or --compare-csv.")
+    compare_rows: dict[CompareKey, dict[str, Any]] = {}
     for path in args.compare_json:
         compare_rows.update(read_compare_rows(path))
+    for path in args.compare_csv:
+        compare_rows.update(read_compare_csv_rows(path))
 
-    traces_by_seed: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    traces_by_key: dict[CompareKey, list[dict[str, Any]]] = defaultdict(list)
     for row in read_trace_rows(args.trace_jsonl):
         if not row.get("accepted", False):
             continue
-        try:
-            seed = int(row["seed"])
-        except Exception:
+        key = compare_key(row)
+        if key is None:
             continue
-        traces_by_seed[seed].append(row)
+        traces_by_key[key].append(row)
 
     output_rows = []
-    for seed, trace_rows in sorted(traces_by_seed.items()):
-        compare_row = compare_rows.get(seed)
+    for key, trace_rows in sorted(traces_by_key.items()):
+        compare_row = compare_rows.get(key)
         if compare_row is None:
             continue
         trace_rows = sorted(
@@ -224,7 +258,7 @@ def main() -> int:
                 "rows": output_rows,
                 "summary": {
                     "rows": len(output_rows),
-                    "seeds": len({row["seed"] for row in output_rows}),
+                    "seeds": len({(row.get("scene", ""), row["seed"]) for row in output_rows}),
                     "good": sum(row["outcome_category"] == "good" for row in output_rows),
                     "neutral": sum(row["outcome_category"] == "neutral" for row in output_rows),
                     "bad": sum(row["outcome_category"] == "bad" for row in output_rows),
@@ -240,7 +274,7 @@ def main() -> int:
     print(
         "rows={rows} seeds={seeds} good={good} neutral={neutral} bad={bad}".format(
             rows=len(output_rows),
-            seeds=len({row["seed"] for row in output_rows}),
+            seeds=len({(row.get("scene", ""), row["seed"]) for row in output_rows}),
             good=sum(row["outcome_category"] == "good" for row in output_rows),
             neutral=sum(row["outcome_category"] == "neutral" for row in output_rows),
             bad=sum(row["outcome_category"] == "bad" for row in output_rows),
