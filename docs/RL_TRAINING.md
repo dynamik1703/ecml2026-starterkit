@@ -6577,3 +6577,24 @@ Weighted disagreement distillation canary:
 - Decision: do not append this checkpoint to the online Sequence candidate
   list. The remaining useful path for this checkpoint is as an RL
   initialization, not as an extra gated proposal source.
+- PPO fine-tune from the weighted checkpoint:
+  `/private/tmp/ecml_ppo_from_weighted_bc_successsafe_v1.pt` was trained from
+  `/private/tmp/ecml_bc_sequence_actionobs_weighted_v1.pt` with
+  `MyActionConflictObservationBuilder`, seed `6500`, `8` PPO updates,
+  `4` complete episodes per update, scene rotation
+  `scene_1,scene_1,scene_2,scene_3,scene_4`, low LR `1e-5`,
+  `SequenceSuccessPolicy` teacher CE `0.05`, anchor KL `0.02`, terminal
+  Success/failure shaping, and light action-conflict penalties. Training did
+  not collapse, but holdout rejected the checkpoint:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO from weighted BC v1 | `scene_1..4 6090..6109` | `+0.003047` | `-0.010417` | `18/13/49` | `6/6/68` |
+
+  The worst regression was `scene_3` seed `6090`: reward `-0.386682` and
+  Success `-0.833333`. Decision: do not continue this exact PPO objective. It
+  mostly preserved the weighted-BC action surface but did not learn a reliable
+  Success-risk correction. The next RL attempt needs either explicit
+  counterfactual failure labels/risk-head gating during action selection or
+  checkpoint selection inside training, not just stronger terminal reward
+  shaping.
