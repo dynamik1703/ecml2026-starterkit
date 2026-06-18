@@ -6459,3 +6459,29 @@ Multi-scene PPO canary from the direct checkpoint:
   `submission/checkpoint.pt`. Keep v1 packaged and use v2 as evidence that
   multi-scene PPO tooling works; the next training round should target the
   specific Success-loss seeds rather than broadly continuing from v1.
+
+ActionConflict-baseline correction:
+- The large direct-PPO gains above were measured against
+  `SequenceSuccessPolicy` under the 36-feature `MyObservationBuilder`. The old
+  Docker default, however, used
+  `MyActionConflictObservationBuilder`. Re-running the packaged direct PPO
+  against that ActionConflict Sequence baseline changed the conclusion:
+  - `scene_1..4 6090..6109`: reward W/L/T `30/10/40`,
+    Success W/L/T `14/5/61`, reward delta mean `+0.059226`,
+    Success delta mean `+0.014583`.
+  - `scene_1..4 6110..6129`: reward W/L/T `23/15/42`,
+    Success W/L/T `9/13/58`, reward delta mean `+0.009245`,
+    Success delta mean `-0.018750`.
+- Using the direct PPO as an internal Sequence candidate under ActionConflict
+  observations was also not useful:
+  - `6090..6109`: reward W/L/T `2/1/77`, Success W/L/T `1/1/78`,
+    reward delta mean `+0.002556`, Success delta mean `-0.002083`.
+  - `6110..6129`: reward W/L/T `0/2/78`, Success W/L/T `0/1/79`,
+    reward delta mean `-0.007613`, Success delta mean `-0.008333`.
+- Decision correction: do not promote direct PPO as Docker default yet. Restore
+  Docker to `submission.sequence_success_policy.MyPolicy` with
+  `MyActionConflictObservationBuilder`, and restore the previous
+  `submission/checkpoint.pt`. The direct PPO remains an important RL result and
+  a training starting point, but the next winner-oriented run must optimize
+  against the ActionConflict Sequence baseline or incorporate ActionConflict
+  observations directly.
