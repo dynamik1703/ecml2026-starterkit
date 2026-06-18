@@ -6436,3 +6436,26 @@ Direct constrained-PPO candidate:
   competition submission, run a larger canary grid, inspect the few Success-loss
   seeds, and consider a second constrained PPO round using all-scene failure
   seeds rather than scene 1 only.
+
+Multi-scene PPO canary from the direct checkpoint:
+- Added `--training-scenes` to `tools/train_masked_ppo.py`, allowing
+  complete-episode PPO collection to cycle through multiple scenes in the same
+  run. A smoke run confirmed that `training_scenes=scene_1,scene_2` is logged
+  and executes correctly.
+- Trained `/private/tmp/ecml_ppo_multiscene_direct_v2.pt` from the packaged
+  direct PPO checkpoint with `training_scenes=scene_1,scene_2,scene_3,scene_4`
+  and a loss-seed-heavy training seed list. The run stayed conservative
+  (`anchor_kl` roughly `2e-5..1e-4`).
+- Validation against the same SequencePolicy baseline:
+  - `scene_1..4 6070..6089`: reward W/L/T `60/16/4`,
+    Success W/L/T `62/5/13`, reward delta mean `+0.149141`,
+    Success delta mean `+0.277083`.
+  - `scene_1..4 6090..6109`: reward W/L/T `69/9/2`,
+    Success W/L/T `62/5/13`, reward delta mean `+0.185026`,
+    Success delta mean `+0.300000`.
+- Compared with the packaged direct PPO checkpoint, v2 is only marginally
+  different: slightly higher reward on these windows, roughly unchanged or
+  slightly lower Success. It is not a clear enough improvement to replace
+  `submission/checkpoint.pt`. Keep v1 packaged and use v2 as evidence that
+  multi-scene PPO tooling works; the next training round should target the
+  specific Success-loss seeds rather than broadly continuing from v1.
