@@ -6598,3 +6598,31 @@ Weighted disagreement distillation canary:
   counterfactual failure labels/risk-head gating during action selection or
   checkpoint selection inside training, not just stronger terminal reward
   shaping.
+
+Risk-head veto audit for weighted BC:
+- Tested the existing multi-scene risk head
+  `/private/tmp/ecml_actor_risk_head_multiscene_5700.pt` as a hard veto on top
+  of the default Sequence candidates plus the weighted-BC candidate.
+- Relative risk veto (`ECML_SEQUENCE_RISK_HEAD_MAX_CANDIDATE_MINUS_BASELINE=0`)
+  did not block the two bad weighted-BC `MOVE_FORWARD -> MOVE_LEFT` events on
+  `scene_1 6090..6109`: the risk head predicted both candidates as lower risk
+  than the baseline. Example: seed `6102` had baseline risk `0.620952`,
+  candidate risk `0.416981`; seed `6104` had baseline risk `0.580164`,
+  candidate risk `0.331804`.
+- Adding an absolute candidate-risk veto
+  (`ECML_SEQUENCE_RISK_HEAD_MAX_CANDIDATE=0.30`) neutralized the
+  `scene_1 6090..6109` regression. The `scene_1..4 6090..6109` aggregate was
+  exactly neutral: reward W/L/T `0/0/80`, Success W/L/T `0/0/80`.
+- The same absolute veto failed on the next holdout window:
+  `scene_1..4 6110..6129` scored reward delta mean `-0.005959`,
+  Success delta mean `-0.008333`, reward W/L/T `0/1/79`, Success W/L/T
+  `0/1/79`. The remaining loss was `scene_1 seed 6123`
+  (`-0.476757` reward, `-0.666667` Success), caused by an existing
+  `ecml_action_conflict_penalty_ppo_seed3700_u12.pt` `MOVE_FORWARD ->
+  MOVE_RIGHT` accepted event whose candidate risk was only `0.090280`.
+- Testing the absolute veto without the weighted-BC candidate produced the
+  same `scene_1 6110..6129` regression. Decision: do not deploy the current
+  risk-head veto. It is useful diagnostically, but the current risk head is
+  not calibrated enough for hard online vetoes; it needs accepted-event
+  outcome labels/counterfactual labels targeted at current selector failures,
+  not only rollout-MC per-action supervision.
