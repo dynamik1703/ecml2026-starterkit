@@ -87,7 +87,11 @@ def load_symbol(path: str) -> Any:
     return getattr(module, symbol_name)
 
 
-def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any], Any]:
+def make_env(
+    args: argparse.Namespace,
+    seed: int,
+    scene: str | None = None,
+) -> tuple[Any, dict[int, Any], Any]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = ECML2026Rewards()
     env, _ = RailEnvPersister.load_new(
@@ -96,7 +100,11 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any], 
         rewards=rewards,
     )
     env.number_of_agents = args.num_agents
-    env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
+    env = load_sampling_env_generator()(
+        env,
+        line_length=args.line_length,
+        scene=args.scene if scene is None else scene,
+    )
     observations, _ = env.reset(random_seed=seed)
     return env, observations, obs_builder
 
@@ -367,6 +375,24 @@ def parse_seed_list(value: str | None) -> list[int]:
     return seeds
 
 
+def parse_scene_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    scenes = []
+    valid_scenes = {"scene_1", "scene_2", "scene_3", "scene_4", "scene_5"}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item not in valid_scenes:
+            raise ValueError(
+                f"Unknown training scene {item!r}; expected one of "
+                f"{sorted(valid_scenes)}"
+            )
+        scenes.append(item)
+    return scenes
+
+
 def load_aux_bc_dataset(
     args: argparse.Namespace,
 ) -> tuple[dict[str, torch.Tensor] | None, dict[str, Any] | None]:
@@ -611,6 +637,18 @@ def rollout_seed(
     return int(start_seed + episode_index)
 
 
+def rollout_scene(
+    args: argparse.Namespace,
+    episode_index: int,
+    episode_seed_offset: int,
+) -> str | None:
+    training_scene_list = getattr(args, "training_scene_list", [])
+    if training_scene_list:
+        scene_index = (episode_seed_offset + episode_index) % len(training_scene_list)
+        return str(training_scene_list[scene_index])
+    return args.scene
+
+
 def collect_rollout(
     args: argparse.Namespace,
     policy: ActorCritic,
@@ -620,6 +658,7 @@ def collect_rollout(
     env, observations, obs_builder = make_env(
         args,
         rollout_seed(args, start_seed, 0, episode_seed_offset),
+        rollout_scene(args, 0, episode_seed_offset),
     )
     handles = list(env.get_agent_handles())
     num_agents = len(handles)
@@ -780,6 +819,11 @@ def collect_rollout(
                 rollout_seed(
                     args,
                     start_seed,
+                    completed_episodes,
+                    episode_seed_offset,
+                ),
+                rollout_scene(
+                    args,
                     completed_episodes,
                     episode_seed_offset,
                 ),
@@ -1148,6 +1192,13 @@ def parse_args() -> argparse.Namespace:
             "When set, updates cycle through this list instead of contiguous seed blocks."
         ),
     )
+    parser.add_argument(
+        "--training-scenes",
+        help=(
+            "Comma-separated scenes for complete-episode PPO collection. "
+            "When set, updates cycle through this list per completed episode."
+        ),
+    )
     parser.add_argument("--num-agents", type=int, default=6)
     parser.add_argument("--line-length", type=int, default=2)
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
@@ -1507,6 +1558,9 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
     args.training_seed_list = parse_seed_list(args.training_seeds)
     if args.training_seed_list and args.episodes_per_update <= 0:
         raise ValueError("--training-seeds requires --episodes-per-update > 0")
+    args.training_scene_list = parse_scene_list(args.training_scenes)
+    if args.training_scene_list and args.episodes_per_update <= 0:
+        raise ValueError("--training-scenes requires --episodes-per-update > 0")
     args.aux_bc_anchor_seed_list = parse_seed_list(args.aux_bc_anchor_seeds)
     if not args.aux_bc_anchor_seed_list:
         args.aux_bc_anchor_seed_list = list(args.training_seed_list)
@@ -1557,6 +1611,12 @@ def main() -> int:
             " training_seeds="
             + ",".join(str(seed) for seed in args.training_seed_list)
             if args.training_seed_list
+            else ""
+        )
+        + (
+            " training_scenes="
+            + ",".join(str(scene) for scene in args.training_scene_list)
+            if args.training_scene_list
             else ""
         ),
         flush=True,
