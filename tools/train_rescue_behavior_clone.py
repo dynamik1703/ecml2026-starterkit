@@ -327,6 +327,7 @@ def train_policy(
     observations: torch.Tensor,
     actions: torch.Tensor,
     weights: torch.Tensor,
+    forbidden_actions: torch.Tensor,
 ) -> tuple[ActorCritic, dict[str, float]]:
     checkpoint_path = args.init_checkpoint if args.init_checkpoint.exists() else None
     policy = ActorCritic(
@@ -344,6 +345,9 @@ def train_policy(
     )
     num_samples = observations.shape[0]
     final_loss = 0.0
+    final_bc_loss = 0.0
+    final_forbid_loss = 0.0
+    final_forbid_valid_fraction = 0.0
     final_accuracy = 0.0
     final_weighted_accuracy = 0.0
 
@@ -354,15 +358,56 @@ def train_policy(
         correct = 0
         weighted_correct = 0.0
         weight_seen = 0.0
+        forbid_losses = []
+        forbid_valid_fractions = []
         seen = 0
         for start in range(0, num_samples, args.batch_size):
             batch_idx = permutation[start : start + args.batch_size]
             obs_batch = observations[batch_idx]
             action_batch = actions[batch_idx]
             weight_batch = weights[batch_idx]
+            forbidden_batch = forbidden_actions[batch_idx]
             logits = policy.masked_logits(obs_batch)
             loss_values = F.cross_entropy(logits, action_batch, reduction="none")
-            loss = (loss_values * weight_batch).sum() / weight_batch.sum().clamp_min(1e-6)
+            bc_loss = (loss_values * weight_batch).sum() / weight_batch.sum().clamp_min(
+                1e-6
+            )
+            loss = bc_loss
+
+            forbid_loss = logits.new_tensor(0.0)
+            if args.forbid_coef != 0.0:
+                forbidden_mask = (forbidden_batch >= 0) & (
+                    forbidden_batch != action_batch
+                )
+                forbid_valid_fractions.append(float(forbidden_mask.float().mean().item()))
+                if forbidden_mask.any():
+                    forbidden_logits = logits[forbidden_mask]
+                    forbidden_actions_batch = forbidden_batch[forbidden_mask]
+                    selected_logits = forbidden_logits.gather(
+                        1,
+                        forbidden_actions_batch.unsqueeze(1),
+                    ).squeeze(1)
+                    valid_forbidden = torch.isfinite(selected_logits)
+                    if valid_forbidden.any():
+                        forbidden_logits = forbidden_logits[valid_forbidden]
+                        forbidden_actions_batch = forbidden_actions_batch[valid_forbidden]
+                        forbidden_probs = torch.softmax(
+                            forbidden_logits,
+                            dim=1,
+                        ).gather(
+                            1,
+                            forbidden_actions_batch.unsqueeze(1),
+                        ).squeeze(1)
+                        forbid_loss_values = -torch.log1p(
+                            -forbidden_probs.clamp(max=1.0 - 1e-6)
+                        )
+                        forbid_weight_batch = weight_batch[forbidden_mask][
+                            valid_forbidden
+                        ]
+                        forbid_loss = (
+                            forbid_loss_values * forbid_weight_batch
+                        ).sum() / forbid_weight_batch.sum().clamp_min(1e-6)
+                loss = loss + args.forbid_coef * forbid_loss
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -370,6 +415,7 @@ def train_policy(
             optimizer.step()
 
             losses.append(float(loss.item()))
+            forbid_losses.append(float(forbid_loss.item()))
             predictions = logits.argmax(dim=-1)
             is_correct = predictions == action_batch
             correct += int(is_correct.sum().item())
@@ -378,11 +424,19 @@ def train_policy(
             seen += int(action_batch.numel())
 
         final_loss = float(np.mean(losses))
+        final_bc_loss = final_loss - args.forbid_coef * float(np.mean(forbid_losses))
+        final_forbid_loss = float(np.mean(forbid_losses))
+        final_forbid_valid_fraction = (
+            float(np.mean(forbid_valid_fractions)) if forbid_valid_fractions else 0.0
+        )
         final_accuracy = correct / max(1, seen)
         final_weighted_accuracy = weighted_correct / max(1e-6, weight_seen)
         print(
             f"epoch={epoch + 1}/{args.epochs} "
             f"loss={final_loss:.6g} "
+            f"bc_loss={final_bc_loss:.6g} "
+            f"forbid_loss={final_forbid_loss:.6g} "
+            f"forbid_valid={final_forbid_valid_fraction:.6g} "
             f"accuracy={final_accuracy:.6g} "
             f"weighted_accuracy={final_weighted_accuracy:.6g}",
             flush=True,
@@ -390,6 +444,9 @@ def train_policy(
 
     return policy, {
         "loss": final_loss,
+        "bc_loss": final_bc_loss,
+        "forbid_loss": final_forbid_loss,
+        "forbid_valid_fraction": final_forbid_valid_fraction,
         "accuracy": final_accuracy,
         "weighted_accuracy": final_weighted_accuracy,
     }
@@ -518,6 +575,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--avoidance-weight", type=float, default=6.0)
+    parser.add_argument(
+        "--forbid-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional penalty for candidate_action on negative_baseline rows. "
+            "Uses -log(1 - pi(candidate_action)) and ignores rows where the "
+            "forbidden action equals the target action."
+        ),
+    )
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--success-weight", type=float, default=2.0)
     parser.add_argument("--failed-weight", type=float, default=0.75)
@@ -542,7 +609,7 @@ def main() -> int:
         observations,
         actions,
         weights,
-        _forbidden_actions,
+        forbidden_actions,
         collection_stats,
     ) = collect_training_samples(
         args,
@@ -563,7 +630,13 @@ def main() -> int:
         f"anchor_action_counts={collection_stats['anchor_action_counts']}",
         flush=True,
     )
-    policy, train_stats = train_policy(args, observations, actions, weights)
+    policy, train_stats = train_policy(
+        args,
+        observations,
+        actions,
+        weights,
+        forbidden_actions,
+    )
 
     args.output_checkpoint.parent.mkdir(parents=True, exist_ok=True)
     torch.save(

@@ -6351,3 +6351,48 @@ Multi-scene risk-head and raw-margin guard:
     step should mine more positive rescue labels across scenes, train a
     broader candidate generator, and then validate it under the same
     detour-only manifest protocol.
+
+Failure-unblock candidate and selector diagnosis:
+- Added an optional forbidden-action loss to
+  `tools/train_rescue_behavior_clone.py`. Negative-baseline rows can now carry
+  the counterfactual `candidate_action` as a forbidden action, and training can
+  penalize it with `--forbid-coef` via `-log(1 - pi(candidate_action))`. The
+  default remains `0.0`, so older BC runs are unchanged.
+- Mined current failure-focused counterfactuals on `scene_1..scene_4`, seeds
+  `6070..6089`. The strongest scene-1 labels included late unblock actions
+  such as `scene_1 seed6071 env_time95 agent5 MOVE_LEFT->MOVE_FORWARD`
+  (`reward_delta=+0.530149`, `success_delta=+0.5`) and multiple seed6088
+  `DO_NOTHING->MOVE_FORWARD` rescues.
+- Trained `/private/tmp/ecml_failure_unblock_bc_scene1_6070_v2_forbid.pt`
+  from `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` with positive rescue
+  weights, low-weight anchors, negative-baseline rows, and `--forbid-coef 0.20`.
+  Collection stats were `525` samples, `31` valid rescue/avoidance labels,
+  `8` valid forbidden labels, `0` forbidden-invalid labels, and `256`
+  invalid replay labels. Final weighted BC accuracy was `0.979088`.
+- Online manifest A/B on `scene_1 seed6070 episodes=20` was exactly neutral:
+  - default sequence gate: reward W/L/T `0/0/20`, Success W/L/T `0/0/20`,
+    accepted sources `listwise=19`, `aux_listwise=1`.
+  - `ECML_SEQUENCE_MAX_ACCEPTED_EVENTS=4`: reward W/L/T `0/0/20`, Success
+    W/L/T `0/0/20`, accepted sources `listwise=79`, `aux_listwise=1`.
+- Trace diagnosis showed the bottleneck has moved from candidate generation to
+  selector quality. The v2 candidate produces several positive late rescue
+  actions under a blocked Listwise/Aux trace:
+  - `seed6071 env_time95 agent5 MOVE_LEFT->MOVE_FORWARD` is present, but the
+    Listwise margin is `-6.583263`.
+  - `seed6077 env_time19/28 MOVE_RIGHT->MOVE_LEFT` positives are present, but
+    score at margin `0.0` and are rejected; a later neutral
+    `DO_NOTHING->MOVE_FORWARD` at env_time29 is accepted by Listwise.
+  - `seed6088 env_time100..111 agent5 DO_NOTHING->MOVE_FORWARD` positives are
+    present, but Listwise margins are negative (`-0.6874` to `-0.8558`).
+  Early neutral accepted events can also change the trajectory before later
+  positive rescues are reached.
+- A dedicated Success/Unsafe classifier on the new failure-focused CSVs is not
+  a deployable replacement gate yet. Training on scene 1 and validating on
+  scenes 2-4 accepted very few good rows and still leaked bad/success-negative
+  rows, with negative accepted reward sums at relaxed thresholds. This argues
+  against adding another small one-step learned gate from the current features.
+- Current decision: do not package the v2 failure-unblock checkpoint as a
+  default model. Keep the forbidden-loss training path, because it fixes a real
+  tooling gap, but shift the winning-solution effort toward a stronger learned
+  selector objective or an end-to-end RL policy that internalizes rescue timing
+  instead of relying on the current Listwise gate.
