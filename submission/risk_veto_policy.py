@@ -99,6 +99,34 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_MIN_CANDIDATE_VALUE",
             float("-inf"),
         )
+        self.prefix_relax_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
+        )
+        self.prefix_relax_max_future_head_on_risk = self._env_float(
+            "ECML_RISK_VETO_PREFIX_RELAX_MAX_FUTURE_HEAD_ON_RISK",
+            0.0,
+        )
+        self.prefix_relax_max_deadline_conflict_penalty = self._env_float(
+            "ECML_RISK_VETO_PREFIX_RELAX_MAX_DEADLINE_CONFLICT_PENALTY",
+            0.0,
+        )
+        allowed_prefix_relax_reasons = os.environ.get(
+            "ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS",
+            (
+                "insufficient_risk_improvement,"
+                "insufficient_reward_risk_improvement,"
+                "reward_risk_too_high,"
+                "reward_risk_regression"
+            ),
+        ).strip()
+        self.prefix_relax_allowed_reject_reasons = {
+            reason.strip()
+            for reason in allowed_prefix_relax_reasons.split(",")
+            if reason.strip()
+        }
+        self.prefix_relax_allow_all_reject_reasons = (
+            allowed_prefix_relax_reasons == "*"
+        )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
 
     @staticmethod
@@ -240,6 +268,82 @@ class RiskVetoPolicy:
                 accepted = False
         return accepted, scores
 
+    def _baseline_prefixes(
+        self,
+        obs_builder: Any,
+        baseline_actions: dict[int, int],
+    ) -> dict[int, list[dict[str, Any]]]:
+        lookahead = getattr(self.baseline_policy, "FUTURE_RERANK_LOOKAHEAD_CELLS", 45)
+        prefixes: dict[int, list[dict[str, Any]]] = {}
+        for handle, action in baseline_actions.items():
+            try:
+                prefixes[handle] = self.baseline_policy._route_prefix_for_action(
+                    obs_builder,
+                    handle,
+                    int(action),
+                    lookahead,
+                )
+            except Exception:
+                prefixes[handle] = []
+        return prefixes
+
+    def _prefix_relax(
+        self,
+        obs_builder: Any | None,
+        planned_prefixes: dict[int, list[dict[str, Any]]] | None,
+        handle: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> tuple[bool, dict[str, Any]]:
+        if (
+            not self.prefix_relax_enabled
+            or obs_builder is None
+            or planned_prefixes is None
+        ):
+            return False, scores
+        original_reject_reason = str(scores.get("reject_reason", ""))
+        scores["prefix_relax_original_reject_reason"] = original_reject_reason
+        if (
+            not self.prefix_relax_allow_all_reject_reasons
+            and original_reject_reason
+            not in self.prefix_relax_allowed_reject_reasons
+        ):
+            scores["prefix_relax_blocked_reject_reason"] = original_reject_reason
+            return False, scores
+        try:
+            future_head_on_risk = float(
+                self.baseline_policy._future_head_on_risk(
+                    obs_builder,
+                    handle,
+                    candidate_action,
+                    planned_prefixes,
+                )
+            )
+            deadline_conflict_penalty = float(
+                self.baseline_policy._deadline_conflict_penalty(
+                    obs_builder,
+                    handle,
+                    candidate_action,
+                    planned_prefixes,
+                )
+            )
+        except Exception:
+            scores["prefix_relax_error"] = 1.0
+            return False, scores
+
+        scores["prefix_relax_candidate_future_head_on_risk"] = future_head_on_risk
+        scores["prefix_relax_candidate_deadline_conflict_penalty"] = (
+            deadline_conflict_penalty
+        )
+        if future_head_on_risk > self.prefix_relax_max_future_head_on_risk:
+            return False, scores
+        if deadline_conflict_penalty > self.prefix_relax_max_deadline_conflict_penalty:
+            return False, scores
+
+        scores["selector_source"] = "prefix_relax"
+        scores.pop("reject_reason", None)
+        return True, scores
+
     def _trace(
         self,
         *,
@@ -281,19 +385,28 @@ class RiskVetoPolicy:
         output = dict(baseline_actions)
         seed = None
         step = None
+        obs_builder = None
         try:
             from submission import runtime_context
 
             context = runtime_context.get()
             seed = context.seed
             step = context.step
+            obs_builder = context.obs_builder
         except Exception:
             pass
+        baseline_action_ids = {
+            handle: self._action_id(action)
+            for handle, action in baseline_actions.items()
+        }
+        planned_prefixes = None
+        if self.prefix_relax_enabled and obs_builder is not None:
+            planned_prefixes = self._baseline_prefixes(obs_builder, baseline_action_ids)
 
         for handle in handles:
             if handle not in candidate_actions or handle not in baseline_actions:
                 continue
-            baseline_action = self._action_id(baseline_actions[handle])
+            baseline_action = baseline_action_ids[handle]
             candidate_action = self._action_id(candidate_actions[handle])
             if candidate_action == baseline_action:
                 continue
@@ -302,6 +415,14 @@ class RiskVetoPolicy:
                 baseline_action,
                 candidate_action,
             )
+            if not accepted:
+                accepted, scores = self._prefix_relax(
+                    obs_builder,
+                    planned_prefixes,
+                    int(handle),
+                    candidate_action,
+                    scores,
+                )
             self._trace(
                 handle=handle,
                 seed=seed,

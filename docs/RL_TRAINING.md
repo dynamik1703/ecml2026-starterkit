@@ -7089,3 +7089,47 @@ Exact action-diff counterfactual labels:
   shape. Do not force it. The next implementation should either add a small
   exact-event ranker or add an online guard that uses the exact-label feature
   insight above.
+
+Online prefix-relax gate:
+- Added optional Prefix-Relax support to `RiskVetoPolicy`. The policy still
+  starts from `SequenceSuccessPolicy`, proposes candidate actions with the
+  direct PPO/Rerank policy, and applies learned Success-risk + Reward-risk
+  vetoes. When a PPO candidate is rejected only because the learned risk
+  improvement is too small or because the weaker Reward-risk head is cautious,
+  Prefix-Relax may still accept the candidate if the candidate action has:
+  - `candidate_future_head_on_risk <= 0`
+  - `candidate_deadline_conflict_penalty <= 0`
+- The first aggressive version allowed Prefix-Relax to override every reject
+  reason. It increased reward but was not deployable:
+
+| selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Prefix-Relax, all reject reasons | `6290..6299` | `+0.012799` | `0.000000` | `6/0/34` | `0/0/40` |
+| Prefix-Relax, all reject reasons | `6300..6309` | `+0.008269` | `0.000000` | `4/1/35` | `1/1/38` |
+
+- Exact counterfactual diagnosis of the independent `scene_3 seed6301`
+  Success loss showed that several `STOP_MOVING->MOVE_FORWARD` actions for
+  agent `2` were individually Success-negative (`Success_delta=-0.166667`)
+  despite zero prefix head-on/deadline penalties. These actions had been
+  rejected by the learned Success-risk head as `candidate_risk_regression`.
+  `scene_4 seed6306` also showed a reward loss tied to a
+  `candidate_risk_regression` relaxation.
+- Hardened Prefix-Relax with
+  `ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS`. The default only
+  relaxes `insufficient_risk_improvement`,
+  `insufficient_reward_risk_improvement`, `reward_risk_too_high`, and
+  `reward_risk_regression`. It does not override hard Success-risk rejects
+  such as `candidate_risk_regression` or `candidate_risk_too_high`.
+- Robust Prefix-Relax validation:
+
+| selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T | Prefix-Relax accepts |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Prefix-Relax, safe reject reasons | `6290..6299` | `+0.006435` | `0.000000` | `3/0/37` | `0/0/40` | `46` |
+| Prefix-Relax, safe reject reasons | `6300..6309` | `+0.004244` | `0.000000` | `3/0/37` | `0/0/40` | `38` |
+
+- Interpretation: this is the best current deployment candidate in the
+  learned-selector family. It is still modest in reward magnitude, but it is
+  clearly better than the low-recall learned risk veto alone and avoids the
+  observed independent Success/Reward regressions. The next RL improvement
+  should replace the hand-coded Prefix-Relax rule with a learned exact-event
+  pairwise selector trained from the forced-action counterfactual labels.
