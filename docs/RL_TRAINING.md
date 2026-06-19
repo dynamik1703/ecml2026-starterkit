@@ -6897,3 +6897,18 @@ Direct ActionConflict PPO refresh after v4d:
   should therefore add explicit failure/counterfactual supervision or a learned
   candidate-risk objective from these loss cases, rather than another longer
   run of the same PPO objective.
+- First synchronized diff diagnosis for the v4 loss rows:
+  - `scene_1 seed6274`: early `MOVE_FORWARD->MOVE_LEFT` and
+    `MOVE_FORWARD->MOVE_RIGHT` deviations around `env_time=178`, followed by a
+    later `STOP_MOVING->MOVE_RIGHT` deviation at `env_time=320`.
+  - `scene_3 seed6271`: early `MOVE_FORWARD->MOVE_LEFT` at `env_time=23`,
+    followed by repeated `STOP_MOVING->MOVE_FORWARD` deviations from
+    `env_time=147` onward with very large distance delta (`245`).
+  - `scene_4 seed6271`: `MOVE_FORWARD->MOVE_RIGHT` at `env_time=95`,
+    `MOVE_FORWARD->MOVE_LEFT` at `env_time=146`, then
+    `STOP_MOVING->MOVE_FORWARD` at `env_time=154/155`.
+- Important tooling issue before the next train: the current Aux-BC/forbid
+  loader is seed-keyed, not scene-keyed. Since `seed6271` is a different
+  failure in `scene_3` and `scene_4`, we must make the failure-label loader
+  scene-aware before mixing these rows into a new PPO/BC run. Otherwise the
+  negative labels can be applied to the wrong sampled environment.
