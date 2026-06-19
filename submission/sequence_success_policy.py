@@ -46,6 +46,11 @@ DEFAULT_AUX_LISTWISE_MODEL_PATH = str(
     / "models"
     / "ecml_multicandidate_listwise_ranker_online_prefix_v9_enriched.pt"
 )
+DEFAULT_EXTRA_AUX_LISTWISE_MODEL_PATH = str(
+    SUBMISSION_DIR
+    / "models"
+    / "ecml_actionobs_v1_sequence_ranker_extra_aux_margin075.pt"
+)
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
     str(
@@ -55,6 +60,7 @@ DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     ),
     str(SUBMISSION_DIR / "models" / "ecml_aux_bc_counterfactual_v7_probe.pt"),
     str(SUBMISSION_DIR / "models" / "ecml_aux_bc_counterfactual_v7b_3435neg_u1.pt"),
+    str(SUBMISSION_DIR / "models" / "ecml_ppo_actionobs_multiscene_v1.pt"),
 )
 
 
@@ -441,6 +447,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_AUX_LISTWISE_MODEL",
             DEFAULT_AUX_LISTWISE_MODEL_PATH,
         ).strip()
+        extra_aux_listwise_model_path = os.environ.get(
+            "ECML_SEQUENCE_EXTRA_AUX_LISTWISE_MODEL",
+            DEFAULT_EXTRA_AUX_LISTWISE_MODEL_PATH,
+        ).strip()
         candidate_checkpoint_path = (
             os.environ.get("ECML_SEQUENCE_SUCCESS_CANDIDATE_CHECKPOINT")
             or ",".join(DEFAULT_CANDIDATE_CHECKPOINT_PATHS)
@@ -478,6 +488,16 @@ class SequenceSuccessPolicy(RerankPolicy):
             if aux_listwise_model_path and Path(aux_listwise_model_path).exists()
             else None
         )
+        self.extra_aux_listwise_scorer = (
+            self._load_listwise_scorer(
+                extra_aux_listwise_model_path,
+                env_prefix="ECML_SEQUENCE_EXTRA_AUX_LISTWISE",
+                default_margin_threshold=0.75,
+            )
+            if extra_aux_listwise_model_path
+            and Path(extra_aux_listwise_model_path).exists()
+            else None
+        )
         self.selector_mode = os.environ.get(
             "ECML_SEQUENCE_SELECTOR_MODE",
             "listwise",
@@ -509,6 +529,14 @@ class SequenceSuccessPolicy(RerankPolicy):
                 "STOP_MOVING->MOVE_RIGHT,"
                 "MOVE_FORWARD->MOVE_RIGHT"
             ),
+        )
+        self.extra_aux_listwise_transitions = self._env_transition_set(
+            "ECML_SEQUENCE_EXTRA_AUX_LISTWISE_TRANSITIONS",
+            default="",
+        )
+        self.extra_aux_candidate_stems = self._env_string_set(
+            "ECML_SEQUENCE_EXTRA_AUX_CANDIDATE_STEMS",
+            default="",
         )
         self.max_head_on_edge_conflicts = self._env_int(
             "ECML_SEQUENCE_MAX_HEAD_ON_EDGE_CONFLICTS",
@@ -857,6 +885,9 @@ class SequenceSuccessPolicy(RerankPolicy):
     def _candidate_checkpoint_path(self, candidate_policy: RerankPolicy) -> str:
         return self.candidate_policy_paths.get(id(candidate_policy), "")
 
+    def _candidate_stem(self, candidate_policy: RerankPolicy) -> str:
+        return Path(self._candidate_checkpoint_path(candidate_policy)).stem
+
     def _is_extra_candidate(
         self,
         candidate_policy: RerankPolicy,
@@ -864,8 +895,7 @@ class SequenceSuccessPolicy(RerankPolicy):
     ) -> bool:
         if require_existing_event and not self._accepted_event_details:
             return False
-        path = Path(self._candidate_checkpoint_path(candidate_policy))
-        stem = path.stem
+        stem = self._candidate_stem(candidate_policy)
         return bool(stem and stem in self.extra_candidate_stems)
 
     def act_many(
@@ -881,6 +911,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 self.sequence_scorer is None
                 and self.listwise_scorer is None
                 and self.aux_listwise_scorer is None
+                and self.extra_aux_listwise_scorer is None
             )
         ):
             return baseline_actions
@@ -1396,7 +1427,11 @@ class SequenceSuccessPolicy(RerankPolicy):
         extra_candidate: bool,
     ) -> tuple[bool, dict[str, float]]:
         if (
-            (self.listwise_scorer is not None or self.aux_listwise_scorer is not None)
+            (
+                self.listwise_scorer is not None
+                or self.aux_listwise_scorer is not None
+                or self.extra_aux_listwise_scorer is not None
+            )
             and self.selector_mode in {"listwise", "listwise_primary"}
         ):
             score_row = dict(aggregate)
@@ -1438,6 +1473,35 @@ class SequenceSuccessPolicy(RerankPolicy):
                     return True, aux_scores
                 if not scores:
                     return False, aux_scores
+
+            if (
+                self.extra_aux_listwise_scorer is not None
+                and (
+                    not self.extra_aux_candidate_stems
+                    or self._candidate_stem(candidate_policy)
+                    in self.extra_aux_candidate_stems
+                )
+                and (
+                    not self.extra_aux_listwise_transitions
+                    or (baseline_action, candidate_action)
+                    in self.extra_aux_listwise_transitions
+                )
+            ):
+                extra_aux_accepted, extra_aux_scores = (
+                    self.extra_aux_listwise_scorer.score(score_row)
+                )
+                extra_aux_scores["selector_source"] = "extra_aux_listwise"
+                extra_aux_accepted, extra_aux_scores = self._apply_candidate_guards(
+                    accepted=extra_aux_accepted,
+                    scores=extra_aux_scores,
+                    detail=detail,
+                    baseline_action=baseline_action,
+                    candidate_action=candidate_action,
+                )
+                if extra_aux_accepted:
+                    return True, extra_aux_scores
+                if not scores:
+                    return False, extra_aux_scores
 
             return False, scores
 

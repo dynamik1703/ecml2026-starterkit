@@ -6667,3 +6667,41 @@ ActionConflict targeted PPO v2 rejection:
   scorer from these failure cases or train candidate policies with a stronger
   sequence-level anti-regression objective, then evaluate with the manifest
   gate before deployment.
+
+ActionConflict v1 Extra-Aux ranker promotion candidate:
+- Mined focused diff-prefix rows for
+  `/private/tmp/ecml_ppo_actionobs_multiscene_v1.pt` against the current
+  ActionConflict Sequence policy on the actually changed `6090..6129` seeds:
+  150 rows total (`99 good`, `39 bad`, `12 neutral`) across `scene_1..4`.
+  Scene 1 supplied the hard Success-loss rows; scenes 2-4 supplied mostly
+  reward/Success wins plus reward-only hard negatives.
+- A sequence rescue/planner diagnostic on held-out Scene-1 seeds separated
+  safe reward gains from Success losses: threshold mode accepted `10/0/0`
+  good/neutral/bad rows at several safe settings; planner mode accepted a
+  more conservative `6/0/0` with reward delta sum `+0.230717`.
+- Exported the online-compatible listwise ranker as
+  `/private/tmp/ecml_actionobs_v1_sequence_ranker_all.pt`, then packaged it as
+  `submission/models/ecml_actionobs_v1_sequence_ranker_extra_aux_margin075.pt`.
+  The associated RL candidate is packaged as
+  `submission/models/ecml_ppo_actionobs_multiscene_v1.pt`.
+- Important integration finding: replacing the existing Aux-Listwise model was
+  wrong. It removed a helpful default Aux decision on `scene_3 seed6123` and
+  created a reward regression even when the new ranker accepted nothing. The
+  policy now supports an additional `ECML_SEQUENCE_EXTRA_AUX_LISTWISE_MODEL`
+  that runs after primary Listwise and the existing Aux scorer.
+- Conservative Extra-Aux margin `0.75` was selected. Against the old default
+  Sequence policy over two 80-episode windows, using default candidates plus
+  the v1 RL candidate and the Extra-Aux ranker scored:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6090..6109` | `+0.006238` | `+0.004167` | `3/0/77` | `2/0/78` |
+| `scene_1..4 6110..6129` | `+0.004167` | `+0.004167` | `1/0/79` | `1/0/79` |
+| combined `160` episodes | `+0.005202` | `+0.004167` | `4/0/156` | `3/0/157` |
+
+- Packaging smoke with the new defaults reproduced the key canaries:
+  `scene_3 seed6090` improved by `+0.069315` reward with no Success loss via
+  `extra_aux_listwise`, while `scene_3 seed6123` stayed neutral and preserved
+  the existing `aux_listwise` decision. This is the first RL-derived online
+  extension in this branch that is positive and loss-free on the two current
+  80-episode validation windows.
