@@ -554,6 +554,18 @@ def load_aux_risk_dataset(
             continue
         if args.aux_risk_target == "team_failure":
             target = 1.0 - finite_or_zero(row.get("team_success"))
+        elif args.aux_risk_target == "low_reward":
+            reward = safe_float(row.get("episode_normalized_reward"))
+            if not np.isfinite(reward):
+                skipped_missing_target += 1
+                continue
+            target = float(reward < args.aux_risk_reward_threshold)
+        elif args.aux_risk_target == "reward_shortfall":
+            reward = safe_float(row.get("episode_normalized_reward"))
+            if not np.isfinite(reward):
+                skipped_missing_target += 1
+                continue
+            target = 1.0 - reward
         else:
             target = safe_float(row.get("agent_failure"))
         if not np.isfinite(target):
@@ -602,6 +614,7 @@ def load_aux_risk_dataset(
         "obs_columns": int(len(obs_columns)),
         "positive_fraction": float(labels_array.mean()),
         "target": args.aux_risk_target,
+        "reward_threshold": float(getattr(args, "aux_risk_reward_threshold", 0.9)),
         "skipped_invalid_action": skipped_invalid_action,
         "skipped_invalid_mask": skipped_invalid_mask,
         "skipped_missing_target": skipped_missing_target,
@@ -615,6 +628,9 @@ def load_aux_risk_dataset(
                 "config": {
                     "aux_risk_csv": [str(csv_path) for csv_path in args.aux_risk_csv],
                     "target": args.aux_risk_target,
+                    "reward_threshold": float(
+                        getattr(args, "aux_risk_reward_threshold", 0.9)
+                    ),
                     "obs_size": args.obs_size,
                     "n_actions": args.n_actions,
                 },
@@ -1455,8 +1471,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--aux-risk-target",
-        choices=["agent_failure", "team_failure"],
+        choices=["agent_failure", "team_failure", "low_reward", "reward_shortfall"],
         default="agent_failure",
+    )
+    parser.add_argument(
+        "--aux-risk-reward-threshold",
+        type=float,
+        default=0.9,
+        help=(
+            "Episode reward threshold for --aux-risk-target=low_reward. "
+            "Rows below this normalized reward are treated as risky."
+        ),
     )
     parser.add_argument("--aux-risk-batch-size", type=int, default=512)
     parser.add_argument("--aux-risk-positive-weight", type=float, default=4.0)

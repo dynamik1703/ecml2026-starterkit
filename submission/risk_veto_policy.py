@@ -45,6 +45,17 @@ class RiskVetoPolicy:
         )
         if self.risk_policy is not None:
             self.risk_policy.eval()
+        reward_risk_checkpoint = os.environ.get(
+            "ECML_RISK_VETO_REWARD_RISK_CHECKPOINT",
+            "",
+        ).strip()
+        self.reward_risk_policy = (
+            ActorCritic(checkpoint_path=reward_risk_checkpoint)
+            if reward_risk_checkpoint and Path(reward_risk_checkpoint).exists()
+            else None
+        )
+        if self.reward_risk_policy is not None:
+            self.reward_risk_policy.eval()
         self.max_candidate_risk = self._env_float(
             "ECML_RISK_VETO_MAX_CANDIDATE",
             0.50,
@@ -55,6 +66,18 @@ class RiskVetoPolicy:
         )
         self.min_baseline_minus_candidate = self._env_float(
             "ECML_RISK_VETO_MIN_BASELINE_MINUS_CANDIDATE",
+            float("-inf"),
+        )
+        self.max_reward_risk = self._env_float(
+            "ECML_RISK_VETO_MAX_REWARD_RISK",
+            0.50,
+        )
+        self.max_reward_risk_candidate_minus_baseline = self._env_float(
+            "ECML_RISK_VETO_MAX_REWARD_RISK_CANDIDATE_MINUS_BASELINE",
+            0.00,
+        )
+        self.min_reward_risk_baseline_minus_candidate = self._env_float(
+            "ECML_RISK_VETO_MIN_REWARD_RISK_BASELINE_MINUS_CANDIDATE",
             float("-inf"),
         )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
@@ -79,6 +102,26 @@ class RiskVetoPolicy:
         except Exception:
             return str(action)
 
+    def _action_risk_scores(
+        self,
+        policy: ActorCritic,
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+        prefix: str,
+    ) -> dict[str, float]:
+        with torch.no_grad():
+            logits = policy.risk_logits(np.asarray(observation, dtype=np.float32))
+            probs = torch.sigmoid(logits).squeeze(0).cpu().numpy()
+        baseline_risk = float(probs[baseline_action])
+        candidate_risk = float(probs[candidate_action])
+        return {
+            f"{prefix}_baseline": baseline_risk,
+            f"{prefix}_candidate": candidate_risk,
+            f"{prefix}_candidate_minus_baseline": candidate_risk - baseline_risk,
+            f"{prefix}_baseline_minus_candidate": baseline_risk - candidate_risk,
+        }
+
     def _risk_scores(
         self,
         observation: Any,
@@ -88,24 +131,19 @@ class RiskVetoPolicy:
         if self.risk_policy is None:
             return False, {"reject_reason": "missing_risk_head"}
         try:
-            with torch.no_grad():
-                logits = self.risk_policy.risk_logits(
-                    np.asarray(observation, dtype=np.float32)
-                )
-                probs = torch.sigmoid(logits).squeeze(0).cpu().numpy()
-            baseline_risk = float(probs[baseline_action])
-            candidate_risk = float(probs[candidate_action])
+            scores = self._action_risk_scores(
+                self.risk_policy,
+                observation,
+                baseline_action,
+                candidate_action,
+                "risk_head",
+            )
         except Exception:
             return False, {"reject_reason": "risk_score_error"}
 
-        candidate_minus_baseline = candidate_risk - baseline_risk
-        baseline_minus_candidate = baseline_risk - candidate_risk
-        scores = {
-            "risk_head_baseline": baseline_risk,
-            "risk_head_candidate": candidate_risk,
-            "risk_head_candidate_minus_baseline": candidate_minus_baseline,
-            "risk_head_baseline_minus_candidate": baseline_minus_candidate,
-        }
+        candidate_risk = float(scores["risk_head_candidate"])
+        candidate_minus_baseline = float(scores["risk_head_candidate_minus_baseline"])
+        baseline_minus_candidate = float(scores["risk_head_baseline_minus_candidate"])
         accepted = True
         if candidate_risk > self.max_candidate_risk:
             scores["reject_reason"] = "candidate_risk_too_high"
@@ -116,6 +154,43 @@ class RiskVetoPolicy:
         elif baseline_minus_candidate < self.min_baseline_minus_candidate:
             scores["reject_reason"] = "insufficient_risk_improvement"
             accepted = False
+        if accepted and self.reward_risk_policy is not None:
+            try:
+                scores.update(
+                    self._action_risk_scores(
+                        self.reward_risk_policy,
+                        observation,
+                        baseline_action,
+                        candidate_action,
+                        "reward_risk_head",
+                    )
+                )
+            except Exception:
+                scores["reject_reason"] = "reward_risk_score_error"
+                accepted = False
+        if accepted and self.reward_risk_policy is not None:
+            reward_candidate = float(scores["reward_risk_head_candidate"])
+            reward_candidate_minus_baseline = float(
+                scores["reward_risk_head_candidate_minus_baseline"]
+            )
+            reward_baseline_minus_candidate = float(
+                scores["reward_risk_head_baseline_minus_candidate"]
+            )
+            if reward_candidate > self.max_reward_risk:
+                scores["reject_reason"] = "reward_risk_too_high"
+                accepted = False
+            elif (
+                reward_candidate_minus_baseline
+                > self.max_reward_risk_candidate_minus_baseline
+            ):
+                scores["reject_reason"] = "reward_risk_regression"
+                accepted = False
+            elif (
+                reward_baseline_minus_candidate
+                < self.min_reward_risk_baseline_minus_candidate
+            ):
+                scores["reject_reason"] = "insufficient_reward_risk_improvement"
+                accepted = False
         return accepted, scores
 
     def _trace(

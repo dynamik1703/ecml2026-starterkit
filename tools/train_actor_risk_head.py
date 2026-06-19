@@ -136,7 +136,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-actions", type=int, default=5)
     parser.add_argument("--hidden-size", type=int, default=128)
     parser.add_argument("--num-hidden-layers", type=int, default=3)
-    parser.add_argument("--target", choices=["agent_failure", "team_failure"], default="agent_failure")
+    parser.add_argument(
+        "--target",
+        choices=["agent_failure", "team_failure", "low_reward", "reward_shortfall"],
+        default="agent_failure",
+    )
+    parser.add_argument("--reward-threshold", type=float, default=0.9)
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -163,6 +168,7 @@ def risk_loader_args(
         aux_risk_positive_weight=args.positive_weight,
         aux_risk_negative_weight=args.negative_weight,
         aux_risk_max_samples=max_samples,
+        aux_risk_reward_threshold=args.reward_threshold,
         seed=args.seed,
         n_actions=args.n_actions,
         obs_size=args.obs_size,

@@ -6978,3 +6978,36 @@ Action-risk veto for direct PPO proposals:
   experiment is not another blind PPO fine-tune; it is a broader multi-window
   MC-risk/value head and threshold screen on fresh seeds (`6280..6299`) before
   integrating this selector into the default Sequence policy.
+
+Reward-risk head for direct PPO proposals:
+- Extended the rollout-MC risk loader with two reward-oriented targets:
+  `low_reward` and `reward_shortfall`. This lets us train a second per-action
+  badness head without changing the actor itself. `RiskVetoPolicy` can now
+  optionally load `ECML_RISK_VETO_REWARD_RISK_CHECKPOINT` and require that a
+  direct PPO candidate is safe under both Success-risk and Reward-risk.
+- Trained `/private/tmp/ecml_reward_risk_head_v4_lowreward09_mc6270_s123_val4.pt`
+  from the direct v4 checkpoint with `target=low_reward`,
+  `reward_threshold=0.9`, train scenes `1..3`, validation scene `4`. The
+  signal is weaker than Success-risk but usable as a veto feature:
+  validation improved from `AUC=0.475116`, `AP=0.465539` to
+  `AUC=0.611898`, `AP=0.588137`.
+- Combined selector settings:
+  - Success-risk: candidate risk `<=0.50`, no relative risk regression, and
+    baseline-minus-candidate risk improvement `>=0.15`.
+  - Reward-risk: candidate low-reward risk `<=0.50` and no relative reward-risk
+    regression.
+
+| selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T | accepted diffs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Success-risk only | `6270..6279` | `+0.000779` | `0.000000` | `1/0/39` | `0/0/40` | `3/118` |
+| Success-risk only | `6280..6289` | `-0.000501` | `0.000000` | `1/1/38` | `0/0/40` | `7/82` |
+| Success + reward-risk | `6270..6279` | `+0.000779` | `0.000000` | `1/0/39` | `0/0/40` | `1/118` |
+| Success + reward-risk | `6280..6289` | `+0.002951` | `0.000000` | `1/0/39` | `0/0/40` | `1/85` |
+
+- Interpretation: this is still low coverage, but it is a cleaner learned
+  RL-selector result than the previous direct PPO attempts. The reward-risk
+  head blocked the `scene_4 seed6281` reward regression on the fresh screen
+  while keeping the positive `scene_3 seed6287` rescue. Next step: scale this
+  from a binary low-reward veto to an action-conditioned value/risk selector
+  trained on more windows, because the current gains are safe but too small for
+  a winner-level policy.
