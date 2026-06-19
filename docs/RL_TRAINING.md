@@ -6912,3 +6912,32 @@ Direct ActionConflict PPO refresh after v4d:
   failure in `scene_3` and `scene_4`, we must make the failure-label loader
   scene-aware before mixing these rows into a new PPO/BC run. Otherwise the
   negative labels can be applied to the wrong sampled environment.
+- Implemented scene-aware Aux-BC/forbid loading in
+  `tools/train_rescue_behavior_clone.py` and added
+  `tools/convert_action_diffs_to_aux_events.py` to convert scene-qualified
+  action-diff CSVs into `negative_baseline` events. Converting the three v4
+  loss-diff files produced `19` negative events:
+  `scene_1=3`, `scene_3=12`, `scene_4=4`. A loader smoke inside PPO found all
+  `19` events with `0` misses, `0` invalid rows, `0` baseline mismatches, and
+  `19` valid forbidden actions.
+- Trained `/private/tmp/ecml_ppo_actionobs_lossforbid_v5.pt` from
+  `ecml_ppo_actionobs_multiscene_v1.pt` with the scene-aware negative events,
+  `aux_bc_coef=0.03`, `aux_bc_forbid_coef=0.25`, strong teacher/anchor, and
+  Success-heavy terminal shaping. Training confirmed the labels had effect:
+  aux forbid loss dropped from `0.646` to `0.119`. However, the final update
+  showed larger policy drift (`anchor_kl=0.0102`).
+- Direct holdout screen on the same `scene_1..4 6270..6279` block rejected v5:
+
+| checkpoint | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| ActionObs loss-forbid v5 | `-0.033422` | `-0.012500` | `5/13/22` | `3/5/32` |
+
+- Interpretation: explicit negative labels are powerful enough to change the
+  policy and even create new Success wins (`scene_2 seed6270`,
+  `scene_2 seed6273`, `scene_3 seed6279`), but applying them directly as a
+  strong policy loss overfits/drifts and opens new Success losses
+  (`scene_1 seed6272`, `scene_2 seed6277`, `scene_4 seed6276/6277`). The next
+  RL direction should use these labels more selectively: either a smaller
+  forbid coefficient with stronger anchor/checkpoint selection, or better, a
+  learned action-risk head/ranker trained from accepted-event outcomes rather
+  than forcing the actor directly.

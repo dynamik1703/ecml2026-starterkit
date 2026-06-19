@@ -58,7 +58,11 @@ def instantiate_policy(policy_path: str, checkpoint: Path | None) -> Any:
     return policy_cls()
 
 
-def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
+def make_env(
+    args: argparse.Namespace,
+    seed: int,
+    scene: str | None = None,
+) -> tuple[Any, dict[int, Any]]:
     obs_builder = load_symbol(args.obs_builder)()
     rewards = load_symbol(args.rewards)()
     env, _ = RailEnvPersister.load_new(
@@ -67,7 +71,11 @@ def make_env(args: argparse.Namespace, seed: int) -> tuple[Any, dict[int, Any]]:
         rewards=rewards,
     )
     env.number_of_agents = args.num_agents
-    env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
+    env = load_sampling_env_generator()(
+        env,
+        line_length=args.line_length,
+        scene=args.scene if scene is None else scene,
+    )
     observations, _ = env.reset(random_seed=seed)
     return env, observations
 
@@ -126,8 +134,10 @@ def is_avoidance_event(row: dict[str, str], args: argparse.Namespace) -> bool:
 def read_rescue_events(
     paths: list[Path],
     args: argparse.Namespace,
-) -> dict[int, dict[tuple[int, int], dict[str, Any]]]:
-    best: dict[int, dict[tuple[int, int], dict[str, Any]]] = defaultdict(dict)
+) -> dict[tuple[str | None, int], dict[tuple[int, int], dict[str, Any]]]:
+    best: dict[tuple[str | None, int], dict[tuple[int, int], dict[str, Any]]] = (
+        defaultdict(dict)
+    )
     for path in paths:
         with path.open(newline="") as handle:
             for row in csv.DictReader(handle):
@@ -150,12 +160,15 @@ def read_rescue_events(
                     candidate_action = forced_action
                 if forced_action < 0 or forced_action >= ACTION_COUNT:
                     continue
+                scene_value = str(row.get("scene", "")).strip() or args.scene
                 score = utility(row, args)
                 key = (env_time, agent_id)
-                previous = best[seed].get(key)
+                context_key = (scene_value, seed)
+                previous = best[context_key].get(key)
                 if previous is None or score > float(previous["utility"]):
-                    best[seed][key] = {
+                    best[context_key][key] = {
                         "seed": seed,
+                        "scene": scene_value,
                         "env_time": env_time,
                         "agent_id": agent_id,
                         "event_kind": (
@@ -206,7 +219,7 @@ def sample_weight_for_rescue(event: dict[str, Any], args: argparse.Namespace) ->
 
 def collect_training_samples(
     args: argparse.Namespace,
-    rescue_events: dict[int, dict[tuple[int, int], dict[str, Any]]],
+    rescue_events: dict[tuple[str | None, int], dict[tuple[int, int], dict[str, Any]]],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, Any]]:
     policy = instantiate_policy(args.baseline_policy, args.baseline_checkpoint)
     observations_out: list[np.ndarray] = []
@@ -225,13 +238,18 @@ def collect_training_samples(
     avoidance_hits = 0
     rescue_seed_hits: Counter[int] = Counter()
 
-    seeds = sorted(set(rescue_events) | set(args.anchor_seed_list))
-    if not seeds:
+    contexts = set(rescue_events)
+    contexts.update((args.scene, seed) for seed in args.anchor_seed_list)
+    sorted_contexts = sorted(
+        contexts,
+        key=lambda item: ("" if item[0] is None else str(item[0]), int(item[1])),
+    )
+    if not sorted_contexts:
         raise ValueError("No seeds selected from rescue CSVs or --anchor-seeds")
 
-    for seed in seeds:
-        env, observations = make_env(args, seed)
-        events_for_seed = rescue_events.get(seed, {})
+    for scene, seed in sorted_contexts:
+        env, observations = make_env(args, seed, scene)
+        events_for_seed = rescue_events.get((scene, seed), {})
         seen_events: set[tuple[int, int]] = set()
         while int(env._elapsed_steps) < env._max_episode_steps:
             handles = list(env.get_agent_handles())
@@ -270,7 +288,9 @@ def collect_training_samples(
                         rescue_hits += 1
                         if event.get("event_kind") == "negative_baseline":
                             avoidance_hits += 1
-                        rescue_seed_hits[seed] += 1
+                        rescue_seed_hits[
+                            f"{scene}:{seed}" if scene is not None else str(seed)
+                        ] += 1
                         rescue_action_counts[forced_action] += 1
                     else:
                         rescue_invalid += 1
@@ -311,7 +331,13 @@ def collect_training_samples(
         "rescue_action_counts": dict(sorted(rescue_action_counts.items())),
         "anchor_action_counts": dict(sorted(anchor_action_counts.items())),
         "rescue_seed_hits": dict(sorted(rescue_seed_hits.items())),
-        "seeds": seeds,
+        "contexts": [
+            {
+                "scene": scene,
+                "seed": seed,
+            }
+            for scene, seed in sorted_contexts
+        ],
     }
     return (
         torch.as_tensor(np.asarray(observations_out, dtype=np.float32)),
