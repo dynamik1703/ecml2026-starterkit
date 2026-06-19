@@ -6828,3 +6828,28 @@ Trace old-plus Extra-Aux ranker v4d:
   check stayed loss-free and positive; Extra-Aux accepted three first-event
   `STOP_MOVING->MOVE_FORWARD` rescues, avoiding the late-rescue pattern that
   caused the earlier `6175` regression.
+
+Submission smoke after v4d promotion:
+- Docker cannot be run on this local machine because the `docker` CLI is not
+  installed (`docker --version` returns `command not found`). The Dockerfile was
+  still checked manually: it copies `submission/` and `tools/`, sets
+  `POLICY=submission.sequence_success_policy.MyPolicy`, and sets
+  `OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder`.
+- Local compile smoke passed with `python -m compileall -q submission tools`.
+  All default model paths referenced by the submission policy exist under
+  `submission/models/`, including the promoted
+  `ecml_trace_oldplus_extra_aux_ranker_v4d.pt`.
+- Default policy construction passed without any `ECML_SEQUENCE_*` overrides:
+  `SequenceSuccessPolicy` loads five candidate policies, the sequence scorer,
+  the main listwise scorer (`margin=1.0`), Aux listwise (`margin=0.75`), and
+  Extra-Aux listwise (`margin=1.25`). The promoted guard defaults are active:
+  high-deadline right-detour limit `1000.0`, late non-finite
+  `STOP_MOVING->MOVE_FORWARD` event-gap limit `150.0`, and no Extra-Aux
+  transition whitelist.
+- The local Flatland submission CLI is available. A direct smoke run with the
+  Dockerfile-equivalent env vars succeeded:
+  `POLICY=submission.sequence_success_policy.MyPolicy`,
+  `OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder`,
+  `REWARDS=flatland.envs.rewards.ECML2026Rewards`, seed `6121`, `3` agents,
+  `35x35` grid, `2` cities. It wrote trajectory event logs and serialized
+  state to `/private/tmp/ecml_submission_cli_smoke/`.
