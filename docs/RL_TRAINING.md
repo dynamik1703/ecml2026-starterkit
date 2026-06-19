@@ -6858,3 +6858,42 @@ Submission smoke after v4d promotion:
   `REWARDS=flatland.envs.rewards.ECML2026Rewards`, seed `6121`, `3` agents,
   `35x35` grid, `2` cities. It wrote trajectory event logs and serialized
   state to `/private/tmp/ecml_submission_cli_smoke/`.
+
+Direct ActionConflict PPO refresh after v4d:
+- Trained `/private/tmp/ecml_ppo_actionobs_successheavy_v3.pt` from the
+  packaged `submission/models/ecml_ppo_actionobs_multiscene_v1.pt`. The run
+  used ActionConflict observations, multi-scene complete-episode collection,
+  low LR (`3e-6`), Sequence teacher CE (`0.20`), anchor KL (`4.0`), terminal
+  success/failure shaping, and light action-conflict penalties. Training stayed
+  numerically stable and close to the start actor (`anchor_kl <= 1.8e-4`).
+- Direct holdout screen versus the current v4d `SequenceSuccessPolicy` on
+  `scene_1..4 6270..6279` rejected v3 as a deployable direct policy:
+
+| checkpoint | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| ActionObs success-heavy v3 | `+0.016855` | `-0.012500` | `8/0/32` | `0/3/37` |
+
+- The important signal is not that v3 is useless: it produced reward wins
+  without any reward losses. The problem is Success safety. The three
+  Success-loss rows were `scene_1 seed6274`, `scene_3 seed6271`, and
+  `scene_4 seed6271`, each losing one of six agents.
+- Trained a more Success-first variant,
+  `/private/tmp/ecml_ppo_actionobs_successfirst_v4.pt`, again from
+  `ecml_ppo_actionobs_multiscene_v1.pt`, with lower LR (`2e-6`), stronger
+  teacher/anchor (`teacher_ce=0.35`, `anchor_kl=6.0`), much stronger terminal
+  success/failure shaping, and smaller environment reward scale (`0.01`).
+  Training stayed stable and conservative (`anchor_kl <= 5.9e-5`).
+- The same holdout screen rejected v4 as well:
+
+| checkpoint | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| ActionObs success-first v4 | `+0.019314` | `-0.012500` | `9/0/31` | `0/3/37` |
+
+- Interpretation: direct PPO is finding shorter/better movement patterns, but
+  the current reward/terminal shaping does not learn the Success-risk boundary
+  that the Sequence wrapper protects. Simply making terminal Success bonuses
+  larger did not remove the three loss cases; it mostly preserved the same
+  risky action surface while increasing reward on some seeds. The next RL work
+  should therefore add explicit failure/counterfactual supervision or a learned
+  candidate-risk objective from these loss cases, rather than another longer
+  run of the same PPO objective.
