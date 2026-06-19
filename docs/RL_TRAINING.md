@@ -6735,3 +6735,41 @@ ActionConflict v1 Extra-Aux ranker promotion candidate:
   filtering was also too brittle in the online loop and suppressed desired
   canaries. Keep the default transition guard narrow until a new ranker is
   trained with mixed-candidate sequence labels.
+
+Trace-only Extra-Aux ranker v3:
+- Fixed the offline ranker evaluator split key to include `scene` as well as
+  `seed`. Without this, rows from different scenes but identical seeds could
+  leak across train/eval groups.
+- A mixed v2 ranker trained on v1 diff rows plus trace rows was rejected
+  online. Even with stricter margin it reopened `scene_3 seed6150` losses and
+  introduced a `scene_3 seed6090` Success regression. Decision: do not package
+  v2.
+- A trace-only v3 ranker trained from the focused online trace prefixes was
+  much better calibrated. Margin `0.0` was promising on OOD canaries, but full
+  `scene_1..4 6090..6109` exposed two `scene_1` Success losses (`6095`,
+  `6107`), so margin `0.0` is not deployable.
+- Margin `0.75` removed those Success losses while preserving useful wins.
+  Full checks against the previous default Sequence policy:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6090..6109` | `+0.013106` | `+0.006250` | `8/0/72` | `3/0/77` |
+| `scene_1..4 6110..6129` | `+0.008074` | `+0.008333` | `6/1/73` | `3/0/77` |
+| `scene_1..4 6130..6149` | `+0.002403` | `0.000000` | `2/0/78` | `0/0/80` |
+| `scene_1..4 6150..6169` | `+0.004715` | `+0.004167` | `3/0/77` | `1/0/79` |
+
+- The only relevant negative row at margin `0.75` was reward-only:
+  `scene_4 seed6124`, with Success unchanged (`1.0 -> 1.0`) but reward
+  `-0.087719`. Trace showed this was a `MOVE_FORWARD->MOVE_RIGHT`
+  Extra-Aux acceptance despite very high prefix/deadline conflict metrics
+  (`candidate_deadline_conflict_penalty=1818.9`). A small safety guard now
+  rejects right detours above
+  `ECML_SEQUENCE_RIGHT_DETOUR_MAX_DEADLINE_CONFLICT_PENALTY` (default
+  `1000.0`). Re-testing `scene_4 6110..6129` with the repo defaults made the
+  window neutral (`0/0/20` reward and Success), removing the loss.
+- Decision: promote `submission/models/ecml_trace_only_extra_aux_ranker_v3.pt`
+  as the default Extra-Aux model with margin `0.75`, no transition whitelist,
+  and the high-deadline-conflict right-detour safety guard. This is materially
+  better than the previous narrow guarded v1 ranker: higher recall, positive
+  Success deltas in three validated windows, and no observed Success
+  regressions over the four 80-episode windows.

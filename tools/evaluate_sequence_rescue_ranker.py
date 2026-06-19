@@ -116,7 +116,8 @@ def target_values(rows: list[dict[str, Any]], args: argparse.Namespace) -> np.nd
 
 
 def seed_key(row: dict[str, Any], row_index: int) -> str:
-    return str(row.get("seed", row_index))
+    scene = str(row.get("scene", "") or "")
+    return f"{scene}:{row.get('seed', row_index)}"
 
 
 def grouped_pair_indices(

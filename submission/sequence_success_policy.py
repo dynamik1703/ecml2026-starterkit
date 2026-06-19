@@ -49,7 +49,7 @@ DEFAULT_AUX_LISTWISE_MODEL_PATH = str(
 DEFAULT_EXTRA_AUX_LISTWISE_MODEL_PATH = str(
     SUBMISSION_DIR
     / "models"
-    / "ecml_actionobs_v1_sequence_ranker_extra_aux_margin075.pt"
+    / "ecml_trace_only_extra_aux_ranker_v3.pt"
 )
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
@@ -532,7 +532,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.extra_aux_listwise_transitions = self._env_transition_set(
             "ECML_SEQUENCE_EXTRA_AUX_LISTWISE_TRANSITIONS",
-            default="STOP_MOVING->MOVE_RIGHT",
+            default="",
         )
         self.extra_aux_candidate_stems = self._env_string_set(
             "ECML_SEQUENCE_EXTRA_AUX_CANDIDATE_STEMS",
@@ -609,6 +609,10 @@ class SequenceSuccessPolicy(RerankPolicy):
         self.right_detour_low_conflict_min_value = self._env_float(
             "ECML_SEQUENCE_RIGHT_DETOUR_LOW_CONFLICT_MIN_VALUE_LCB",
             0.0,
+        )
+        self.right_detour_max_deadline_conflict_penalty = self._env_float(
+            "ECML_SEQUENCE_RIGHT_DETOUR_MAX_DEADLINE_CONFLICT_PENALTY",
+            1000.0,
         )
         self.extra_candidate_stems = self._env_string_set(
             "ECML_SEQUENCE_EXTRA_CANDIDATE_STEMS",
@@ -1408,6 +1412,13 @@ class SequenceSuccessPolicy(RerankPolicy):
         ):
             accepted = False
             scores["reject_reason"] = "right_detour_crowded"
+        if accepted and self._high_deadline_conflict_right_detour(
+            baseline_action,
+            candidate_action,
+            detail,
+        ):
+            accepted = False
+            scores["reject_reason"] = "right_detour_high_deadline_conflict"
         if accepted and self._low_conflict_right_detour(
             baseline_action,
             candidate_action,
@@ -1828,6 +1839,25 @@ class SequenceSuccessPolicy(RerankPolicy):
             and slack < self.right_detour_low_conflict_min_slack
             and value_lcb < self.right_detour_low_conflict_min_value
         )
+
+    def _high_deadline_conflict_right_detour(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.right_detour_max_deadline_conflict_penalty):
+            return False
+        if (
+            baseline_action != ReservationPolicy.MOVE_FORWARD
+            or candidate_action != ReservationPolicy.MOVE_RIGHT
+        ):
+            return False
+        try:
+            penalty = float(detail.get("candidate_deadline_conflict_penalty", 0.0))
+        except Exception:
+            return False
+        return penalty > self.right_detour_max_deadline_conflict_penalty
 
     def _trace_sequence_decision(
         self,
