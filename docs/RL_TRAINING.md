@@ -6817,10 +6817,14 @@ Trace old-plus Extra-Aux ranker v4d:
 | `scene_1..4 6170..6189` | `+0.003435` | `+0.010417` | `5/0/75` | `5/0/75` |
 | `scene_1..4 6190..6209` | `+0.005010` | `+0.016667` | `4/0/76` | `4/0/76` |
 | `scene_1..4 6210..6229` | `+0.001193` | `+0.006250` | `2/0/78` | `2/0/78` |
+| `scene_1..4 6230..6249` | `+0.004320` | `+0.008333` | `3/0/77` | `3/0/77` |
 
 - Decision: promote v4d as the default Extra-Aux model with default margin
   `1.25`. Compared with v3, v4d is more conservative offline but produced
   stronger Success deltas on the newest OOD windows while keeping the `6175`
   and `6121` canaries correct. The fresh `6210..6229` check was again
   loss-free; Extra-Aux accepted only two decisions there, both useful
-  `STOP_MOVING->MOVE_FORWARD` rescues in `scene_3`.
+  `STOP_MOVING->MOVE_FORWARD` rescues in `scene_3`. The fresh `6230..6249`
+  check stayed loss-free and positive; Extra-Aux accepted three first-event
+  `STOP_MOVING->MOVE_FORWARD` rescues, avoiding the late-rescue pattern that
+  caused the earlier `6175` regression.
