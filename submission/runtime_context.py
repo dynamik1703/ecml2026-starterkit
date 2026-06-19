@@ -12,6 +12,7 @@ class RuntimeContext:
     obs_builder: Any | None = None
     step: int | None = None
     seed: int | None = None
+    scene: str | None = None
     masks: dict[int, np.ndarray] = field(default_factory=dict)
 
 
@@ -30,6 +31,10 @@ def update(env: Any, obs_builder: Any, masks: dict[int, np.ndarray]) -> None:
 
 def set_seed(seed: int | None) -> None:
     _CONTEXT.seed = seed
+
+
+def set_scene(scene: str | None) -> None:
+    _CONTEXT.scene = scene
 
 
 def get() -> RuntimeContext:

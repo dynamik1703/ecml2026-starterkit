@@ -7215,3 +7215,50 @@ Temporal exact-event selector probe:
   for a learned selector, but it should still be deployed only after an online
   A/B wrapper can reproduce the same feature set and after another fresh
   validation window confirms no Bad leakage.
+
+Online exact-event gate wrapper:
+- Added an experimental `submission.exact_event_gate_policy.MyPolicy`. It keeps
+  `SequenceSuccessPolicy` as the baseline and queries the direct ActionConflict
+  PPO-v4/Rerank candidate. Candidate actions may override the baseline only
+  when the learned exact-event gate scores that concrete baseline-vs-candidate
+  event above a threshold. The wrapper also reconstructs the scored
+  counterfactual feature set online by adding Success-risk, Reward-risk, and
+  value-head action scores.
+- The wrapper is intentionally not the default submission policy yet. It is a
+  safer RL-candidate deployment path: instead of letting PPO control the full
+  episode, PPO proposes local improvements and the learned event gate decides
+  whether the proposal is allowed.
+- Online A/B against `SequenceSuccessPolicy` with
+  `MyActionConflictObservationBuilder`, direct PPO-v4 candidate, and the
+  train-old/no-temporal gate:
+
+| threshold | window | reward delta | Success delta | reward W/L/T | Success W/L/T | accepted events |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `0.75` | `scene_1..4 6310..6319` | `+0.005824` | `0.000000` | `3/0/37` | `0/0/40` | `3` |
+| `0.60` | `scene_1..4 6310..6319` | `+0.007835` | `0.000000` | `4/0/36` | `0/0/40` | `5` |
+| `0.60`, max events `2` | `scene_1..4 6310..6319` | `+0.007835` | `0.000000` | `4/0/36` | `0/0/40` | `5` |
+
+- Non-zero `0.60` gains:
+  - `scene_2 seed6316`: `+0.152725` reward, Success unchanged.
+  - `scene_2 seed6317`: `+0.080438` reward, Success unchanged.
+  - `scene_4 seed6311`: `+0.019953` reward, Success unchanged.
+  - `scene_4 seed6318`: `+0.060279` reward, Success unchanged.
+- Fair apples-to-apples robust Prefix-Relax comparison on the same window:
+
+| selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Exact-event gate `0.60` | `scene_1..4 6310..6319` | `+0.007835` | `0.000000` | `4/0/36` | `0/0/40` |
+| Robust Prefix-Relax | `scene_1..4 6310..6319` | `+0.011669` | `0.000000` | `4/0/36` | `0/0/40` |
+
+- Decision: `threshold=0.60`, `max_accepted_events=1` is the stronger learned
+  exact-event gate candidate, but it does not yet beat robust Prefix-Relax.
+  Increasing the exact-event accepted-event budget to `2` did not change the
+  result. The trace shows why: the exact gate accepts the `scene_2 6316/6317`
+  and `scene_4 6311/6318` gains, but misses the Prefix-Relax-only
+  `scene_3 seed6319` gain and gets only a smaller `scene_4 seed6311` gain.
+  The next learned-selector iteration should add those Prefix-Relax wins as
+  labeled online events or train the exact gate directly against online
+  Prefix-Relax vs Sequence outcomes.
+- Also extended `runtime_context` and `evaluate_sampled.py` with scene
+  tracking so exact-event and Risk-Veto traces include the scene name. This
+  only affects diagnostics, not policy behavior.

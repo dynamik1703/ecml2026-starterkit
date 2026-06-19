@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from flatland.envs.rail_env_action import RailEnvActions
 
+from submission import runtime_context
 from submission.my_policy import ActorCritic
 from submission.rerank_policy import RerankPolicy
 from submission.sequence_success_policy import (
@@ -357,8 +358,10 @@ class RiskVetoPolicy:
     ) -> None:
         if not self.trace_path:
             return
+        context = runtime_context.get()
         row = {
             "seed": seed,
+            "scene": context.scene,
             "env_time": step,
             "agent_id": int(handle),
             "baseline_action": int(baseline_action),
