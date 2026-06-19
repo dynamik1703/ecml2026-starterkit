@@ -49,7 +49,7 @@ DEFAULT_AUX_LISTWISE_MODEL_PATH = str(
 DEFAULT_EXTRA_AUX_LISTWISE_MODEL_PATH = str(
     SUBMISSION_DIR
     / "models"
-    / "ecml_trace_only_extra_aux_ranker_v3.pt"
+    / "ecml_trace_oldplus_extra_aux_ranker_v4d.pt"
 )
 DEFAULT_CANDIDATE_CHECKPOINT_PATHS = (
     str(SUBMISSION_DIR / "models" / "ecml_action_conflict_penalty_ppo_seed3700_u12.pt"),
@@ -492,7 +492,7 @@ class SequenceSuccessPolicy(RerankPolicy):
             self._load_listwise_scorer(
                 extra_aux_listwise_model_path,
                 env_prefix="ECML_SEQUENCE_EXTRA_AUX_LISTWISE",
-                default_margin_threshold=0.75,
+                default_margin_threshold=1.25,
             )
             if extra_aux_listwise_model_path
             and Path(extra_aux_listwise_model_path).exists()

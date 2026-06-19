@@ -6793,3 +6793,31 @@ Trace-only Extra-Aux ranker v3:
   W/L/T `2/0/78`, with no negative single-seed rows. Extra-Aux still accepted
   seven decisions in this window, so the late-stop-forward guard is not simply
   disabling the learned extension.
+
+Trace old-plus Extra-Aux ranker v4d:
+- v4 training used the v3 trace-only rows plus final-prefix rows mined from
+  the newer OOD windows. The final-prefix rows avoid incorrectly blaming an
+  early neutral Aux decision for a later Extra-Aux failure. Combined training
+  data: `126` rows (`35 good`, `87 neutral`, `4 bad`).
+- Rejected v4a/v4b/v4c variants: training only on the new final-prefix rows,
+  or using a narrow safety-feature subset, still leaked one hard bad row in
+  cross-seed validation at useful thresholds. This confirmed that the new
+  OOD negatives must be trained together with the older `6150` hard negatives.
+- v4d (`/private/tmp/ecml_trace_ranker_v4d_oldplus.pt`) with threshold `1.25`
+  was the first offline-safe setting: accepted bad `0`, accepted
+  success-negative `0`, accepted reward-negative `0`; accepted good `7`,
+  accepted neutral `5`, accepted Success-positive `5`.
+- Online canaries with v4d and the existing safety guards:
+  `scene_1 seed6175` stayed neutral, while `scene_3 seed6121` preserved the
+  positive rescue (`+0.333333` reward and Success).
+- Full online A/B checks versus the old four-candidate default:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6170..6189` | `+0.003435` | `+0.010417` | `5/0/75` | `5/0/75` |
+| `scene_1..4 6190..6209` | `+0.005010` | `+0.016667` | `4/0/76` | `4/0/76` |
+
+- Decision: promote v4d as the default Extra-Aux model with default margin
+  `1.25`. Compared with v3, v4d is more conservative offline but produced
+  stronger Success deltas on the two newest OOD windows while keeping the
+  `6175` and `6121` canaries correct.
