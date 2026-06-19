@@ -21,6 +21,8 @@ OUTCOME_COLUMNS = {
     "baseline_success",
     "forced_success",
     "success_delta",
+    "normalized_reward",
+    "success_rate",
     "baseline_env_time",
     "forced_env_time",
     "env_time_delta",
@@ -30,6 +32,7 @@ OUTCOME_COLUMNS = {
     "baseline_failed_agent_ids",
     "forced_failed_agent_ids",
     "forced_applied",
+    "pairwise_label",
 }
 
 NON_NUMERIC_COLUMNS = {

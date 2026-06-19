@@ -8,6 +8,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import torch
+
+from submission.my_policy import ActorCritic
 from tools.analyze_policy_action_diffs import (
     done_all,
     instantiate_policy,
@@ -43,6 +47,52 @@ def event_key(row: dict[str, Any]) -> tuple[int, int, int, int]:
     )
 
 
+def load_actor_head(path: Path | None) -> ActorCritic | None:
+    if path is None or not path.exists():
+        return None
+    model = ActorCritic(checkpoint_path=str(path))
+    model.eval()
+    return model
+
+
+def action_head_scores(
+    models: dict[str, ActorCritic],
+    observation: Any,
+    baseline_action: int,
+    candidate_action: int,
+) -> dict[str, float]:
+    scores: dict[str, float] = {}
+    obs = np.asarray(observation, dtype=np.float32)
+    for prefix, model in models.items():
+        try:
+            with torch.no_grad():
+                if prefix == "value_head":
+                    values = model.action_value_scores(obs).squeeze(0).cpu().numpy()
+                    baseline_score = float(values[baseline_action])
+                    candidate_score = float(values[candidate_action])
+                    scores[f"{prefix}_baseline"] = baseline_score
+                    scores[f"{prefix}_candidate"] = candidate_score
+                    scores[f"{prefix}_candidate_minus_baseline"] = (
+                        candidate_score - baseline_score
+                    )
+                else:
+                    logits = model.risk_logits(obs)
+                    probs = torch.sigmoid(logits).squeeze(0).cpu().numpy()
+                    baseline_risk = float(probs[baseline_action])
+                    candidate_risk = float(probs[candidate_action])
+                    scores[f"{prefix}_baseline"] = baseline_risk
+                    scores[f"{prefix}_candidate"] = candidate_risk
+                    scores[f"{prefix}_candidate_minus_baseline"] = (
+                        candidate_risk - baseline_risk
+                    )
+                    scores[f"{prefix}_baseline_minus_candidate"] = (
+                        baseline_risk - candidate_risk
+                    )
+        except Exception:
+            scores[f"{prefix}_score_error"] = 1.0
+    return scores
+
+
 def run_episode(
     args: argparse.Namespace,
     seed: int,
@@ -55,6 +105,7 @@ def run_episode(
     positions: dict[int, list[Any]] = defaultdict(list)
     actions_by_agent: dict[int, list[int]] = defaultdict(list)
     forced_applied = False
+    event_scores: dict[str, float] = {}
 
     force_step = None
     force_handle = None
@@ -73,6 +124,16 @@ def run_episode(
             and int(env._elapsed_steps) == force_step
             and force_handle in actions
         ):
+            try:
+                observation = obs_list[handles.index(force_handle)]
+                event_scores = action_head_scores(
+                    args._score_models,
+                    observation,
+                    int(actions[force_handle]),
+                    int(force_action),
+                )
+            except Exception:
+                event_scores = {"event_score_error": 1.0}
             actions[force_handle] = force_action
             forced_applied = True
 
@@ -87,6 +148,7 @@ def run_episode(
 
     result = final_result(args, seed, env, reward_values, positions, actions_by_agent)
     result["forced_applied"] = forced_applied
+    result["event_scores"] = event_scores
     return result
 
 
@@ -102,6 +164,7 @@ def annotate(
     success_epsilon = 1e-9
     return {
         **row,
+        **forced.get("event_scores", {}),
         "baseline_reward": baseline["normalized_reward"],
         "forced_reward": forced["normalized_reward"],
         "reward_delta": reward_delta,
@@ -178,6 +241,9 @@ def parse_args() -> argparse.Namespace:
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
     )
     parser.add_argument("--action-diff-csv", nargs="+", required=True, type=Path)
+    parser.add_argument("--risk-checkpoint", type=Path)
+    parser.add_argument("--reward-risk-checkpoint", type=Path)
+    parser.add_argument("--value-checkpoint", type=Path)
     parser.add_argument("--max-events", type=int, default=0)
     parser.add_argument("--output-csv", type=Path)
     parser.add_argument("--output-json", type=Path)
@@ -186,6 +252,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args._score_models = {
+        key: model
+        for key, model in {
+            "risk_head": load_actor_head(args.risk_checkpoint),
+            "reward_risk_head": load_actor_head(args.reward_risk_checkpoint),
+            "value_head": load_actor_head(args.value_checkpoint),
+        }.items()
+        if model is not None
+    }
     raw_rows = [
         row
         for row in read_rows(args.action_diff_csv)

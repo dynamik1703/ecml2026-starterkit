@@ -7133,3 +7133,46 @@ Online prefix-relax gate:
   observed independent Success/Reward regressions. The next RL improvement
   should replace the hand-coded Prefix-Relax rule with a learned exact-event
   pairwise selector trained from the forced-action counterfactual labels.
+
+Exact-event selector follow-up:
+- Fixed two label-leakage issues in `tools/train_counterfactual_gate.py` for
+  the newer exact action-diff CSVs: `pairwise_label`, `normalized_reward`, and
+  `success_rate` are now treated as outcome columns, not train-time features.
+- Extended `tools/evaluate_action_diff_counterfactuals.py` with optional
+  `--risk-checkpoint`, `--reward-risk-checkpoint`, and `--value-checkpoint`.
+  The tool now writes per-action Success-risk, Reward-risk, and value-head
+  scores for the exact decision event. This lets learned exact-event selectors
+  train on the same head signals used by `RiskVetoPolicy`.
+- Mined a fresh direct PPO-v4 diff window on `scene_1..4 6310..6319`
+  (`68` exact forced-action rows):
+
+| sample | rows | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: |
+| scene 1 | `5` | `0/0/5` | `0/0/5` |
+| scene 2 | `26` | `6/0/20` | `0/0/26` |
+| scene 3 | `12` | `1/0/11` | `0/0/12` |
+| scene 4 | `25` | `4/2/19` | `0/1/24` |
+| total | `68` | `11/2/55` | `0/1/67` |
+
+- Combined old+fresh exact-label pool: `138` rows with `15` good, `107`
+  neutral, `16` bad outcome categories. Mixed seed-split MLPs improved after
+  the extra data, but the harder train-old/validate-fresh test is not
+  deployable yet:
+  - Binary/all-features at threshold `0.90`: validation accepted `6` good,
+    `2` neutral, and `1` bad.
+  - Multiclass/all-features was safer but too low-recall: threshold `0.50`
+    accepted only `1` good and `2` neutral on the fresh validation window.
+- Scored fresh audit:
+  - The `scene_4 seed6316 step425 STOP_MOVING->MOVE_RIGHT` Success-negative
+    event has `candidate_deadline_conflict_penalty=9056.25`; the robust
+    Prefix-Relax online rule blocks this class.
+  - The `scene_4 seed6311 step302 STOP_MOVING->MOVE_RIGHT` reward-negative
+    event has zero prefix risk and head scores that look nearly identical to
+    the positive `step285/298` events. A single-step event MLP cannot reliably
+    separate this timing trap with current features.
+- Decision: do not deploy an exact-event MLP yet. The next learned-selector
+  iteration should add temporal context features, for example repeated
+  candidate attempts for the same agent/action, elapsed wait since first safe
+  PPO proposal, or a small recurrent/stateful selector. This is more likely to
+  improve RL performance than another threshold sweep on the current static
+  feature set.
