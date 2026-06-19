@@ -6727,3 +6727,11 @@ ActionConflict v1 Extra-Aux ranker promotion candidate:
   low-recall RL extension. The next improvement should train a better
   candidate-specific ranker with the `6150` hard negative included, instead of
   loosening this guard blindly.
+- Follow-up guard probes confirmed that simple broadening is unsafe:
+  allowing both `STOP_MOVING->MOVE_RIGHT` and `STOP_MOVING->MOVE_FORWARD`
+  recovers useful canaries (`scene_3 seed6090` reward `+0.069315` and
+  `scene_4 seed6163` Success `+0.333333`), but immediately reopens the
+  `scene_3 seed6150` loss (`-0.166667` reward and Success). Candidate-stem
+  filtering was also too brittle in the online loop and suppressed desired
+  canaries. Keep the default transition guard narrow until a new ranker is
+  trained with mixed-candidate sequence labels.
