@@ -47,6 +47,105 @@ def event_key(row: dict[str, Any]) -> tuple[int, int, int, int]:
     )
 
 
+def int_value(row: dict[str, Any], key: str, default: int = 0) -> int:
+    try:
+        return int(float(row.get(key, default)))
+    except Exception:
+        return default
+
+
+def temporal_gap(current_step: int, previous_step: int | None) -> float:
+    return float(current_step - previous_step) if previous_step is not None else 999.0
+
+
+def add_temporal_features(rows: list[dict[str, Any]]) -> None:
+    seed_counts: dict[int, int] = defaultdict(int)
+    agent_counts: dict[tuple[int, int], int] = defaultdict(int)
+    action_counts: dict[tuple[int, int, int], int] = defaultdict(int)
+    transition_counts: dict[tuple[int, int, int, int], int] = defaultdict(int)
+    seed_action_counts: dict[tuple[int, int], int] = defaultdict(int)
+
+    last_seed_step: dict[int, int] = {}
+    last_agent_step: dict[tuple[int, int], int] = {}
+    last_action_step: dict[tuple[int, int, int], int] = {}
+    first_action_step: dict[tuple[int, int, int], int] = {}
+    last_transition_step: dict[tuple[int, int, int, int], int] = {}
+    first_transition_step: dict[tuple[int, int, int, int], int] = {}
+    transition_streak: dict[tuple[int, int, int, int], int] = defaultdict(int)
+
+    for row in rows:
+        seed = int_value(row, "seed")
+        step = int_value(row, "env_time")
+        agent_id = int_value(row, "agent_id")
+        baseline_action = int_value(row, "baseline_action")
+        candidate_action = int_value(row, "candidate_action")
+        agent_key = (seed, agent_id)
+        action_key = (seed, agent_id, candidate_action)
+        transition_key = (seed, agent_id, baseline_action, candidate_action)
+        seed_action_key = (seed, candidate_action)
+
+        seed_counts[seed] += 1
+        agent_counts[agent_key] += 1
+        action_counts[action_key] += 1
+        transition_counts[transition_key] += 1
+        seed_action_counts[seed_action_key] += 1
+
+        previous_transition_step = last_transition_step.get(transition_key)
+        if previous_transition_step is not None and step - previous_transition_step == 1:
+            transition_streak[transition_key] += 1
+        else:
+            transition_streak[transition_key] = 1
+
+        first_action_step.setdefault(action_key, step)
+        first_transition_step.setdefault(transition_key, step)
+
+        row.update(
+            {
+                "temporal_seed_diff_index": float(seed_counts[seed]),
+                "temporal_agent_diff_index": float(agent_counts[agent_key]),
+                "temporal_seed_candidate_action_index": float(
+                    seed_action_counts[seed_action_key]
+                ),
+                "temporal_agent_candidate_action_index": float(
+                    action_counts[action_key]
+                ),
+                "temporal_agent_transition_index": float(
+                    transition_counts[transition_key]
+                ),
+                "temporal_same_transition_streak": float(
+                    transition_streak[transition_key]
+                ),
+                "temporal_steps_since_seed_previous_diff": temporal_gap(
+                    step,
+                    last_seed_step.get(seed),
+                ),
+                "temporal_steps_since_agent_previous_diff": temporal_gap(
+                    step,
+                    last_agent_step.get(agent_key),
+                ),
+                "temporal_steps_since_same_candidate_action": temporal_gap(
+                    step,
+                    last_action_step.get(action_key),
+                ),
+                "temporal_steps_since_same_transition": temporal_gap(
+                    step,
+                    previous_transition_step,
+                ),
+                "temporal_steps_since_first_same_candidate_action": float(
+                    step - first_action_step[action_key]
+                ),
+                "temporal_steps_since_first_same_transition": float(
+                    step - first_transition_step[transition_key]
+                ),
+            }
+        )
+
+        last_seed_step[seed] = step
+        last_agent_step[agent_key] = step
+        last_action_step[action_key] = step
+        last_transition_step[transition_key] = step
+
+
 def load_actor_head(path: Path | None) -> ActorCritic | None:
     if path is None or not path.exists():
         return None
@@ -271,6 +370,7 @@ def main() -> int:
         unique_rows.setdefault(event_key(row), row)
     rows = list(unique_rows.values())
     rows.sort(key=lambda item: event_key(item))
+    add_temporal_features(rows)
     if args.max_events > 0:
         rows = rows[: args.max_events]
 

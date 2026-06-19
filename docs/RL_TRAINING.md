@@ -7176,3 +7176,42 @@ Exact-event selector follow-up:
   PPO proposal, or a small recurrent/stateful selector. This is more likely to
   improve RL performance than another threshold sweep on the current static
   feature set.
+
+Temporal exact-event selector probe:
+- Added temporal proposal-history features to
+  `tools/evaluate_action_diff_counterfactuals.py`. They are derived from
+  previous policy-diff events in the same seed and are therefore online
+  reproducible:
+  `temporal_seed_diff_index`, `temporal_agent_diff_index`,
+  `temporal_seed_candidate_action_index`,
+  `temporal_agent_candidate_action_index`,
+  `temporal_agent_transition_index`,
+  `temporal_same_transition_streak`, and step gaps since previous/first
+  same-agent candidate or transition.
+- Smoke on `scene_4 seed6311` confirms that the known timing trap is encoded:
+  `STOP_MOVING->MOVE_RIGHT` at steps `285/298` is reward-positive, while
+  step `302` is reward-negative. The negative row has
+  `temporal_agent_transition_index=6` and
+  `temporal_same_transition_streak=5`.
+- Regenerated temporal+scored old/fresh exact-label pools:
+  - Train-old pool: `110` rows from direct PPO-v4 `6290..6299` plus the
+    diagnosed `6301/6306` failure rows.
+  - Fresh validation pool: `68` rows from direct PPO-v4 `6310..6319`.
+  - Combined: `178` rows, `22` positives.
+- Hard train-old / validate-fresh MLP results:
+
+| feature set | objective | threshold | validation accepted good/neutral/bad |
+| --- | --- | ---: | ---: |
+| all incl. temporal | binary | `0.90` | `6/2/0` |
+| all excluding temporal | binary | `0.75` | `7/0/0` |
+| deploy-ish, no temporal | binary | `0.90` | `5/0/0` |
+| no learned heads, no temporal | binary | `0.75` | `6/0/0` |
+| heads only | binary | `0.90` | `7/4/1` |
+
+- Interpretation: temporal features are useful diagnostics and are now
+  available for future models, but this static MLP did not benefit from them
+  on the hard holdout. The strongest offline signal currently comes from the
+  larger scored exact-event pool without temporal features. This is promising
+  for a learned selector, but it should still be deployed only after an online
+  A/B wrapper can reproduce the same feature set and after another fresh
+  validation window confirms no Bad leakage.
