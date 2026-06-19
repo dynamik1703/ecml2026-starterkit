@@ -6773,3 +6773,18 @@ Trace-only Extra-Aux ranker v3:
   better than the previous narrow guarded v1 ranker: higher recall, positive
   Success deltas in three validated windows, and no observed Success
   regressions over the four 80-episode windows.
+- First fresh OOD window after promotion, `scene_1..4 6170..6189`, was
+  aggregate-positive (`+0.003277` reward, `+0.004167` Success), but exposed a
+  new `scene_1 seed6175` Success regression (`-0.166667`). Disabling Extra-Aux
+  made that seed neutral, isolating the cause to the new ranker. Trace showed
+  a late second Extra-Aux `STOP_MOVING->MOVE_FORWARD` acceptance with
+  non-finite distance delta, long delay after the first accepted event
+  (`284 - 76` steps), and no prefix conflicts.
+- Added a targeted Extra-Aux-only guard,
+  `ECML_SEQUENCE_EXTRA_AUX_STOP_TO_FORWARD_MAX_EVENT_TIME_GAP` (default
+  `150.0`), which rejects late non-finite `STOP_MOVING->MOVE_FORWARD`
+  rescues after a prior accepted event. It neutralized `scene_1 seed6175`
+  while preserving the known positive counterexample `scene_3 seed6121`
+  (`+0.333333` reward and Success). Re-running `scene_1 6170..6189` produced
+  `+0.018927` reward, `+0.016667` Success, reward W/L/T `4/0/16`, Success
+  W/L/T `2/0/18`.

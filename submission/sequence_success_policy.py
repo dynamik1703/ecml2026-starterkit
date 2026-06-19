@@ -586,6 +586,10 @@ class SequenceSuccessPolicy(RerankPolicy):
             "ECML_SEQUENCE_STOP_TO_FORWARD_MAX_SLACK",
             80.0,
         )
+        self.extra_aux_stop_to_forward_max_event_time_gap = self._env_float(
+            "ECML_SEQUENCE_EXTRA_AUX_STOP_TO_FORWARD_MAX_EVENT_TIME_GAP",
+            150.0,
+        )
         self.first_detour_min_prefix_conflicts = self._env_float(
             "ECML_SEQUENCE_FIRST_DETOUR_MIN_PREFIX_CONFLICTS",
             1.0,
@@ -1326,6 +1330,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         accepted: bool,
         scores: dict[str, float],
         detail: dict[str, Any],
+        aggregate: dict[str, Any],
         baseline_action: int,
         candidate_action: int,
     ) -> tuple[bool, dict[str, float]]:
@@ -1397,6 +1402,18 @@ class SequenceSuccessPolicy(RerankPolicy):
         ):
             accepted = False
             scores["reject_reason"] = "stop_to_forward_bad_slack"
+        if (
+            accepted
+            and scores.get("selector_source") == "extra_aux_listwise"
+            and self._late_nonfinite_extra_aux_stop_to_forward(
+                baseline_action,
+                candidate_action,
+                detail,
+                aggregate,
+            )
+        ):
+            accepted = False
+            scores["reject_reason"] = "extra_aux_stop_to_forward_late_nonfinite"
         if accepted and self._low_conflict_first_detour(
             baseline_action,
             candidate_action,
@@ -1457,6 +1474,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                     accepted=accepted,
                     scores=scores,
                     detail=detail,
+                    aggregate=aggregate,
                     baseline_action=baseline_action,
                     candidate_action=candidate_action,
                 )
@@ -1477,6 +1495,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                     accepted=aux_accepted,
                     scores=aux_scores,
                     detail=detail,
+                    aggregate=aggregate,
                     baseline_action=baseline_action,
                     candidate_action=candidate_action,
                 )
@@ -1506,6 +1525,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                     accepted=extra_aux_accepted,
                     scores=extra_aux_scores,
                     detail=detail,
+                    aggregate=aggregate,
                     baseline_action=baseline_action,
                     candidate_action=candidate_action,
                 )
@@ -1538,6 +1558,7 @@ class SequenceSuccessPolicy(RerankPolicy):
                 accepted=accepted,
                 scores=scores,
                 detail=detail,
+                aggregate=aggregate,
                 baseline_action=baseline_action,
                 candidate_action=candidate_action,
             )
@@ -1754,6 +1775,36 @@ class SequenceSuccessPolicy(RerankPolicy):
         except Exception:
             return False
         return slack > self.stop_to_forward_max_slack
+
+    def _late_nonfinite_extra_aux_stop_to_forward(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+        detail: dict[str, Any],
+        aggregate: dict[str, Any],
+    ) -> bool:
+        if not np.isfinite(self.extra_aux_stop_to_forward_max_event_time_gap):
+            return False
+        if (
+            baseline_action != ReservationPolicy.STOP_MOVING
+            or candidate_action != ReservationPolicy.MOVE_FORWARD
+        ):
+            return False
+        try:
+            event_count = float(aggregate.get("event_count", 0.0))
+            event_time_first = float(aggregate.get("event_time_first", 0.0))
+            event_time_last = float(aggregate.get("event_time_last", event_time_first))
+            distance_delta = float(detail.get("candidate_distance_delta", 0.0))
+        except Exception:
+            return False
+        return (
+            event_count >= 2.0
+            and not np.isfinite(distance_delta)
+            and (
+                event_time_last - event_time_first
+                > self.extra_aux_stop_to_forward_max_event_time_gap
+            )
+        )
 
     def _low_conflict_first_detour(
         self,
