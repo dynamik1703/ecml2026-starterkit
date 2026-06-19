@@ -6941,3 +6941,40 @@ Direct ActionConflict PPO refresh after v4d:
   forbid coefficient with stronger anchor/checkpoint selection, or better, a
   learned action-risk head/ranker trained from accepted-event outcomes rather
   than forcing the actor directly.
+
+Action-risk veto for direct PPO proposals:
+- Collected rollout-MC action rows from the direct ActionConflict PPO v4
+  checkpoint (`/private/tmp/ecml_ppo_actionobs_successfirst_v4.pt`) on
+  `scene_1..scene_4`, seeds `6270..6279`, using the ActionConflict
+  observation. This produced roughly `99k` action rows with per-action
+  eventual failure labels.
+- Trained only the `ActorCritic.risk_head` from the v4 checkpoint on
+  scenes `1..3` and validated on scene `4`:
+  `/private/tmp/ecml_risk_head_v4_mc6270_s123_val4.pt`. Validation improved
+  from `AUC=0.321896`, `AP=0.069636` before training to `AUC=0.900895`,
+  `AP=0.701205` after training. This is a much cleaner learned signal than
+  the previous direct actor updates.
+- Added `submission/risk_veto_policy.py`: the current safe
+  `SequenceSuccessPolicy` remains the baseline, a direct `RerankPolicy`
+  checkpoint proposes actions, and the learned risk head may accept only
+  candidate actions whose predicted risk is safe enough relative to the
+  baseline action. This is an experimental RL selector, not the default
+  submission policy.
+- First holdout screen versus the current v4d default on
+  `scene_1..4 6270..6279`:
+
+| risk-veto config | reward delta | Success delta | reward W/L/T | Success W/L/T | accepted diffs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| max risk `0.50`, no min improvement | `+0.014277` | `-0.008333` | `7/0/33` | `0/2/38` | `25/76` |
+| max risk `0.30`, no min improvement | `+0.014277` | `-0.008333` | `7/0/33` | `0/2/38` | `25/76` |
+| max risk `0.50`, min improvement `0.15` | `+0.000779` | `0.000000` | `1/0/39` | `0/0/40` | `3/118` |
+
+- Interpretation: the learned risk head can block obvious direct-PPO Success
+  regressions. The `min_improvement=0.15` run neutralized all Success losses,
+  but at the cost of very low action coverage and only a tiny reward gain. This
+  is the best current evidence for a stronger RL path: keep training direct PPO
+  as a candidate generator, but route deployment through a learned
+  action-risk/value selector trained from rollout outcomes. The next useful
+  experiment is not another blind PPO fine-tune; it is a broader multi-window
+  MC-risk/value head and threshold screen on fresh seeds (`6280..6299`) before
+  integrating this selector into the default Sequence policy.
