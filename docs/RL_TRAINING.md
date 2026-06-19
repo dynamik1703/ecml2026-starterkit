@@ -6818,6 +6818,7 @@ Trace old-plus Extra-Aux ranker v4d:
 | `scene_1..4 6190..6209` | `+0.005010` | `+0.016667` | `4/0/76` | `4/0/76` |
 | `scene_1..4 6210..6229` | `+0.001193` | `+0.006250` | `2/0/78` | `2/0/78` |
 | `scene_1..4 6230..6249` | `+0.004320` | `+0.008333` | `3/0/77` | `3/0/77` |
+| `scene_1..4 6250..6269` | `+0.000515` | `+0.002083` | `1/0/79` | `1/0/79` |
 
 - Decision: promote v4d as the default Extra-Aux model with default margin
   `1.25`. Compared with v3, v4d is more conservative offline but produced
@@ -6827,7 +6828,11 @@ Trace old-plus Extra-Aux ranker v4d:
   `STOP_MOVING->MOVE_FORWARD` rescues in `scene_3`. The fresh `6230..6249`
   check stayed loss-free and positive; Extra-Aux accepted three first-event
   `STOP_MOVING->MOVE_FORWARD` rescues, avoiding the late-rescue pattern that
-  caused the earlier `6175` regression.
+  caused the earlier `6175` regression. The fresh `6250..6269` window was
+  again loss-free and positive. The single non-neutral row was
+  `scene_3 seed6269`: v4d accepted one `STOP_MOVING->MOVE_FORWARD` Extra-Aux
+  rescue at `env_time=229` with listwise margin `3.224`, improving reward by
+  `+0.041165` and Success by `+0.166667`.
 
 Submission smoke after v4d promotion:
 - Docker cannot be run on this local machine because the `docker` CLI is not
