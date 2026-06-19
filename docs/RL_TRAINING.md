@@ -6626,3 +6626,44 @@ Risk-head veto audit for weighted BC:
   not calibrated enough for hard online vetoes; it needs accepted-event
   outcome labels/counterfactual labels targeted at current selector failures,
   not only rollout-MC per-action supervision.
+- Follow-up isolated trace on `scene_1 seed 6123` clarified the mechanism:
+  the absolute `0.30` risk cutoff blocks an existing helpful default listwise
+  event, not a weighted-BC event. The default policy accepts
+  `STOP_MOVING -> MOVE_FORWARD` at time `85`, agent `5`, with
+  `listwise_margin=4.541854`. Under the absolute veto the same event has
+  `risk_head_baseline=0.628466` and `risk_head_candidate=0.622024`; the
+  candidate is slightly less risky than the baseline, but both risks are above
+  the arbitrary absolute cutoff. This confirms the decision: do not use the
+  current risk head as a hard absolute veto. If risk is used online, it should
+  be relative/calibrated and evaluated on accepted-event outcome labels.
+
+ActionConflict targeted PPO v2 rejection:
+- Trained `/private/tmp/ecml_ppo_actionobs_targeted_v2.pt` from
+  `/private/tmp/ecml_ppo_actionobs_multiscene_v1.pt` with paired
+  `--training-seeds/--training-scenes` that over-sampled the v1 loss cases
+  (`scene_1` seeds `6104,6114,6115,6123`, plus reward-only loss cases in
+  `scene_2..4`) and mixed in representative gain seeds. The run used
+  `MyActionConflictObservationBuilder`, low LR `5e-6`, teacher CE `0.3`,
+  anchor KL `5.0`, terminal Success/failure shaping, and light
+  action-conflict penalties. Training stayed close to the anchor
+  (`anchor_kl <= 9.9e-5`).
+- Direct A/B against the ActionConflict Sequence baseline rejected the
+  checkpoint:
+
+| checkpoint | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO actionobs targeted v2 | `scene_1..4 6090..6109` | `+0.015129` | `0.000000` | `13/4/63` | `4/2/74` |
+| PPO actionobs targeted v2 | `scene_1..4 6110..6129` | `+0.001525` | `-0.006250` | `6/5/69` | `4/3/73` |
+
+- Versus v1 on `6090..6109`, v2 only changed three seed outcomes:
+  it lost the old `scene_1 seed6093` reward gain, opened a new hard
+  `scene_1 seed6105` Success regression (`-0.333333`), and added
+  `scene_1 seed6107` as a Success gain. On `6110..6129`, it neutralized the
+  reward-only loss `scene_2 seed6112`, but the large `scene_1` Success losses
+  (`6114`, `6115`, `6123`) remained. Decision: do not promote or continue this
+  targeted-PPO objective. It shows that simple loss-seed over-sampling plus
+  teacher/anchor constraints does not fix the Scene-1 Success-risk boundary.
+  The next RL attempt should either learn an explicit candidate/action risk
+  scorer from these failure cases or train candidate policies with a stronger
+  sequence-level anti-regression objective, then evaluate with the manifest
+  gate before deployment.
