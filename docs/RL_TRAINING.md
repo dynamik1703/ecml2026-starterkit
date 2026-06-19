@@ -7047,3 +7047,45 @@ Broader risk/value selector probe:
   centralized critic with richer conflict context. The current best learned
   online selector remains Success-risk + Reward-risk without hard value gating,
   but its recall is too low for a winner-level solution.
+
+Exact action-diff counterfactual labels:
+- Added `tools/evaluate_action_diff_counterfactuals.py`. It takes
+  `tools/analyze_policy_action_diffs.py` rows and evaluates the exact
+  one-step candidate action from the direct PPO policy against the current
+  Sequence baseline. This gives pairwise candidate-vs-baseline labels instead
+  of weak episode-level MC labels.
+- Smoke on `scene_1 6290..6291` confirmed that forced candidate actions are
+  applied exactly at the synchronized diff step.
+- First exact-label sample on direct v4 diffs from `scene_1..4 6290..6299`:
+
+| sample | rows | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: |
+| scene 1 | `16` | `1/1/14` | `0/1/15` |
+| scene 2 | `12` | `1/6/5` | `0/0/12` |
+| scene 3 | `16` | `1/1/14` | `0/0/16` |
+| scene 4 | `12` | `1/0/11` | `0/0/12` |
+| total | `56` | `4/8/44` | `0/1/55` |
+
+- The labels are much more actionable than MC returns. Examples:
+  - `scene_3 seed6291 step123`, `STOP_MOVING->MOVE_FORWARD`:
+    `reward_delta=+0.114746`, `Success_delta=0`.
+  - `scene_4 seed6292 step87`, `STOP_MOVING->MOVE_FORWARD`:
+    `reward_delta=+0.074663`, `Success_delta=0`.
+  - `scene_2 seed6295 step301`, `STOP_MOVING->MOVE_FORWARD`:
+    `reward_delta=+0.009940`, but the same transition at steps `302..307`
+    becomes `reward_delta=-0.072896`. Timing matters.
+  - `scene_1 seed6292 step328`, `MOVE_FORWARD->STOP_MOVING`:
+    `reward_delta=-0.148054`, `Success_delta=-0.166667`.
+- Simple feature audit on this sample found a promising safety/value rule:
+  accepting candidates with `candidate_future_head_on_risk == 0` and
+  `candidate_deadline_conflict_penalty == 0` selected `45/56` rows with
+  `3` reward-positive, `0` negative, and reward sum `+0.207795`.
+  Relaxing the deadline penalty to include high-penalty candidates admitted
+  the bad rows and turned the reward sum negative. This rule needs online A/B
+  validation, but it is the clearest low-effort path to higher recall than the
+  current learned risk-veto thresholds.
+- The existing sequence ranker did not train cleanly on these event-only rows
+  because its planner architecture expects a different event/static feature
+  shape. Do not force it. The next implementation should either add a small
+  exact-event ranker or add an online guard that uses the exact-label feature
+  insight above.
