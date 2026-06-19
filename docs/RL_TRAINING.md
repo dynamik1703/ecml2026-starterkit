@@ -6705,3 +6705,25 @@ ActionConflict v1 Extra-Aux ranker promotion candidate:
   the existing `aux_listwise` decision. This is the first RL-derived online
   extension in this branch that is positive and loss-free on the two current
   80-episode validation windows.
+- Wider OOD validation changed the deployment decision. Unguarded Extra-Aux was
+  neutral on `scene_1..4 6130..6149`, but on `scene_1..4 6150..6169` it had a
+  `scene_3 seed6150` Success regression (`-0.166667`) while `scene_4 seed6163`
+  improved (`+0.333333` Success), for aggregate `+0.000573` reward and
+  `+0.002083` Success with W/L/T `1/1/78` on both metrics. Trace showed the
+  regression came from broad Extra-Aux acceptance across older candidates and
+  stop-to-forward/left actions, not just the new v1 RL candidate.
+- A conservative transition guard,
+  `ECML_SEQUENCE_EXTRA_AUX_LISTWISE_TRANSITIONS=STOP_MOVING->MOVE_RIGHT`,
+  fixed the OOD loss. It kept the `scene_3 seed6090` reward canary positive
+  (`+0.069315`) and made `scene_3 seed6150` neutral. Full guarded checks:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6090..6109` | `+0.000866` | `0.000000` | `1/0/79` | `0/0/80` |
+| `scene_1..4 6110..6129` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+| `scene_1..4 6150..6169` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+
+  Decision: deploy the guarded Extra-Aux default for safety, but treat it as a
+  low-recall RL extension. The next improvement should train a better
+  candidate-specific ranker with the `6150` hard negative included, instead of
+  loosening this guard blindly.

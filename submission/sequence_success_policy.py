@@ -532,7 +532,7 @@ class SequenceSuccessPolicy(RerankPolicy):
         )
         self.extra_aux_listwise_transitions = self._env_transition_set(
             "ECML_SEQUENCE_EXTRA_AUX_LISTWISE_TRANSITIONS",
-            default="",
+            default="STOP_MOVING->MOVE_RIGHT",
         )
         self.extra_aux_candidate_stems = self._env_string_set(
             "ECML_SEQUENCE_EXTRA_AUX_CANDIDATE_STEMS",
