@@ -6788,3 +6788,8 @@ Trace-only Extra-Aux ranker v3:
   (`+0.333333` reward and Success). Re-running `scene_1 6170..6189` produced
   `+0.018927` reward, `+0.016667` Success, reward W/L/T `4/0/16`, Success
   W/L/T `2/0/18`.
+- Next fresh OOD window `scene_1..4 6190..6209` confirmed the guarded default:
+  `+0.004609` reward, `+0.006250` Success, reward W/L/T `6/0/74`, Success
+  W/L/T `2/0/78`, with no negative single-seed rows. Extra-Aux still accepted
+  seven decisions in this window, so the late-stop-forward guard is not simply
+  disabling the learned extension.
