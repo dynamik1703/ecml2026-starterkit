@@ -45,6 +45,7 @@ class ActorCritic(nn.Module):
         self.policy_head = nn.Linear(hidden_size, n_actions)
         self.value_head = nn.Linear(hidden_size, 1)
         self.risk_head = nn.Linear(hidden_size, n_actions)
+        self.action_value_head = nn.Linear(hidden_size, n_actions)
 
         if ckpt is not None:
             self._load_compatible_state_dict(ckpt["model"])
@@ -61,6 +62,8 @@ class ActorCritic(nn.Module):
             nn.init.zeros_(self.value_head.bias)
             nn.init.orthogonal_(self.risk_head.weight, gain=0.01)
             nn.init.zeros_(self.risk_head.bias)
+            nn.init.orthogonal_(self.action_value_head.weight, gain=0.01)
+            nn.init.zeros_(self.action_value_head.bias)
 
     def _load_compatible_state_dict(self, checkpoint_state: dict[str, torch.Tensor]) -> None:
         current_state = self.state_dict()
@@ -159,6 +162,14 @@ class ActorCritic(nn.Module):
     ) -> torch.Tensor:
         features, _ = self._features_and_valid_actions(observations, action_masks)
         return self.risk_head(self.trunk(features))
+
+    def action_value_scores(
+        self,
+        observations: Any,
+        action_masks: Any | None = None,
+    ) -> torch.Tensor:
+        features, _ = self._features_and_valid_actions(observations, action_masks)
+        return self.action_value_head(self.trunk(features))
 
     def action_distribution(
         self,

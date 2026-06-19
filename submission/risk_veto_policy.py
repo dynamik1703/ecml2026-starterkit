@@ -56,6 +56,17 @@ class RiskVetoPolicy:
         )
         if self.reward_risk_policy is not None:
             self.reward_risk_policy.eval()
+        value_checkpoint = os.environ.get(
+            "ECML_RISK_VETO_VALUE_CHECKPOINT",
+            "",
+        ).strip()
+        self.value_policy = (
+            ActorCritic(checkpoint_path=value_checkpoint)
+            if value_checkpoint and Path(value_checkpoint).exists()
+            else None
+        )
+        if self.value_policy is not None:
+            self.value_policy.eval()
         self.max_candidate_risk = self._env_float(
             "ECML_RISK_VETO_MAX_CANDIDATE",
             0.50,
@@ -78,6 +89,14 @@ class RiskVetoPolicy:
         )
         self.min_reward_risk_baseline_minus_candidate = self._env_float(
             "ECML_RISK_VETO_MIN_REWARD_RISK_BASELINE_MINUS_CANDIDATE",
+            float("-inf"),
+        )
+        self.min_value_delta = self._env_float(
+            "ECML_RISK_VETO_MIN_VALUE_DELTA",
+            float("-inf"),
+        )
+        self.min_candidate_value = self._env_float(
+            "ECML_RISK_VETO_MIN_CANDIDATE_VALUE",
             float("-inf"),
         )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
@@ -190,6 +209,34 @@ class RiskVetoPolicy:
                 < self.min_reward_risk_baseline_minus_candidate
             ):
                 scores["reject_reason"] = "insufficient_reward_risk_improvement"
+                accepted = False
+        if accepted and self.value_policy is not None:
+            try:
+                with torch.no_grad():
+                    values = self.value_policy.action_value_scores(
+                        np.asarray(observation, dtype=np.float32)
+                    ).squeeze(0).cpu().numpy()
+                baseline_value = float(values[baseline_action])
+                candidate_value = float(values[candidate_action])
+                value_delta = candidate_value - baseline_value
+                scores.update(
+                    {
+                        "value_head_baseline": baseline_value,
+                        "value_head_candidate": candidate_value,
+                        "value_head_candidate_minus_baseline": value_delta,
+                    }
+                )
+            except Exception:
+                scores["reject_reason"] = "value_score_error"
+                accepted = False
+        if accepted and self.value_policy is not None:
+            candidate_value = float(scores["value_head_candidate"])
+            value_delta = float(scores["value_head_candidate_minus_baseline"])
+            if candidate_value < self.min_candidate_value:
+                scores["reject_reason"] = "candidate_value_too_low"
+                accepted = False
+            elif value_delta < self.min_value_delta:
+                scores["reject_reason"] = "insufficient_value_delta"
                 accepted = False
         return accepted, scores
 

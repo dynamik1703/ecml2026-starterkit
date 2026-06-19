@@ -7011,3 +7011,39 @@ Reward-risk head for direct PPO proposals:
   from a binary low-reward veto to an action-conditioned value/risk selector
   trained on more windows, because the current gains are safe but too small for
   a winner-level policy.
+
+Broader risk/value selector probe:
+- Collected another direct-PPO rollout-MC batch on `scene_1..4 6280..6289`.
+  This added meaningful signal: e.g. direct v4 success means were `0.90`,
+  `0.95`, `0.983333`, `0.966667` across scenes `1..4`, with several
+  low-reward completed episodes.
+- Retrained broader heads on windows `6270` and `6280`, train scenes `1..3`,
+  validation scene `4`:
+  - Success-risk:
+    `/private/tmp/ecml_risk_head_v4_mc6270_6280_s123_val4.pt`, validation
+    `AUC=0.898844`, `AP=0.691732`.
+  - Reward-risk:
+    `/private/tmp/ecml_reward_risk_head_v4_lowreward09_mc6270_6280_s123_val4.pt`,
+    validation `AUC=0.546709`, `AP=0.380197`; this is weaker than the
+    first reward-risk head and should be treated as a coarse veto only.
+- Fresh `6290..6299` screen with broad Success-risk + broad Reward-risk:
+  `reward_delta=+0.000460`, `Success_delta=0.000000`, reward W/L/T `1/0/39`,
+  Success W/L/T `0/0/40`, accepted `2/111` traced diffs. The only changed seed
+  was `scene_1 seed6295`, improving reward from `0.685053` to `0.703440`.
+- Added an optional per-action `action_value_head` to `ActorCritic` and
+  `tools/train_actor_value_head.py`. The head trains from MC
+  `episode_normalized_reward` while keeping the actor frozen. On the same
+  broad split it reached validation `MAE=0.102687`, `RMSE=0.120794`, but only
+  `corr=0.097961`, so it mostly learns average return rather than ranking
+  actions well.
+- Hard value gating (`ECML_RISK_VETO_VALUE_CHECKPOINT` with
+  `ECML_RISK_VETO_MIN_VALUE_DELTA=0.0`) on `6290..6299` was rejected:
+  `reward_delta=0`, `Success_delta=0`, accepted `0/114`. It blocked the
+  positive `scene_1 seed6295` moves because the value head overvalued the
+  baseline `STOP_MOVING` action.
+- Decision: keep the action-value infrastructure, but do not use hard
+  value-delta gating yet. The next value-model attempt needs better labels:
+  counterfactual action returns, pairwise candidate-vs-baseline ranking, or a
+  centralized critic with richer conflict context. The current best learned
+  online selector remains Success-risk + Reward-risk without hard value gating,
+  but its recall is too low for a winner-level solution.
