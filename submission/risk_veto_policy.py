@@ -118,6 +118,13 @@ class RiskVetoPolicy:
                 float("inf"),
             ),
         }
+        self.require_stop_left_conflict = bool(
+            int(os.environ.get("ECML_RISK_VETO_REQUIRE_STOP_LEFT_CONFLICT", "0") or "0")
+        )
+        self.stop_left_min_slack_for_unconflicted = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED",
+            float("-inf"),
+        )
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -426,6 +433,100 @@ class RiskVetoPolicy:
             return True
         return False
 
+    def _candidate_prefix_cell_intersections(
+        self,
+        obs_builder: Any | None,
+        planned_prefixes: dict[int, list[dict[str, Any]]] | None,
+        handle: int,
+        candidate_action: int,
+    ) -> float | None:
+        if obs_builder is None or planned_prefixes is None:
+            return None
+        try:
+            lookahead = getattr(
+                self.baseline_policy,
+                "FUTURE_RERANK_LOOKAHEAD_CELLS",
+                45,
+            )
+            candidate_prefix = self.baseline_policy._route_prefix_for_action(
+                obs_builder,
+                handle,
+                candidate_action,
+                lookahead,
+            )
+        except Exception:
+            return None
+        candidate_positions = [
+            node.get("position")
+            for node in candidate_prefix
+            if node.get("position") is not None
+        ]
+        if not candidate_positions:
+            return 0.0
+        other_positions = set()
+        for other, other_prefix in planned_prefixes.items():
+            if other == handle:
+                continue
+            for node in other_prefix:
+                position = node.get("position")
+                if position is not None:
+                    other_positions.add(position)
+        return float(sum(position in other_positions for position in candidate_positions))
+
+    def _stop_left_conflict_veto(
+        self,
+        obs_builder: Any | None,
+        planned_prefixes: dict[int, list[dict[str, Any]]] | None,
+        handle: int,
+        baseline_action: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> bool:
+        slack_threshold_enabled = np.isfinite(
+            self.stop_left_min_slack_for_unconflicted
+        )
+        if not self.require_stop_left_conflict and not slack_threshold_enabled:
+            return False
+        if baseline_action != 4 or candidate_action != 1:
+            return False
+        prefix_intersections = self._candidate_prefix_cell_intersections(
+            obs_builder,
+            planned_prefixes,
+            handle,
+            candidate_action,
+        )
+        if prefix_intersections is None:
+            return False
+        try:
+            deadline_penalty = float(
+                self.baseline_policy._deadline_conflict_penalty(
+                    obs_builder,
+                    handle,
+                    candidate_action,
+                    planned_prefixes,
+                )
+            )
+        except Exception:
+            deadline_penalty = 0.0
+        scores["candidate_prefix_cell_intersections"] = float(prefix_intersections)
+        scores["candidate_deadline_conflict_penalty"] = float(deadline_penalty)
+        if prefix_intersections <= 0.0 and deadline_penalty <= 0.0:
+            if slack_threshold_enabled:
+                try:
+                    distance = obs_builder._current_distance_to_waypoint(handle)
+                    slack = float(obs_builder._deadline_slack(handle, distance))
+                except Exception:
+                    slack = float("inf")
+                scores["stop_left_current_slack"] = float(slack)
+                scores["stop_left_min_slack_for_unconflicted"] = float(
+                    self.stop_left_min_slack_for_unconflicted
+                )
+                if slack >= self.stop_left_min_slack_for_unconflicted:
+                    return False
+            scores["reject_reason"] = "stop_left_without_prefix_conflict"
+            return True
+        return False
+
     def _trace(
         self,
         *,
@@ -510,6 +611,15 @@ class RiskVetoPolicy:
             if accepted and self._distance_delta_veto(
                 obs_builder,
                 int(handle),
+                candidate_action,
+                scores,
+            ):
+                accepted = False
+            if accepted and self._stop_left_conflict_veto(
+                obs_builder,
+                planned_prefixes,
+                int(handle),
+                baseline_action,
                 candidate_action,
                 scores,
             ):

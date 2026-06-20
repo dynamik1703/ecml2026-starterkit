@@ -7456,3 +7456,34 @@ Right-distance Success shield:
   the v1 learned-policy gains, removes the known `scene_2 seed6354` Success
   regression, does not lose the `scene_4 seed6344` high-distance `MOVE_LEFT`
   reward gain, and stayed loss-free on a fresh `6360..6369` validation window.
+
+Slack-gated Stop-Left Success shield:
+- A larger fresh validation window exposed one more sparse Success regression:
+  with PPO-FT v1 plus the right-distance shield, `scene_1..4 6370..6389`
+  scored `+0.004303` reward but `-0.002083` Success (`5/0/75` reward,
+  `0/1/79` Success). The regression was `scene_4 seed6385`.
+- Trace and exact counterfactual labeling again reduced the failure to one
+  accepted override: agent 5 at step 270, `STOP_MOVING -> MOVE_LEFT`, with
+  `reward_delta=+0.058824` and `success_delta=-0.166667`.
+- A hard "require prefix conflict for every Stop->Left" shield removed this
+  regression but was too conservative: it also removed good left-detour reward
+  wins, giving only `+0.001623` reward on `6370..6389`.
+- The useful discriminator was slack. Good unconflicted Stop->Left wins had
+  slack around `115..128`; the bad `scene_4 seed6385` event had slack `53`.
+  Added optional `ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED`, which
+  rejects unconflicted `STOP_MOVING -> MOVE_LEFT` only when current slack is
+  below the threshold.
+- Final short-term config adds
+  `ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED=80` on top of
+  `ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA=150`:
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO-FT v1 + final shields | `scene_1..4 6340..6344` | `+0.011708` | `0.000000` | `3/0/17` | `0/0/20` |
+| PPO-FT v1 + final shields | `scene_1..4 6350..6359` | `+0.015241` | `0.000000` | `4/0/36` | `0/0/40` |
+| PPO-FT v1 + final shields | `scene_1..4 6370..6389` | `+0.003568` | `0.000000` | `4/0/76` | `0/0/80` |
+
+- Targeted checks: the bad `scene_4 seed6385` event becomes neutral, while the
+  good `scene_4 seed6374` and `scene_1 seed6386` Stop->Left reward wins remain.
+  This is a better safety/recall tradeoff than the hard Stop->Left conflict
+  requirement.
