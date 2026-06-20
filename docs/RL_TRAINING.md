@@ -7304,3 +7304,43 @@ Prefix-augmented exact-event gate probe:
   improvement should either generate full online `diff_row` features for every
   accepted Prefix/Risk event or distill robust Prefix-Relax into the PPO/gate
   stack with an explicit recall objective.
+
+Full-feature trace reconstruction:
+- Added `tools/reconstruct_trace_diff_rows.py`. It reads policy trace JSONL
+  events, replays the corresponding baseline trajectory, and reconstructs full
+  `analyze_policy_action_diffs.py`/`diff_row` feature rows while using the
+  traced candidate action as the proposed override. This removes the sparse
+  trace-feature mismatch from the previous Prefix-augmented gate probe.
+- Smoke on the `6310..6319` robust Prefix-Relax traces reconstructed all
+  selected events:
+  - combined `scene_3/scene_4`: `18/18` rows reconstructed.
+  - split outputs: `scene_3` `6/6`, `scene_4` `12/12`.
+- Exact labels for the full reconstructed rows matched the sparse probe:
+
+| source | rows | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: |
+| `scene_3` full Prefix-Relax rows | `6` | `1/0/5` | `0/0/6` |
+| `scene_4` full Prefix-Relax rows | `12` | `0/0/12` | `0/0/12` |
+
+- Trained `ecml_exact_event_gate_fullprefix_v1.pt` from old exact labels plus
+  those full reconstructed rows. On the old `6310..6319` validation set it was
+  cleaner than the sparse Prefix-augmented run:
+
+| threshold | train accepted good/neutral/bad | validation accepted good/neutral/bad |
+| ---: | ---: | ---: |
+| `0.50` | `11/13/0` | `10/0/0` |
+| `0.60` | `10/9/0` | `9/0/0` |
+| `0.75` | `10/1/0` | `6/0/0` |
+| `0.90` | `9/1/0` | `5/0/0` |
+
+- Fresh online test on unseen `6320..6329` with threshold `0.50`:
+  `+0.004329` reward, `0.000000` Success, reward `2/0/38`,
+  Success `0/0/40`. This is identical to the sparse Prefix-augmented gate and
+  still below robust Prefix-Relax on the same window (`+0.006150`,
+  reward `3/0/37`, Success `0/0/40`).
+- Interpretation: full `diff_row` reconstruction fixes the training data
+  quality issue but does not solve the main problem. The learned selector is
+  safe but still lower-recall than robust Prefix-Relax. The next high-value
+  step is not another static MLP threshold sweep; it is either direct
+  distillation of Prefix-Relax accepted/not-accepted decisions or PPO
+  fine-tuning with the robust Prefix-Relax policy as a high-recall teacher.
