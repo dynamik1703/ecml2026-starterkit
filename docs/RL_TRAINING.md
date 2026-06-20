@@ -7364,3 +7364,31 @@ Additional robust Prefix-Relax validation:
   the intervention trades reward for one additional completed train. We should
   not blindly tighten Prefix-Relax on reward risk yet, because the same family
   of accepts is responsible for the larger reward wins.
+
+Prefix-Relax teacher BC smoke:
+- Trained `ecml_bc_prefixrelax_teacher_v1.pt` by behavior-cloning the current
+  robust Prefix-Relax teacher (`RiskVetoPolicy` with PPO-v4 candidate and the
+  v4 success/reward-risk/value heads). The run used action-conflict
+  observations, `scene_1..4`, seeds `6400..6419`, 20 teacher episodes, and
+  initialized from `ecml_ppo_actionobs_successfirst_v4.pt`.
+- Collection exposed the main weakness of this BC setup: the teacher had
+  `48,275` valid samples but only `23` disagreements from the PPO-v4 reference.
+  The high-level policy is mostly "PPO/Sequence as usual, with rare guarded
+  overrides", so full-trajectory BC is dominated by ordinary driving samples
+  and does not isolate the rare high-impact decisions well.
+- Fresh online tests on `scene_1..4 6340..6344`:
+
+| candidate | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| direct BC checkpoint | `-0.737401` | `-0.866667` | `0/20/0` | `0/20/0` |
+| BC checkpoint under RiskVeto | `-0.565474` | `-0.633333` | `0/20/0` | `0/20/0` |
+| PPO-v4 under RiskVeto/Prefix-Relax | `+0.006728` | `-0.016667` | `2/1/17` | `0/1/19` |
+
+- Interpretation: naive full-trajectory BC is not a good path to a stronger
+  submission. It damages the action distribution badly enough that even the
+  current RiskVeto heads do not rescue it. The promising path remains PPO-v4
+  under robust Prefix-Relax, but the next learned-policy attempt should be
+  targeted: train only on counterfactual override states, use much stronger
+  anchor regularization/KL to PPO-v4, or move to PPO fine-tuning with the
+  robust policy as a safety wrapper instead of replacing the candidate with
+  full-trajectory BC.
