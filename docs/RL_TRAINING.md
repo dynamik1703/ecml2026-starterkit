@@ -7487,3 +7487,19 @@ Slack-gated Stop-Left Success shield:
   good `scene_4 seed6374` and `scene_1 seed6386` Stop->Left reward wins remain.
   This is a better safety/recall tradeoff than the hard Stop->Left conflict
   requirement.
+
+Submission packaging:
+- Copied the final short-term checkpoints into `submission/models/`:
+  - `ecml_ppo_actionobs_prefixrelax_ft_v1.pt`
+  - `ecml_risk_head_v4_mc6270_6280_s123_val4.pt`
+  - `ecml_reward_risk_head_v4_lowreward09_mc6270_6280_s123_val4.pt`
+  - `ecml_action_value_head_v4_mc6270_6280_s123_val4.pt`
+- Updated `Dockerfile` to instantiate
+  `POLICY=submission.risk_veto_policy.MyPolicy` with
+  `MyActionConflictObservationBuilder` and the final RiskVeto env:
+  `ECML_RISK_VETO_PREFIX_RELAX_ENABLED=1`,
+  `ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA=150`, and
+  `ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED=80`.
+- Packaging smoke using only repo-local model paths reproduced the expected
+  final score on `scene_1..4 6340..6344`: `+0.011708` reward,
+  `0.000000` Success, reward `3/0/17`, Success `0/0/20`.
