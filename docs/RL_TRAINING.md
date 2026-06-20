@@ -7262,3 +7262,45 @@ Online exact-event gate wrapper:
 - Also extended `runtime_context` and `evaluate_sampled.py` with scene
   tracking so exact-event and Risk-Veto traces include the scene name. This
   only affects diagnostics, not policy behavior.
+
+Prefix-augmented exact-event gate probe:
+- Fixed `tools/sequence_trace_to_counterfactual_focus.py` to preserve numeric
+  `baseline_action` and `candidate_action` columns. Without those columns,
+  accepted-event traces could not be fed back into
+  `evaluate_action_diff_counterfactuals.py`.
+- Replayed robust Prefix-Relax candidates for `scene_3` and `scene_4` on
+  `6310..6319` with scene-aware traces, then exact-labeled the accepted events:
+
+| source | rows | reward W/L/T | Success W/L/T | note |
+| --- | ---: | ---: | ---: | --- |
+| `scene_3` Prefix-Relax accepted | `6` | `1/0/5` | `0/0/6` | `seed6319 step84` is `+0.140292` |
+| `scene_4` Prefix-Relax-only accepted | `12` | `0/0/12` | `0/0/12` | pure Prefix-Relax events are individually neutral |
+| `scene_4` all accepted | `14` | `1/0/13` | `0/0/14` | `seed6311 step285` is `+0.019953`; step297 is neutral |
+
+- Trained `ecml_exact_event_gate_prefixaug_v1.pt` from old exact labels plus
+  the new Prefix/Risk accepted labels. Validation still uses the old
+  `6310..6319` direct PPO-v4 exact set, so this is a training sanity check,
+  not an independent score:
+
+| threshold | train accepted good/neutral/bad | validation accepted good/neutral/bad |
+| ---: | ---: | ---: |
+| `0.50` | `12/24/0` | `9/2/0` |
+| `0.60` | `12/10/0` | `9/1/0` |
+| `0.75` | `12/2/0` | `8/1/0` |
+| `0.90` | `10/1/0` | `6/0/0` |
+
+- Fresh online test on unseen `6320..6329`:
+
+| selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Prefix-aug exact gate `0.60` | `scene_1..4 6320..6329` | `+0.004329` | `0.000000` | `2/0/38` | `0/0/40` |
+| Robust Prefix-Relax | `scene_1..4 6320..6329` | `+0.006150` | `0.000000` | `3/0/37` | `0/0/40` |
+
+- Interpretation: the learned gate is now directionally useful on a new
+  window, but robust Prefix-Relax still has better recall and remains the
+  stronger deployment candidate. The learned gate's weakness is not safety but
+  missed positives, especially Prefix-Relax accepted events that have sparse
+  trace-derived features rather than full `diff_row` features. The next
+  improvement should either generate full online `diff_row` features for every
+  accepted Prefix/Risk event or distill robust Prefix-Relax into the PPO/gate
+  stack with an explicit recall objective.
