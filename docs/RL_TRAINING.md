@@ -7344,3 +7344,23 @@ Full-feature trace reconstruction:
   step is not another static MLP threshold sweep; it is either direct
   distillation of Prefix-Relax accepted/not-accepted decisions or PPO
   fine-tuning with the robust Prefix-Relax policy as a high-recall teacher.
+
+Additional robust Prefix-Relax validation:
+- Ran robust Prefix-Relax on a further unseen window, `scene_1..4 6330..6339`,
+  against `SequenceSuccessPolicy`:
+
+| window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| `scene_1..4 6330..6339` | `+0.003180` | `+0.004167` | `2/1/37` | `1/0/39` |
+
+- Non-zero seeds:
+  - `scene_1 seed6333`: reward `-0.165766`, Success `+0.166667`.
+  - `scene_1 seed6338`: reward `+0.188816`, Success unchanged.
+  - `scene_4 seed6336`: reward `+0.104167`, Success unchanged.
+- Interpretation: robust Prefix-Relax remains the strongest short-term
+  deployment candidate because it is still Success-safe and improves the mean
+  score on a third fresh window. It is not reward-loss-free, however. The
+  `6333` case is a useful hard example for a future reward-aware selector:
+  the intervention trades reward for one additional completed train. We should
+  not blindly tighten Prefix-Relax on reward risk yet, because the same family
+  of accepts is responsible for the larger reward wins.
