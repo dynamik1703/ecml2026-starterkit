@@ -100,6 +100,24 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_MIN_CANDIDATE_VALUE",
             float("-inf"),
         )
+        self.max_candidate_distance_delta = self._env_float(
+            "ECML_RISK_VETO_MAX_CANDIDATE_DISTANCE_DELTA",
+            float("inf"),
+        )
+        self.max_action_distance_delta = {
+            1: self._env_float(
+                "ECML_RISK_VETO_MAX_LEFT_DISTANCE_DELTA",
+                float("inf"),
+            ),
+            2: self._env_float(
+                "ECML_RISK_VETO_MAX_FORWARD_DISTANCE_DELTA",
+                float("inf"),
+            ),
+            3: self._env_float(
+                "ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA",
+                float("inf"),
+            ),
+        }
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -345,6 +363,69 @@ class RiskVetoPolicy:
         scores.pop("reject_reason", None)
         return True, scores
 
+    def _candidate_distance_delta(
+        self,
+        obs_builder: Any | None,
+        handle: int,
+        candidate_action: int,
+    ) -> float | None:
+        if obs_builder is None:
+            return None
+        try:
+            agent = obs_builder.env.agents[handle]
+            position = agent.position
+            if position is None:
+                return None
+            direction = (
+                agent.direction
+                if agent.direction is not None
+                else agent.initial_direction
+            )
+            target, target_direction = obs_builder._action_target(
+                handle,
+                candidate_action,
+            )
+            if target is None or target_direction is None:
+                return None
+            distance_map = obs_builder._get_distance_map(handle)
+            current_distance = float(distance_map[position[0], position[1], direction])
+            candidate_distance = float(
+                distance_map[target[0], target[1], target_direction]
+            )
+            if not np.isfinite(current_distance) or not np.isfinite(candidate_distance):
+                return None
+            return candidate_distance - current_distance
+        except Exception:
+            return None
+
+    def _distance_delta_veto(
+        self,
+        obs_builder: Any | None,
+        handle: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> bool:
+        action_limit = self.max_action_distance_delta.get(
+            int(candidate_action),
+            float("inf"),
+        )
+        max_distance_delta = min(self.max_candidate_distance_delta, action_limit)
+        if not np.isfinite(max_distance_delta):
+            return False
+        distance_delta = self._candidate_distance_delta(
+            obs_builder,
+            handle,
+            candidate_action,
+        )
+        if distance_delta is None:
+            return False
+        scores["candidate_distance_delta"] = float(distance_delta)
+        scores["candidate_distance_delta_limit"] = float(max_distance_delta)
+        if distance_delta > max_distance_delta:
+            scores["reject_reason"] = "candidate_distance_delta_too_high"
+            return True
+        return False
+
     def _trace(
         self,
         *,
@@ -426,6 +507,13 @@ class RiskVetoPolicy:
                     candidate_action,
                     scores,
                 )
+            if accepted and self._distance_delta_veto(
+                obs_builder,
+                int(handle),
+                candidate_action,
+                scores,
+            ):
+                accepted = False
             self._trace(
                 handle=handle,
                 seed=seed,

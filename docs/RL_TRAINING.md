@@ -7427,3 +7427,31 @@ Conservative PPO fine-tuning probe:
   Success-regression shield for known bad overrides (`scene_1/scene_2 6354`
   style cases), then continue v1-like conservative PPO with stronger validation
   gates.
+
+Right-distance Success shield:
+- Inspected the remaining v1 Success regression on `scene_2 seed6354`. The
+  trace had exactly one accepted override: agent 4 at step 294,
+  `STOP_MOVING -> MOVE_RIGHT`. Exact counterfactual labeling showed
+  `reward_delta=+0.029923` but `success_delta=-0.166667`.
+- Full `diff_row` reconstruction exposed the useful discriminator: that bad
+  override had `candidate_distance_delta=195`. A simple global distance cap was
+  too strict, because a good `scene_4 seed6344` `MOVE_LEFT` reward gain had
+  `candidate_distance_delta=315`. The useful guard is action-specific:
+  cap large `MOVE_RIGHT` detours while leaving large `MOVE_LEFT` detours
+  available.
+- Added optional RiskVeto env controls, defaulting to disabled:
+  `ECML_RISK_VETO_MAX_CANDIDATE_DISTANCE_DELTA`,
+  `ECML_RISK_VETO_MAX_LEFT_DISTANCE_DELTA`,
+  `ECML_RISK_VETO_MAX_FORWARD_DISTANCE_DELTA`, and
+  `ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA`.
+- With PPO-FT v1 and `ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA=150`:
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO-FT v1 + right-distance shield | `scene_1..4 6340..6344` | `+0.011708` | `0.000000` | `3/0/17` | `0/0/20` |
+| PPO-FT v1 + right-distance shield | `scene_1..4 6350..6359` | `+0.015241` | `0.000000` | `4/0/36` | `0/0/40` |
+
+- Interpretation: this is now the strongest short-term candidate. It preserves
+  the v1 learned-policy gains, removes the known `scene_2 seed6354` Success
+  regression, and does not lose the `scene_4 seed6344` high-distance
+  `MOVE_LEFT` reward gain.
