@@ -7450,8 +7450,9 @@ Right-distance Success shield:
 | --- | --- | ---: | ---: | ---: | ---: |
 | PPO-FT v1 + right-distance shield | `scene_1..4 6340..6344` | `+0.011708` | `0.000000` | `3/0/17` | `0/0/20` |
 | PPO-FT v1 + right-distance shield | `scene_1..4 6350..6359` | `+0.015241` | `0.000000` | `4/0/36` | `0/0/40` |
+| PPO-FT v1 + right-distance shield | `scene_1..4 6360..6369` | `+0.004636` | `+0.008333` | `1/0/39` | `1/0/39` |
 
 - Interpretation: this is now the strongest short-term candidate. It preserves
   the v1 learned-policy gains, removes the known `scene_2 seed6354` Success
-  regression, and does not lose the `scene_4 seed6344` high-distance
-  `MOVE_LEFT` reward gain.
+  regression, does not lose the `scene_4 seed6344` high-distance `MOVE_LEFT`
+  reward gain, and stayed loss-free on a fresh `6360..6369` validation window.
