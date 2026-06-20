@@ -7392,3 +7392,38 @@ Prefix-Relax teacher BC smoke:
   anchor regularization/KL to PPO-v4, or move to PPO fine-tuning with the
   robust policy as a safety wrapper instead of replacing the candidate with
   full-trajectory BC.
+
+Conservative PPO fine-tuning probe:
+- Switched from full-trajectory BC to on-policy PPO fine-tuning from
+  `ecml_ppo_actionobs_successfirst_v4.pt`. The PPO runs used action-conflict
+  observations, complete episodes from `scene_1..4`, a CE teacher term toward
+  robust `RiskVetoPolicy`, KL anchoring to PPO-v4, terminal success/failure
+  shaping, slack shaping, and action-conflict penalties. Candidates were still
+  evaluated inside the same RiskVeto/Prefix-Relax safety wrapper.
+- Smoke v1 (`ecml_ppo_actionobs_prefixrelax_ft_smoke_v1.pt`) used 4 updates,
+  low learning rate, and a strong KL anchor. It was stable and produced the
+  first useful learned-policy improvement over PPO-v4:
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO-v4 RiskVeto/Prefix-Relax | `scene_1..4 6340..6344` | `+0.006728` | `-0.016667` | `2/1/17` | `0/1/19` |
+| PPO-FT v1 RiskVeto/Prefix-Relax | `scene_1..4 6340..6344` | `+0.011708` | `0.000000` | `3/0/17` | `0/0/20` |
+| PPO-v4 RiskVeto/Prefix-Relax | `scene_1..4 6350..6359` | `+0.013719` | `-0.004167` | `5/1/34` | `0/1/39` |
+| PPO-FT v1 RiskVeto/Prefix-Relax | `scene_1..4 6350..6359` | `+0.015989` | `-0.004167` | `5/0/35` | `0/1/39` |
+
+- The `6350..6359` improvement came from avoiding the old v4 reward regression
+  on `scene_4 seed6357`; the remaining Success regression (`scene_2 seed6354`)
+  was already present with PPO-v4 under the same wrapper.
+- More aggressive PPO was not better:
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T | decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| PPO-FT v2 | `scene_1..4 6350..6359` | `+0.018576` | `-0.008333` | `7/0/33` | `0/2/38` | reject: more Success regressions |
+| PPO-FT v3-safe | `scene_1..4 6350..6359` | `+0.014364` | `-0.008333` | `6/1/33` | `0/2/38` | reject: worse than v1 |
+
+- Interpretation: on-policy PPO fine-tuning is now the most promising
+  learned-policy path, but the safe operating region is narrow. The next
+  improvement should not simply make PPO more aggressive. It should add a
+  Success-regression shield for known bad overrides (`scene_1/scene_2 6354`
+  style cases), then continue v1-like conservative PPO with stronger validation
+  gates.
