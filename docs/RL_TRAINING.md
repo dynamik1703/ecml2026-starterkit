@@ -7637,11 +7637,12 @@ Targeted raw Top-N candidate recall:
 | v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6410..6429` | `+0.009350` | `0.000000` | `9/0/71` | `0/0/80` |
 | v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6430..6449` | `+0.007120` | `0.000000` | `5/0/75` | `0/0/80` |
 | v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6450..6469` | `+0.007536` | `+0.004167` | `6/0/74` | `1/0/79` |
-| v1plus2 + StopRight Top-N `4:3` | combined `6410..6469` | `+0.008002` | `+0.001389` | `20/0/220` | `1/0/239` |
+| v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6470..6489` | `+0.006648` | `0.000000` | `5/0/75` | `0/0/80` |
+| v1plus2 + StopRight Top-N `4:3` | combined `6410..6489` | `+0.007664` | `+0.001042` | `25/0/295` | `1/0/319` |
 
 - Interpretation: the targeted Top-N filter increases RL proposal recall while
   preserving the zero-loss profile on the tested OOD windows. Compared with the
-  previous StopRight `0.52` freeze on overlapping windows `6410..6469`, reward
-  W/L/T improved from `15/0/225` to `20/0/220`, with the same one Success win
+  previous StopRight `0.52` freeze on overlapping windows `6410..6489`, reward
+  W/L/T improved from `20/0/300` to `25/0/295`, with the same one Success win
   and no losses. The default Docker configuration now includes the filtered
   Top-N setting; unrestricted raw Top-N remains rejected.
