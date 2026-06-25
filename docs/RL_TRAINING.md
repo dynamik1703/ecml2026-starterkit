@@ -7646,3 +7646,26 @@ Targeted raw Top-N candidate recall:
   W/L/T improved from `20/0/300` to `25/0/295`, with the same one Success win
   and no losses. The default Docker configuration now includes the filtered
   Top-N setting; unrestricted raw Top-N remains rejected.
+
+Top-N teacher PPO v1plus3 probe:
+- Trained `/private/tmp/ecml_ppo_actionobs_topn_teacher_v1plus3_s6700.pt` from
+  the packaged v1plus2 checkpoint using the current Top-N RiskVeto policy as
+  the teacher. The run used ActionConflict observations, `2` PPO updates,
+  `8` complete targeted episodes per update, LR `5e-6`, teacher CE `0.08`,
+  anchor KL `0.50`, rollout temperature `0.9`, and light terminal
+  success/failure shaping. Training stayed close to the start checkpoint
+  (`anchor_kl=0.001177` after update 2).
+- Smoke under the same RiskVeto wrapper on `scene_1..4 6340..6344`:
+
+| candidate | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | ---: | ---: | ---: | ---: |
+| v1plus3 Top-N-teacher PPO | `+0.008078` | `0.000000` | `2/0/18` | `0/0/20` |
+| current packaged v1plus2 Top-N | `+0.010870` | `0.000000` | `3/0/17` | `0/0/20` |
+
+- Decision: reject this v1plus3 checkpoint for promotion. It is safe in the
+  smoke and confirms the PPO fine-tune path remains trainable, but it is weaker
+  than the current packaged checkpoint on the first filter. The next RL
+  candidate should change the supervision signal more materially instead of
+  simply continuing conservative PPO from v1plus2, for example by distilling
+  the accepted Top-N rescue action at only candidate-difference states or by
+  adding explicit auxiliary labels for `STOP_MOVING -> MOVE_RIGHT` recall.
