@@ -39,6 +39,13 @@ class RiskVetoPolicy:
         ).strip()
         self.baseline_policy = SequenceSuccessPolicy()
         self.candidate_policy = RerankPolicy(checkpoint_path=candidate_checkpoint)
+        self.top_n_candidate_actions = max(
+            1,
+            int(os.environ.get("ECML_RISK_VETO_TOP_N_CANDIDATE_ACTIONS", "1") or "1"),
+        )
+        self.top_n_allowed_transitions = self._env_transition_set(
+            "ECML_RISK_VETO_TOP_N_ALLOWED_TRANSITIONS",
+        )
         self.risk_policy = (
             ActorCritic(checkpoint_path=risk_checkpoint)
             if risk_checkpoint and Path(risk_checkpoint).exists()
@@ -169,6 +176,22 @@ class RiskVetoPolicy:
             return float(os.environ.get(name, default))
         except Exception:
             return default
+
+    @staticmethod
+    def _env_transition_set(name: str) -> set[tuple[int, int]]:
+        raw_value = os.environ.get(name, "").strip()
+        if not raw_value:
+            return set()
+        transitions: set[tuple[int, int]] = set()
+        for item in raw_value.split(","):
+            if not item.strip():
+                continue
+            try:
+                baseline, candidate = item.split(":", maxsplit=1)
+                transitions.add((int(baseline), int(candidate)))
+            except Exception:
+                continue
+        return transitions
 
     @staticmethod
     def _action_id(action: Any) -> int:
@@ -582,6 +605,70 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _candidate_action_lists(
+        self,
+        handles: List[int],
+        observations: List[Any],
+        baseline_action_ids: dict[int, int],
+        candidate_actions: Dict[int, RailEnvActions],
+    ) -> dict[int, list[tuple[int, dict[str, Any]]]]:
+        result: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+        for handle in handles:
+            result[handle] = []
+            if handle in candidate_actions:
+                result[handle].append(
+                    (
+                        self._action_id(candidate_actions[handle]),
+                        {"candidate_source": "rerank"},
+                    )
+                )
+
+        if self.top_n_candidate_actions <= 1:
+            return result
+
+        try:
+            obs_array = np.asarray(observations, dtype=np.float32)
+            with torch.no_grad():
+                logits = (
+                    self.candidate_policy.rl_policy.masked_logits(obs_array)
+                    .cpu()
+                    .numpy()
+                )
+        except Exception:
+            return result
+
+        for row_index, handle in enumerate(handles):
+            existing = {action for action, _ in result.get(handle, [])}
+            baseline_action = baseline_action_ids.get(handle)
+            ranked_actions = [
+                (int(action), float(logit))
+                for action, logit in enumerate(logits[row_index])
+                if np.isfinite(logit)
+            ]
+            ranked_actions.sort(key=lambda item: item[1], reverse=True)
+            for rank, (action, logit) in enumerate(ranked_actions, start=1):
+                if action == baseline_action or action in existing:
+                    continue
+                if self.top_n_allowed_transitions and (
+                    baseline_action,
+                    action,
+                ) not in self.top_n_allowed_transitions:
+                    continue
+                result.setdefault(handle, []).append(
+                    (
+                        action,
+                        {
+                            "candidate_source": "raw_topn",
+                            "candidate_policy_rank": int(rank),
+                            "candidate_policy_logit": float(logit),
+                        },
+                    )
+                )
+                existing.add(action)
+                if len(result[handle]) >= self.top_n_candidate_actions:
+                    break
+        return result
+
     def act_many(
         self,
         handles: List[int],
@@ -611,54 +698,65 @@ class RiskVetoPolicy:
         planned_prefixes = None
         if self.prefix_relax_enabled and obs_builder is not None:
             planned_prefixes = self._baseline_prefixes(obs_builder, baseline_action_ids)
+        candidate_action_lists = self._candidate_action_lists(
+            handles,
+            observations,
+            baseline_action_ids,
+            candidate_actions,
+        )
 
         for handle in handles:
-            if handle not in candidate_actions or handle not in baseline_actions:
+            if handle not in baseline_actions:
                 continue
             baseline_action = baseline_action_ids[handle]
-            candidate_action = self._action_id(candidate_actions[handle])
-            if candidate_action == baseline_action:
-                continue
-            accepted, scores = self._risk_scores(
-                observations_by_handle.get(handle),
-                baseline_action,
-                candidate_action,
-            )
-            if not accepted:
-                accepted, scores = self._prefix_relax(
+            for candidate_action, candidate_metadata in candidate_action_lists.get(
+                handle,
+                [],
+            ):
+                if candidate_action == baseline_action:
+                    continue
+                accepted, scores = self._risk_scores(
+                    observations_by_handle.get(handle),
+                    baseline_action,
+                    candidate_action,
+                )
+                scores.update(candidate_metadata)
+                if not accepted:
+                    accepted, scores = self._prefix_relax(
+                        obs_builder,
+                        planned_prefixes,
+                        int(handle),
+                        candidate_action,
+                        scores,
+                    )
+                if accepted and self._distance_delta_veto(
                     obs_builder,
-                    planned_prefixes,
                     int(handle),
                     candidate_action,
                     scores,
+                ):
+                    accepted = False
+                if accepted and self._stop_left_conflict_veto(
+                    obs_builder,
+                    planned_prefixes,
+                    int(handle),
+                    baseline_action,
+                    candidate_action,
+                    scores,
+                ):
+                    accepted = False
+                self._trace(
+                    handle=handle,
+                    seed=seed,
+                    step=step,
+                    baseline_action=baseline_action,
+                    candidate_action=candidate_action,
+                    accepted=accepted,
+                    scores=scores,
                 )
-            if accepted and self._distance_delta_veto(
-                obs_builder,
-                int(handle),
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-            if accepted and self._stop_left_conflict_veto(
-                obs_builder,
-                planned_prefixes,
-                int(handle),
-                baseline_action,
-                candidate_action,
-                scores,
-            ):
-                accepted = False
-            self._trace(
-                handle=handle,
-                seed=seed,
-                step=step,
-                baseline_action=baseline_action,
-                candidate_action=candidate_action,
-                accepted=accepted,
-                scores=scores,
-            )
-            if accepted:
-                output[handle] = RailEnvActions(candidate_action)
+                if accepted:
+                    output[handle] = RailEnvActions(candidate_action)
+                    break
         return output
 
 

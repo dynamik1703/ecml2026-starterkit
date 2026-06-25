@@ -7619,3 +7619,29 @@ Final OOD freeze check:
   episodes with reward W/L/T `20/0/300` and Success W/L/T `1/0/319`.
   This is strong enough to freeze the current submission candidate unless a
   later official/docker check reveals packaging issues.
+
+Targeted raw Top-N candidate recall:
+- Tested a broader candidate list from the PPO/Rerank policy. Unrestricted
+  `ECML_RISK_VETO_TOP_N_CANDIDATE_ACTIONS=3` improved mean reward on
+  `6410..6429`, but opened new losses: reward `12/2/66` and Success `0/1/79`.
+  Trace inspection showed the harmful accepts came from raw Top-N transitions
+  outside the narrow StopRight pattern, including moving-to-moving changes and
+  one `STOP_MOVING -> MOVE_LEFT` Success regression.
+- Added an optional transition filter,
+  `ECML_RISK_VETO_TOP_N_ALLOWED_TRANSITIONS`, and promoted only the observed
+  safer expansion `4:3` (`STOP_MOVING -> MOVE_RIGHT`) with
+  `ECML_RISK_VETO_TOP_N_CANDIDATE_ACTIONS=3`.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6410..6429` | `+0.009350` | `0.000000` | `9/0/71` | `0/0/80` |
+| v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6430..6449` | `+0.007120` | `0.000000` | `5/0/75` | `0/0/80` |
+| v1plus2 + StopRight Top-N `4:3` | `scene_1..4 6450..6469` | `+0.007536` | `+0.004167` | `6/0/74` | `1/0/79` |
+| v1plus2 + StopRight Top-N `4:3` | combined `6410..6469` | `+0.008002` | `+0.001389` | `20/0/220` | `1/0/239` |
+
+- Interpretation: the targeted Top-N filter increases RL proposal recall while
+  preserving the zero-loss profile on the tested OOD windows. Compared with the
+  previous StopRight `0.52` freeze on overlapping windows `6410..6469`, reward
+  W/L/T improved from `15/0/225` to `20/0/220`, with the same one Success win
+  and no losses. The default Docker configuration now includes the filtered
+  Top-N setting; unrestricted raw Top-N remains rejected.
