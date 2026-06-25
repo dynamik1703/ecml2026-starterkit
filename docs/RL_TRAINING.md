@@ -7729,3 +7729,30 @@ Explicit accepted StopRight trace BC:
   `1/0/319`. The checkpoint is packaged as
   `submission/models/ecml_trace_stopright_bc_v1_s6900.pt`; the RiskVeto heads
   and safety env remain unchanged.
+
+StopRight trace BC v2 scale-up rejection:
+- Mined additional accepted raw-Top-N `STOP_MOVING -> MOVE_RIGHT` labels from
+  the promoted v1 policy on `scene_1..4 6450..6489`. This added only two more
+  labels: `scene_3 seed6462` and `scene_4 seed6476`, for five StopRight labels
+  total across `6410..6489`.
+- Trained `/private/tmp/ecml_trace_stopright_bc_v2_s7000.pt` from the promoted
+  v1 checkpoint with the same ActionConflict observation stack, low LR
+  `2e-6`, `12` epochs, `5` rescue labels, and `1,150` low-weight anchor
+  samples. Final weighted accuracy was `0.998242`, but this high accuracy is
+  not enough evidence because the positive label pool is extremely small.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| StopRight trace BC v2 | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+| StopRight trace BC v2 | `scene_1..4 6410..6429` | `+0.012475` | `0.000000` | `10/0/70` | `0/0/80` |
+| StopRight trace BC v2 | `scene_1..4 6430..6449` | `+0.007120` | `0.000000` | `5/0/75` | `0/0/80` |
+| StopRight trace BC v2 | `scene_1..4 6450..6469` | `+0.003050` | `0.000000` | `6/1/73` | `1/1/78` |
+
+- Decision: reject v2 and keep the packaged v1 checkpoint. The first three
+  checks match v1, but `6450..6469` regresses from v1's loss-free
+  `+0.007536`, reward `6/0/74`, Success `1/0/79` to reward `6/1/73` and
+  Success `1/1/78`. This is a useful negative result: simply adding a couple
+  of sparse StopRight labels can over-specialize the candidate policy. The
+  next higher-value route is broader rescue mining on true current-policy
+  failures, with explicit negative anchors around new Success-loss cases,
+  instead of promoting tiny-label fine-tunes.
