@@ -7503,3 +7503,29 @@ Submission packaging:
 - Packaging smoke using only repo-local model paths reproduced the expected
   final score on `scene_1..4 6340..6344`: `+0.011708` reward,
   `0.000000` Success, reward `3/0/17`, Success `0/0/20`.
+
+Final timed optimization pass:
+- Ran a fresh packaged-policy A/B check on `scene_1..4 6390..6409` with the
+  packaged PPO-FT v1 RiskVeto stack and the previous slack threshold `80`.
+  Result: `+0.004588` reward, `0.000000` Success, reward `3/0/77`,
+  Success `0/0/80`.
+- RiskVeto tracing showed the gains came from sparse accepted PPO overrides:
+  mainly `STOP_MOVING -> MOVE_LEFT/RIGHT`. The gate remains very conservative:
+  on that 80-episode window it saw `596` PPO/baseline action differences and
+  accepted only `7`; most rejections were `candidate_risk_regression`.
+- The useful new finding was `scene_1 seed6396`: the previous slack threshold
+  `80` blocked eight consecutive unconflicted `STOP_MOVING -> MOVE_LEFT`
+  proposals with slack `61..68`. Removing the slack guard on `scene_1
+  6390..6409` produced one additional reward win, `+0.007739`, with no
+  Success loss.
+- Lowering `ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED` from `80` to
+  `60` captures this new `scene_1 seed6396` win while still rejecting the known
+  bad `scene_4 seed6385` event with slack `53`.
+- Validated slack `60` on the older critical `scene_1..4 6370..6389` window:
+  `+0.003568` reward, `0.000000` Success, reward `4/0/76`, Success `0/0/80`.
+  This matches the previous safe aggregate while increasing recall on the new
+  `6390..6409` window. Updated the final Docker env to use slack threshold
+  `60`.
+- Final packaging smoke with slack `60` on `scene_1..4 6340..6344`
+  reproduced the previous packaged score: `+0.011708` reward, `0.000000`
+  Success, reward `3/0/17`, Success `0/0/20`.
