@@ -7561,3 +7561,18 @@ PPO v1plus2 challenger:
   loss-free on the tested windows and improves the newest holdout window. The
   gain over v1 is still modest; this confirms the main bottleneck is not raw
   PPO capacity but safely increasing accepted override recall.
+
+Broad post-promotion validation:
+- Ran two fresh packaged-policy OOD blocks with the promoted v1plus2 candidate,
+  tighter Prefix-Relax reasons, right-distance shield `150`, and Stop-Left
+  slack threshold `60`.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged v1plus2 + tighter relax | `scene_1..4 6410..6429` | `+0.005552` | `0.000000` | `6/0/74` | `0/0/80` |
+| packaged v1plus2 + tighter relax | `scene_1..4 6430..6449` | `+0.003454` | `0.000000` | `3/0/77` | `0/0/80` |
+| packaged v1plus2 + tighter relax | combined `6410..6449` | `+0.004503` | `0.000000` | `9/0/151` | `0/0/160` |
+
+- Interpretation: the promoted RL candidate stayed loss-free on 160 additional
+  out-of-sample episodes. Gains remain sparse but robust: all non-neutral rows
+  were reward-only wins, with no Success movement.
