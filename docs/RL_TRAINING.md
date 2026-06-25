@@ -7885,13 +7885,12 @@ StopRight transition distance shield:
 | --- | --- | ---: | ---: | ---: | ---: |
 | StopRight transition shield | `scene_3 seed6560` | `0.000000` | `0.000000` | `0/0/1` | `0/0/1` |
 | StopRight transition shield | `scene_2 seed6414` | `+0.066348` | `0.000000` | `1/0/0` | `0/0/1` |
-| StopRight transition shield, limit `10` | `scene_1..4 6550..6569` | `+0.004506` | `0.000000` | `5/0/75` | `0/0/80` |
-| StopRight transition shield, limit `10` | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
-| StopRight transition shield, limit `10` | `scene_1..4 6410..6429` | `+0.011646` | `0.000000` | `9/0/71` | `0/0/80` |
+| StopRight transition shield, limit `50` | `scene_1..4 6550..6569` | `+0.004506` | `0.000000` | `5/0/75` | `0/0/80` |
+| StopRight transition shield, limit `50` | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+| StopRight transition shield, limit `50` | `scene_1..4 6410..6429` | `+0.012475` | `0.000000` | `10/0/70` | `0/0/80` |
 
 - Decision: promote the transition-specific StopRight shield with limit `50`.
-  The full `6550..6569` run with limit `10` already removed the Success loss,
-  and trace inspection showed no additional rejected StopRight candidates in
-  the `10..50` band in that window. The targeted `6414` check confirms that
-  raising the deployment limit to `50` restores a previously validated
-  reward-positive StopRight action without reopening the `6560` loss.
+  Full final-value validation removes the `6550..6569` Success loss, preserves
+  the `6340..6344` smoke score, and restores the previously validated
+  `scene_2 seed6414` reward-positive StopRight action without reopening the
+  `6560` loss.
