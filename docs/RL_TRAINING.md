@@ -7941,3 +7941,44 @@ Post-guard fresh OOD check:
   `6570..6649` block and did not introduce reward regressions in the next two
   OOD windows. The remaining improvement problem is recall: the last 160
   episodes were safe but sparse, with only `9` reward wins.
+
+Rescue BC v4/v4b candidate:
+- Built a broader rescue-BC dataset from current safe accepted deployment
+  events. The first version had `47` positive rescue labels across `41`
+  scene/seed contexts plus the `scene_4 seed6578` negative-baseline avoidance
+  label. Actions were `STOP_MOVING -> MOVE_RIGHT` (`28`) and
+  `STOP_MOVING -> MOVE_LEFT` (`19`), with one `STOP_MOVING` avoidance label.
+- Trained `/private/tmp/ecml_rescue_bc_v4_s7200.pt` from the packaged
+  `ecml_trace_stopright_bc_v1_s6900.pt` checkpoint using ActionConflict
+  observations, LR `1e-6`, low-weight anchors, and a small forbidden-action
+  penalty. v4 improved current directly on fresh windows (`6650..6689`:
+  reward `3/0/157`, Success `0/0/160`) but regressed `scene_3 seed6421`
+  against current by `-0.166667` Success. Trace attribution showed a new
+  `STOP_MOVING -> MOVE_LEFT` proposal at `env_time=164`, same-edge conflicts
+  `16`, ETA gap `25`; current did not propose/accept any action there.
+- Added that `6421` event as a second negative-baseline avoidance label and
+  retrained from the packaged checkpoint with slightly lower LR `8e-7`,
+  producing `/private/tmp/ecml_rescue_bc_v4b_s7300.pt`. Collection stats were
+  `48` event hits, `2` avoidance hits, `0` misses, and `1` invalid positive
+  event. Training remained anchor-dominated (`17,924` anchors).
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v4b vs current | `scene_3 seed6421` | `0.000000` | `0.000000` | `0/0/1` | `0/0/1` |
+| v4b vs current | `scene_1..4 6340..6344` | `0.000000` | `0.000000` | `0/0/20` | `0/0/20` |
+| v4b vs current | `scene_1..4 6410..6429` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+| v4b vs current | `scene_1..4 6570..6589` | `+0.001192` | `0.000000` | `1/0/79` | `0/0/80` |
+| v4b vs current | `scene_1..4 6590..6609` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+| v4b vs current | `scene_1..4 6650..6669` | `+0.002988` | `0.000000` | `2/0/78` | `0/0/80` |
+| v4b vs current | `scene_1..4 6670..6689` | `+0.000936` | `0.000000` | `1/0/79` | `0/0/80` |
+| v4b vs current | combined checked direct windows | `+0.000974` | `0.000000` | `4/0/416` | `0/0/420` |
+
+- Packaged `submission/models/ecml_rescue_bc_v4b_s7300.pt` and updated Docker
+  to use it as `ECML_RISK_VETO_CANDIDATE_CHECKPOINT`. The packaged smoke
+  against Sequence on `scene_1..4 6340..6344` remains unchanged:
+  `+0.015670` reward, `0.000000` Success, reward W/L/T `4/0/16`, Success W/L/T
+  `0/0/20`.
+- Decision: promote v4b as a small recall improvement. The effect size is
+  modest, but it is the first broader rescue-BC candidate that improves fresh
+  direct OOD checks without losing the old 6410 guardrail after adding an
+  explicit negative label.
