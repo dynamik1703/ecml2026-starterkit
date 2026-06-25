@@ -133,6 +133,14 @@ class RiskVetoPolicy:
                 float("inf"),
             ),
         }
+        self.max_raw_topn_stop_right_distance_delta = self._env_float(
+            "ECML_RISK_VETO_MAX_RAW_TOPN_STOP_RIGHT_DISTANCE_DELTA",
+            float("inf"),
+        )
+        self.max_stop_right_distance_delta = self._env_float(
+            "ECML_RISK_VETO_MAX_STOP_RIGHT_DISTANCE_DELTA",
+            float("inf"),
+        )
         self.require_stop_left_conflict = bool(
             int(os.environ.get("ECML_RISK_VETO_REQUIRE_STOP_LEFT_CONFLICT", "0") or "0")
         )
@@ -458,6 +466,7 @@ class RiskVetoPolicy:
         self,
         obs_builder: Any | None,
         handle: int,
+        baseline_action: int,
         candidate_action: int,
         scores: dict[str, Any],
     ) -> bool:
@@ -465,7 +474,16 @@ class RiskVetoPolicy:
             int(candidate_action),
             float("inf"),
         )
+        source_transition_limit = float("inf")
+        if int(baseline_action) == 4 and int(candidate_action) == 3:
+            source_transition_limit = self.max_stop_right_distance_delta
+            if scores.get("candidate_source") == "raw_topn":
+                source_transition_limit = min(
+                    source_transition_limit,
+                    self.max_raw_topn_stop_right_distance_delta,
+                )
         max_distance_delta = min(self.max_candidate_distance_delta, action_limit)
+        max_distance_delta = min(max_distance_delta, source_transition_limit)
         if not np.isfinite(max_distance_delta):
             return False
         distance_delta = self._candidate_distance_delta(
@@ -755,6 +773,7 @@ class RiskVetoPolicy:
                 if accepted and self._distance_delta_veto(
                     obs_builder,
                     int(handle),
+                    baseline_action,
                     candidate_action,
                     scores,
                 ):

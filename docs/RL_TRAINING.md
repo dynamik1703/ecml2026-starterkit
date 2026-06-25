@@ -7860,3 +7860,38 @@ Unconflicted StopLeft distance shield:
 - Decision: promote the specific unconflicted StopLeft distance shield. It
   removes the demonstrated `6534` reward regression while preserving the known
   high-distance but conflict-relevant StopLeft reward wins.
+
+StopRight transition distance shield:
+- A fresh final-config trace/A-B on `scene_1..4 6550..6569` exposed one
+  Success regression while remaining reward-positive overall. The aggregate
+  before this shield was `+0.004506` reward, `-0.002083` Success, reward
+  W/L/T `5/0/75`, Success W/L/T `0/1/79`. Exact counterfactual attribution
+  reduced the loss to `scene_3 seed6560`, agent `1`, `STOP_MOVING ->
+  MOVE_RIGHT`, with `candidate_distance_delta=87`.
+- The first guard only capped raw Top-N StopRight candidates. That correctly
+  rejected the raw-Top-N copy of the bad action, but the same action was still
+  accepted as the normal Rerank proposal. The useful guard is therefore
+  transition-specific: cap `STOP_MOVING -> MOVE_RIGHT` regardless of proposal
+  source, while leaving other right turns controlled by the broader
+  `ECML_RISK_VETO_MAX_RIGHT_DISTANCE_DELTA`.
+- Added optional `ECML_RISK_VETO_MAX_STOP_RIGHT_DISTANCE_DELTA`; Docker sets it
+  to `50`. This blocks the bad `6560` action (`87`) and the older known
+  `6354` StopRight Success-loss pattern (`195`), while preserving the known
+  positive `scene_2 seed6414` StopRight reward win with distance delta `31`.
+  The raw-Top-N-only cap remains available as
+  `ECML_RISK_VETO_MAX_RAW_TOPN_STOP_RIGHT_DISTANCE_DELTA=10`.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| StopRight transition shield | `scene_3 seed6560` | `0.000000` | `0.000000` | `0/0/1` | `0/0/1` |
+| StopRight transition shield | `scene_2 seed6414` | `+0.066348` | `0.000000` | `1/0/0` | `0/0/1` |
+| StopRight transition shield, limit `10` | `scene_1..4 6550..6569` | `+0.004506` | `0.000000` | `5/0/75` | `0/0/80` |
+| StopRight transition shield, limit `10` | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+| StopRight transition shield, limit `10` | `scene_1..4 6410..6429` | `+0.011646` | `0.000000` | `9/0/71` | `0/0/80` |
+
+- Decision: promote the transition-specific StopRight shield with limit `50`.
+  The full `6550..6569` run with limit `10` already removed the Success loss,
+  and trace inspection showed no additional rejected StopRight candidates in
+  the `10..50` band in that window. The targeted `6414` check confirms that
+  raising the deployment limit to `50` restores a previously validated
+  reward-positive StopRight action without reopening the `6560` loss.
