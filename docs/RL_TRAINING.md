@@ -7894,3 +7894,35 @@ StopRight transition distance shield:
   the `6340..6344` smoke score, and restores the previously validated
   `scene_2 seed6414` reward-positive StopRight action without reopening the
   `6560` loss.
+
+StopLeft same-edge ETA guard:
+- Fresh OOD validation on `scene_1..4 6570..6589` exposed a new high-impact
+  StopLeft regression: aggregate was still reward-positive, but `scene_4
+  seed6578` lost `-0.263115` reward and `-0.500000` Success. The accepted
+  action was `STOP_MOVING -> MOVE_LEFT` at `env_time=244`, agent `4`.
+- Feature comparison across accepted StopLeft events showed a clean local
+  discriminator. The bad `6578` action had
+  `candidate_prefix_same_edge_conflicts=21` and
+  `candidate_prefix_min_intersection_eta_gap=3`. Known good StopLeft gains
+  either had low same-edge conflict counts (`0..6`) or larger ETA gaps
+  (`7..30`), even when total prefix intersections were high.
+- Added optional RiskVeto controls:
+  `ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_MIN_CONFLICTS` and
+  `ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_MAX_ETA_GAP`. Docker sets them to `10`
+  and `5`. This delays/blocks only very tight same-edge `STOP_MOVING ->
+  MOVE_LEFT` moves; it does not ban conflict-relevant StopLeft moves globally.
+- Targeted trace on `scene_4 seed6578` shows the guard rejecting the repeated
+  StopLeft proposal while ETA gap is `3..5`; once the gap reaches `6`, the
+  action is allowed and the episode becomes reward-positive instead of
+  Success-negative.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| StopLeft same-edge ETA guard | `scene_4 seed6578` | `+0.065779` | `0.000000` | `1/0/0` | `0/0/1` |
+| StopLeft same-edge ETA guard | `scene_2 seed6592` | `+0.090143` | `0.000000` | `1/0/0` | `0/0/1` |
+| StopLeft same-edge ETA guard | `scene_1..4 6570..6589` | `+0.007578` | `0.000000` | `8/0/72` | `0/0/80` |
+| StopLeft same-edge ETA guard | `scene_1..4 6590..6609` | `+0.014088` | `+0.002083` | `10/0/70` | `1/0/79` |
+
+- Decision: promote the StopLeft same-edge ETA guard. It removes the fresh
+  `6578` Success regression, keeps the good high-same-edge `6592` StopLeft
+  reward win, and leaves the already-strong `6590..6609` window unchanged.

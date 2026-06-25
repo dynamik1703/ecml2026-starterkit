@@ -152,6 +152,14 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_MAX_UNCONFLICTED_STOP_LEFT_DISTANCE_DELTA",
             float("inf"),
         )
+        self.stop_left_same_edge_min_conflicts = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_MIN_CONFLICTS",
+            float("inf"),
+        )
+        self.stop_left_same_edge_max_eta_gap = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_MAX_ETA_GAP",
+            float("inf"),
+        )
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -500,13 +508,36 @@ class RiskVetoPolicy:
             return True
         return False
 
-    def _candidate_prefix_cell_intersections(
+    @staticmethod
+    def _prefix_edges(
+        prefix: list[dict[str, Any]],
+    ) -> dict[tuple[tuple[int, int], tuple[int, int]], dict[str, Any]]:
+        edges = {}
+        for node in prefix:
+            previous = node.get("prev_position")
+            position = node.get("position")
+            if previous is None or position is None or previous == position:
+                continue
+            edges[(previous, position)] = node
+        return edges
+
+    @staticmethod
+    def _agent_eta(obs_builder: Any, handle: int, step: int) -> float:
+        try:
+            speed = float(obs_builder.env.agents[handle].speed_counter.speed)
+        except Exception:
+            speed = 1.0
+        if speed <= 0.0:
+            speed = 1.0
+        return float(step) / speed
+
+    def _candidate_prefix_summary(
         self,
         obs_builder: Any | None,
         planned_prefixes: dict[int, list[dict[str, Any]]] | None,
         handle: int,
         candidate_action: int,
-    ) -> float | None:
+    ) -> dict[str, float] | None:
         if obs_builder is None or planned_prefixes is None:
             return None
         try:
@@ -523,22 +554,62 @@ class RiskVetoPolicy:
             )
         except Exception:
             return None
-        candidate_positions = [
-            node.get("position")
-            for node in candidate_prefix
-            if node.get("position") is not None
-        ]
+
+        candidate_positions: dict[tuple[int, int], list[dict[str, Any]]] = {}
+        for node in candidate_prefix:
+            position = node.get("position")
+            if position is not None:
+                candidate_positions.setdefault(position, []).append(node)
         if not candidate_positions:
-            return 0.0
-        other_positions = set()
+            return {
+                "cell_intersections": 0.0,
+                "same_edge_conflicts": 0.0,
+                "min_intersection_eta_gap": 999.0,
+            }
+
+        cell_intersections = 0
+        same_edge_conflicts = 0
+        min_intersection_eta_gap = float("inf")
+        candidate_edges = self._prefix_edges(candidate_prefix)
         for other, other_prefix in planned_prefixes.items():
             if other == handle:
                 continue
+            other_positions: dict[tuple[int, int], list[dict[str, Any]]] = {}
             for node in other_prefix:
                 position = node.get("position")
                 if position is not None:
-                    other_positions.add(position)
-        return float(sum(position in other_positions for position in candidate_positions))
+                    other_positions.setdefault(position, []).append(node)
+            for position, own_nodes in candidate_positions.items():
+                for other_node in other_positions.get(position, []):
+                    for own_node in own_nodes:
+                        cell_intersections += 1
+                        eta_gap = abs(
+                            self._agent_eta(
+                                obs_builder,
+                                handle,
+                                int(own_node.get("step", 0)),
+                            )
+                            - self._agent_eta(
+                                obs_builder,
+                                other,
+                                int(other_node.get("step", 0)),
+                            )
+                        )
+                        min_intersection_eta_gap = min(
+                            min_intersection_eta_gap,
+                            eta_gap,
+                        )
+            other_edges = self._prefix_edges(other_prefix)
+            for source, target in candidate_edges:
+                if (source, target) in other_edges:
+                    same_edge_conflicts += 1
+        if not np.isfinite(min_intersection_eta_gap):
+            min_intersection_eta_gap = 999.0
+        return {
+            "cell_intersections": float(cell_intersections),
+            "same_edge_conflicts": float(same_edge_conflicts),
+            "min_intersection_eta_gap": float(min_intersection_eta_gap),
+        }
 
     def _stop_left_conflict_veto(
         self,
@@ -556,14 +627,15 @@ class RiskVetoPolicy:
             return False
         if baseline_action != 4 or candidate_action != 1:
             return False
-        prefix_intersections = self._candidate_prefix_cell_intersections(
+        prefix_summary = self._candidate_prefix_summary(
             obs_builder,
             planned_prefixes,
             handle,
             candidate_action,
         )
-        if prefix_intersections is None:
+        if prefix_summary is None:
             return False
+        prefix_intersections = prefix_summary["cell_intersections"]
         try:
             deadline_penalty = float(
                 self.baseline_policy._deadline_conflict_penalty(
@@ -576,7 +648,29 @@ class RiskVetoPolicy:
         except Exception:
             deadline_penalty = 0.0
         scores["candidate_prefix_cell_intersections"] = float(prefix_intersections)
+        scores["candidate_prefix_same_edge_conflicts"] = float(
+            prefix_summary["same_edge_conflicts"]
+        )
+        scores["candidate_prefix_min_intersection_eta_gap"] = float(
+            prefix_summary["min_intersection_eta_gap"]
+        )
         scores["candidate_deadline_conflict_penalty"] = float(deadline_penalty)
+        if (
+            np.isfinite(self.stop_left_same_edge_min_conflicts)
+            and np.isfinite(self.stop_left_same_edge_max_eta_gap)
+            and prefix_summary["same_edge_conflicts"]
+            >= self.stop_left_same_edge_min_conflicts
+            and prefix_summary["min_intersection_eta_gap"]
+            <= self.stop_left_same_edge_max_eta_gap
+        ):
+            scores["stop_left_same_edge_min_conflicts"] = float(
+                self.stop_left_same_edge_min_conflicts
+            )
+            scores["stop_left_same_edge_max_eta_gap"] = float(
+                self.stop_left_same_edge_max_eta_gap
+            )
+            scores["reject_reason"] = "stop_left_same_edge_eta_gap_too_tight"
+            return True
         if prefix_intersections <= 0.0 and deadline_penalty <= 0.0:
             if np.isfinite(self.max_unconflicted_stop_left_distance_delta):
                 distance_delta = self._candidate_distance_delta(
