@@ -7529,3 +7529,35 @@ Final timed optimization pass:
 - Final packaging smoke with slack `60` on `scene_1..4 6340..6344`
   reproduced the previous packaged score: `+0.011708` reward, `0.000000`
   Success, reward `3/0/17`, Success `0/0/20`.
+
+PPO v1plus2 challenger:
+- Trained `/private/tmp/ecml_ppo_actionobs_prefixrelax_ft_v1plus2_s6600.pt`
+  from the packaged PPO-FT v1 checkpoint with only `2` conservative PPO
+  updates, ActionConflict observations, final RiskVeto teacher, LR `1e-5`,
+  teacher CE `0.05`, and anchor KL `0.20`. Training stayed very close to the
+  start actor (`anchor_kl=1.0e-5` after update 2).
+- A longer `6`-update variant was rejected immediately: on `scene_1..4
+  6340..6344` it had `+0.003271` reward but `-0.025000` Success.
+- The `2`-update checkpoint by itself improved reward but opened one
+  Success regression on the fresh `scene_1..4 6390..6409` window:
+  `+0.007119` reward, `-0.002083` Success, reward `5/1/74`, Success
+  `0/1/79`. Trace reduced the regression to `scene_2 seed6408`, one accepted
+  `MOVE_FORWARD -> MOVE_RIGHT` via Prefix-Relax whose original reject reason
+  was `reward_risk_too_high`.
+- Tightened Prefix-Relax for this candidate by removing `reward_risk_too_high`
+  from `ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS`; allowed reasons
+  are now only `insufficient_risk_improvement`,
+  `insufficient_reward_risk_improvement`, and `reward_risk_regression`.
+  The `scene_2 seed6408` loss becomes neutral.
+- Validation with v1plus2 plus the tighter Prefix-Relax rule:
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PPO-FT v1plus2 + tighter relax | `scene_1..4 6340..6344` | `+0.010870` | `0.000000` | `3/0/17` | `0/0/20` |
+| PPO-FT v1plus2 + tighter relax | `scene_1..4 6370..6389` | `+0.003568` | `0.000000` | `4/0/76` | `0/0/80` |
+| PPO-FT v1plus2 + tighter relax | `scene_1..4 6390..6409` | `+0.006991` | `0.000000` | `4/0/76` | `0/0/80` |
+
+- Decision: promote v1plus2 as the packaged RiskVeto candidate because it is
+  loss-free on the tested windows and improves the newest holdout window. The
+  gain over v1 is still modest; this confirms the main bottleneck is not raw
+  PPO capacity but safely increasing accepted override recall.
