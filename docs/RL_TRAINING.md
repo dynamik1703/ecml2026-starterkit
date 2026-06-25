@@ -7829,3 +7829,34 @@ Prefix-Relax reward-risk regression tightening:
   reward/Success gains on the tested windows while removing a demonstrated
   high-impact failure path for context-sensitive `MOVE_FORWARD -> MOVE_RIGHT`
   relaxations.
+
+Unconflicted StopLeft distance shield:
+- A fresh final-config trace on `scene_1..4 6530..6549` exposed one new
+  reward-only regression: `scene_1 seed6534 t=194 a5 STOP_MOVING -> MOVE_LEFT`
+  reduced reward by `-0.073939`. The same trace also had a positive
+  `scene_1 seed6536 STOP_MOVING -> MOVE_LEFT` reward gain of `+0.085445`.
+- A simple global `ECML_RISK_VETO_MAX_LEFT_DISTANCE_DELTA=150` fixed `6534`
+  and kept `6536`, but rejected old good high-distance StopLeft wins in the
+  `6340..6344` smoke, dropping the smoke from reward W/L/T `4/0/16` to
+  `2/0/18`. This broad shield is rejected.
+- Feature comparison showed the useful discriminator: the bad `6534` StopLeft
+  had `candidate_distance_delta=315` and no candidate prefix intersections,
+  while the old good `scene_4 seed6341/6344` StopLeft wins had the same
+  distance delta but `candidate_prefix_cell_intersections` `5` and `1`. The
+  good `6536` StopLeft had distance delta `1` and `3` intersections.
+- Added `ECML_RISK_VETO_MAX_UNCONFLICTED_STOP_LEFT_DISTANCE_DELTA=150`.
+  It only vetoes `STOP_MOVING -> MOVE_LEFT` when the candidate has no prefix
+  conflict/deadline-conflict reason and the distance delta is too large.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| unconflicted StopLeft distance shield | `scene_1 seed6534` | `0.000000` | `0.000000` | `0/0/1` | `0/0/1` |
+| unconflicted StopLeft distance shield | `scene_1 seed6536` | `+0.085445` | `0.000000` | `1/0/0` | `0/0/1` |
+| unconflicted StopLeft distance shield | `scene_4 seed6341` | `+0.055843` | `0.000000` | `1/0/0` | `0/0/1` |
+| unconflicted StopLeft distance shield | `scene_4 seed6344` | `+0.076528` | `0.000000` | `1/0/0` | `0/0/1` |
+| unconflicted StopLeft distance shield | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+| unconflicted StopLeft distance shield | `scene_1..4 6530..6549` | `+0.001068` | `0.000000` | `1/0/79` | `0/0/80` |
+
+- Decision: promote the specific unconflicted StopLeft distance shield. It
+  removes the demonstrated `6534` reward regression while preserving the known
+  high-distance but conflict-relevant StopLeft reward wins.

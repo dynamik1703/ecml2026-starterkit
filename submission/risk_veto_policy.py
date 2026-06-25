@@ -140,6 +140,10 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_STOP_LEFT_MIN_SLACK_FOR_UNCONFLICTED",
             float("-inf"),
         )
+        self.max_unconflicted_stop_left_distance_delta = self._env_float(
+            "ECML_RISK_VETO_MAX_UNCONFLICTED_STOP_LEFT_DISTANCE_DELTA",
+            float("inf"),
+        )
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -556,6 +560,27 @@ class RiskVetoPolicy:
         scores["candidate_prefix_cell_intersections"] = float(prefix_intersections)
         scores["candidate_deadline_conflict_penalty"] = float(deadline_penalty)
         if prefix_intersections <= 0.0 and deadline_penalty <= 0.0:
+            if np.isfinite(self.max_unconflicted_stop_left_distance_delta):
+                distance_delta = self._candidate_distance_delta(
+                    obs_builder,
+                    handle,
+                    candidate_action,
+                )
+                if distance_delta is not None:
+                    scores["unconflicted_stop_left_distance_delta"] = float(
+                        distance_delta
+                    )
+                    scores["max_unconflicted_stop_left_distance_delta"] = float(
+                        self.max_unconflicted_stop_left_distance_delta
+                    )
+                    if (
+                        distance_delta
+                        > self.max_unconflicted_stop_left_distance_delta
+                    ):
+                        scores["reject_reason"] = (
+                            "unconflicted_stop_left_distance_delta_too_high"
+                        )
+                        return True
             if slack_threshold_enabled:
                 try:
                     distance = obs_builder._current_distance_to_waypoint(handle)
