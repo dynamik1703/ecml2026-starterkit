@@ -7926,3 +7926,18 @@ StopLeft same-edge ETA guard:
 - Decision: promote the StopLeft same-edge ETA guard. It removes the fresh
   `6578` Success regression, keeps the good high-same-edge `6592` StopLeft
   reward win, and leaves the already-strong `6590..6609` window unchanged.
+
+Post-guard fresh OOD check:
+- Ran two additional fresh windows after promoting the StopLeft same-edge ETA
+  guard. Both stayed loss-free.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| final same-edge guard | `scene_1..4 6610..6629` | `+0.007717` | `0.000000` | `7/0/73` | `0/0/80` |
+| final same-edge guard | `scene_1..4 6630..6649` | `+0.001673` | `0.000000` | `2/0/78` | `0/0/80` |
+| final same-edge guard | combined `6570..6649` | `+0.007764` | `+0.000521` | `27/0/293` | `1/0/319` |
+
+- Interpretation: the promoted guard fixed the only new Success loss in the
+  `6570..6649` block and did not introduce reward regressions in the next two
+  OOD windows. The remaining improvement problem is recall: the last 160
+  episodes were safe but sparse, with only `9` reward wins.
