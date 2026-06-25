@@ -7756,3 +7756,47 @@ StopRight trace BC v2 scale-up rejection:
   next higher-value route is broader rescue mining on true current-policy
   failures, with explicit negative anchors around new Success-loss cases,
   instead of promoting tiny-label fine-tunes.
+
+Counterfactual-mix trace BC v3 rejection:
+- Ran a fresh current-v1 OOD trace/A-B window on `scene_1..4 6490..6509`
+  with the packaged RiskVeto settings. The current v1 stayed safe but modest:
+  reward delta `+0.002719`, Success delta `0.000000`, reward W/L/T `3/0/77`,
+  Success W/L/T `0/0/80`.
+- The trace had `317` candidate checks and `11` accepts, all from the Rerank
+  proposal policy. Accepted transitions were `MOVE_FORWARD -> MOVE_RIGHT` x7,
+  `STOP_MOVING -> MOVE_RIGHT` x2, `MOVE_FORWARD -> MOVE_LEFT` x1, and
+  `STOP_MOVING -> MOVE_LEFT` x1.
+- Exact one-step counterfactual labeling of the `11` accepted events showed
+  only `3` causal positives and no negatives:
+  `scene_1 seed6492 STOP_MOVING -> MOVE_RIGHT` (`+0.076453` reward),
+  `scene_3 seed6504 STOP_MOVING -> MOVE_RIGHT` (`+0.086266`), and
+  `scene_4 seed6498 STOP_MOVING -> MOVE_LEFT` (`+0.054825`). All accepted
+  `MOVE_FORWARD -> MOVE_RIGHT` events were individually neutral in this
+  window.
+- Reproduced the v2 regression as an exact negative counterfactual:
+  `scene_3 seed6455 t=42 a2 MOVE_FORWARD -> MOVE_RIGHT` caused reward
+  `-0.257803` and Success `-0.333333`. This confirms that `MOVE_FORWARD ->
+  MOVE_RIGHT` is a context-sensitive action: neutral in many states, but
+  potentially catastrophic when prefix-relaxed incorrectly.
+- Hardened `tools/convert_counterfactual_to_aux_events.py` so it accepts both
+  `forced_action` and `candidate_action` counterfactual CSV formats and
+  preserves `scene` in the emitted event rows. Without `scene`, same-seed
+  labels can silently train on the wrong sampled scenario.
+- Trained `/private/tmp/ecml_trace_counterfactual_mix_bc_v3_s7100.pt` from the
+  packaged v1 checkpoint using the original `3` StopRight positives, the `3`
+  fresh causal positives, and the `1` v2 negative-baseline/forbidden event.
+  Training used ActionConflict observations, LR `1e-6`, `10` epochs,
+  `--include-avoidance-events`, `--forbid-coef 0.15`, and low-weight anchors.
+  Collection was clean: `7` event hits, `1` avoidance hit, `1` forbidden hit,
+  and `0` misses.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| counterfactual-mix BC v3 | `scene_3 seed6455` | `-0.257803` | `-0.333333` | `0/1/0` | `0/1/0` |
+| counterfactual-mix BC v3 | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+
+- Decision: reject v3. The smoke matches v1, but the known v2 regression is
+  still present, so a weak candidate-policy BC/forbid update does not solve the
+  actual failure mode. The stronger next step is selector-side learning or
+  counterfactual ranking for prefix-relaxed `MOVE_FORWARD -> MOVE_RIGHT`, not
+  simply pushing more tiny BC updates into the proposal checkpoint.

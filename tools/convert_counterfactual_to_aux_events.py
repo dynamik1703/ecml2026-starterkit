@@ -88,7 +88,10 @@ def event_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dic
         seed = int_value(row.get("seed"))
         env_time = int_value(row.get("env_time"))
         agent_id = int_value(row.get("agent_id"))
-        forced_action = action_id(row.get("forced_action"), row.get("forced_action_name"))
+        forced_action = action_id(
+            row.get("forced_action", row.get("candidate_action")),
+            row.get("forced_action_name", row.get("candidate_action_name")),
+        )
         positive_candidate_keys.add((seed, env_time, agent_id, forced_action))
 
     for row in rows:
@@ -102,8 +105,8 @@ def event_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dic
             row.get("baseline_action_name"),
         )
         candidate_action = action_id(
-            row.get("forced_action"),
-            row.get("forced_action_name"),
+            row.get("forced_action", row.get("candidate_action")),
+            row.get("forced_action_name", row.get("candidate_action_name")),
         )
         if min(seed, env_time, agent_id, baseline_action, candidate_action) < 0:
             continue
@@ -121,8 +124,13 @@ def event_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dic
 
         event_kind = "positive_rescue" if is_positive else "negative_baseline"
         target_action = candidate_action if is_positive else baseline_action
+        candidate_action_name = (
+            row.get("forced_action_name")
+            or row.get("candidate_action_name")
+            or ""
+        )
         target_action_name = (
-            row.get("forced_action_name", "")
+            candidate_action_name
             if is_positive
             else row.get("baseline_action_name", "")
         )
@@ -132,13 +140,14 @@ def event_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dic
         seen.add(key)
         output.append(
             {
+                "scene": row.get("scene", ""),
                 "seed": seed,
                 "env_time": env_time,
                 "agent_id": agent_id,
                 "baseline_action": baseline_action,
                 "baseline_action_name": row.get("baseline_action_name", ""),
                 "candidate_action": candidate_action,
-                "candidate_action_name": row.get("forced_action_name", ""),
+                "candidate_action_name": candidate_action_name,
                 "forced_action": target_action,
                 "forced_action_name": target_action_name,
                 "event_kind": event_kind,
