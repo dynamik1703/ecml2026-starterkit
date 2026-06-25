@@ -155,9 +155,7 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS",
             (
                 "insufficient_risk_improvement,"
-                "insufficient_reward_risk_improvement,"
-                "reward_risk_too_high,"
-                "reward_risk_regression"
+                "insufficient_reward_risk_improvement"
             ),
         ).strip()
         self.prefix_relax_allowed_reject_reasons = {

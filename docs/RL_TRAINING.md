@@ -7117,9 +7117,9 @@ Online prefix-relax gate:
 - Hardened Prefix-Relax with
   `ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS`. The default only
   relaxes `insufficient_risk_improvement`,
-  `insufficient_reward_risk_improvement`, `reward_risk_too_high`, and
-  `reward_risk_regression`. It does not override hard Success-risk rejects
-  such as `candidate_risk_regression` or `candidate_risk_too_high`.
+  `insufficient_reward_risk_improvement`. It does not override hard
+  Success-risk rejects such as `candidate_risk_regression` or
+  `candidate_risk_too_high`, and no longer overrides reward-risk regressions.
 - Robust Prefix-Relax validation:
 
 | selector | window | reward delta | Success delta | reward W/L/T | Success W/L/T | Prefix-Relax accepts |
@@ -7800,3 +7800,31 @@ Counterfactual-mix trace BC v3 rejection:
   actual failure mode. The stronger next step is selector-side learning or
   counterfactual ranking for prefix-relaxed `MOVE_FORWARD -> MOVE_RIGHT`, not
   simply pushing more tiny BC updates into the proposal checkpoint.
+
+Prefix-Relax reward-risk regression tightening:
+- The v2 regression trace and exact counterfactual labels showed that the
+  harmful `scene_3 seed6455 t=42 a2 MOVE_FORWARD -> MOVE_RIGHT` action was
+  accepted only because Prefix-Relax overrode `reward_risk_regression`. In the
+  fresh `6490..6509` trace, all accepted `MOVE_FORWARD -> MOVE_RIGHT`
+  Prefix-Relax actions also came from `reward_risk_regression`, and exact
+  one-step counterfactuals found them individually neutral.
+- Tightened both the code default and Docker config:
+  `ECML_RISK_VETO_PREFIX_RELAX_ALLOWED_REJECT_REASONS` is now only
+  `insufficient_risk_improvement,insufficient_reward_risk_improvement`.
+  Prefix-Relax no longer overrides `reward_risk_regression`.
+- Targeted single-seed checks with the tightened config:
+  `scene_3 seed6455` is neutralized from the v2-style `-0.257803` reward and
+  `-0.333333` Success loss to `0/0`; the positive cases `scene_1 seed6492`,
+  `scene_3 seed6504`, and `scene_4 seed6498` remain positive.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v1 + no reward-risk-regression relax | `scene_1..4 6410..6429` | `+0.012475` | `0.000000` | `10/0/70` | `0/0/80` |
+| v1 + no reward-risk-regression relax | `scene_1..4 6450..6469` | `+0.007536` | `+0.004167` | `6/0/74` | `1/0/79` |
+| v1 + no reward-risk-regression relax | `scene_1..4 6470..6489` | `+0.008018` | `0.000000` | `6/0/74` | `0/0/80` |
+| v1 + no reward-risk-regression relax | `scene_1..4 6490..6509` | `+0.002719` | `0.000000` | `3/0/77` | `0/0/80` |
+
+- Decision: promote the tighter Prefix-Relax config. It keeps the packaged v1
+  reward/Success gains on the tested windows while removing a demonstrated
+  high-impact failure path for context-sensitive `MOVE_FORWARD -> MOVE_RIGHT`
+  relaxations.
