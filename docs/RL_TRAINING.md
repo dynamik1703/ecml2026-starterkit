@@ -7576,3 +7576,29 @@ Broad post-promotion validation:
 - Interpretation: the promoted RL candidate stayed loss-free on 160 additional
   out-of-sample episodes. Gains remain sparse but robust: all non-neutral rows
   were reward-only wins, with no Success movement.
+
+StopRight reward-risk recall probe:
+- Tracing the `6410..6449` reward wins showed a very narrow successful pattern:
+  every win was caused by one direct RiskVeto accept from `STOP_MOVING` to
+  `MOVE_LEFT` or `MOVE_RIGHT`; no Prefix-Relax accept was needed. On
+  `6410..6429`, six direct Stop-start accepts produced the six reward wins.
+- The same full trace exposed `13` near-miss `STOP_MOVING -> MOVE_RIGHT`
+  proposals rejected only because the reward-risk candidate score was just
+  above the default `0.50` threshold (`~0.503..0.515`). The known v1plus2
+  regression was a different pattern, `MOVE_FORWARD -> MOVE_RIGHT`, and remains
+  blocked by the tighter Prefix-Relax allowed-reason set.
+- Added optional action-pair-specific reward-risk limits:
+  `ECML_RISK_VETO_MAX_STOP_RIGHT_REWARD_RISK` and
+  `ECML_RISK_VETO_MAX_STOP_LEFT_REWARD_RISK`, defaulting to the normal
+  `ECML_RISK_VETO_MAX_REWARD_RISK`. Promoted only the StopRight limit at
+  `0.52`.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v1plus2 + StopRight reward-risk `0.52` | `scene_1..4 6410..6429` | `+0.007939` | `0.000000` | `8/0/72` | `0/0/80` |
+| v1plus2 + StopRight reward-risk `0.52` | `scene_1..4 6430..6449` | `+0.003454` | `0.000000` | `3/0/77` | `0/0/80` |
+| v1plus2 + StopRight reward-risk `0.52` | combined `6410..6449` | `+0.005696` | `0.000000` | `11/0/149` | `0/0/160` |
+
+- Interpretation: this is a small but clean recall gain over the previous
+  packaged v1plus2 setting (`+0.004503` combined on the same 160 episodes),
+  with no reward or Success losses in the validation blocks.

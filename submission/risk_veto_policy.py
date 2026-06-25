@@ -84,6 +84,14 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_MAX_REWARD_RISK",
             0.50,
         )
+        self.max_stop_right_reward_risk = self._env_float(
+            "ECML_RISK_VETO_MAX_STOP_RIGHT_REWARD_RISK",
+            self.max_reward_risk,
+        )
+        self.max_stop_left_reward_risk = self._env_float(
+            "ECML_RISK_VETO_MAX_STOP_LEFT_REWARD_RISK",
+            self.max_reward_risk,
+        )
         self.max_reward_risk_candidate_minus_baseline = self._env_float(
             "ECML_RISK_VETO_MAX_REWARD_RISK_CANDIDATE_MINUS_BASELINE",
             0.00,
@@ -175,6 +183,17 @@ class RiskVetoPolicy:
         except Exception:
             return str(action)
 
+    def _max_reward_risk_for(
+        self,
+        baseline_action: int,
+        candidate_action: int,
+    ) -> float:
+        if baseline_action == 4 and candidate_action == 3:
+            return self.max_stop_right_reward_risk
+        if baseline_action == 4 and candidate_action == 1:
+            return self.max_stop_left_reward_risk
+        return self.max_reward_risk
+
     def _action_risk_scores(
         self,
         policy: ActorCritic,
@@ -243,13 +262,18 @@ class RiskVetoPolicy:
                 accepted = False
         if accepted and self.reward_risk_policy is not None:
             reward_candidate = float(scores["reward_risk_head_candidate"])
+            reward_risk_limit = self._max_reward_risk_for(
+                baseline_action,
+                candidate_action,
+            )
+            scores["reward_risk_head_candidate_limit"] = float(reward_risk_limit)
             reward_candidate_minus_baseline = float(
                 scores["reward_risk_head_candidate_minus_baseline"]
             )
             reward_baseline_minus_candidate = float(
                 scores["reward_risk_head_baseline_minus_candidate"]
             )
-            if reward_candidate > self.max_reward_risk:
+            if reward_candidate > reward_risk_limit:
                 scores["reject_reason"] = "reward_risk_too_high"
                 accepted = False
             elif (
