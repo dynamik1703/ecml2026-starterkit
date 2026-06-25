@@ -7698,3 +7698,34 @@ Targeted Top-N disagreement BC probe:
   accepted-action trace labels, especially `STOP_MOVING -> MOVE_RIGHT`, rather
   than relying on one-step teacher/reference disagreement collected from full
   teacher trajectories.
+
+Explicit accepted StopRight trace BC:
+- Generated current Top-N RiskVeto traces on `scene_1..4 6410..6429` plus
+  candidate-only traces on `scene_1..4 6430..6449`. Filtering for accepted
+  raw-Top-N `STOP_MOVING -> MOVE_RIGHT` events produced only `3` labels:
+  `scene_3 seed6427`, `scene_3 seed6435`, and `scene_3 seed6447`. This confirms
+  that the new recall path is extremely sparse.
+- Extended `tools/reconstruct_trace_diff_rows.py` to carry trace metadata
+  (`trace_candidate_source`, rank, logit) into reconstructed diff rows. Converted
+  the `3` accepted StopRight events into `positive_rescue` rows and trained
+  `/private/tmp/ecml_trace_stopright_bc_v1_s6900.pt` from the packaged v1plus2
+  checkpoint using `train_rescue_behavior_clone.py`.
+- Training data: `3` rescue labels plus `1,426` low-weight anchor samples from
+  the same seeds. Rescue action counts `{3: 3}`; final weighted accuracy
+  `0.884191`.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| explicit StopRight trace BC | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+| explicit StopRight trace BC | `scene_1..4 6410..6429` | `+0.012475` | `0.000000` | `10/0/70` | `0/0/80` |
+| explicit StopRight trace BC | `scene_1..4 6430..6449` | `+0.007120` | `0.000000` | `5/0/75` | `0/0/80` |
+| explicit StopRight trace BC | `scene_1..4 6450..6469` | `+0.007536` | `+0.004167` | `6/0/74` | `1/0/79` |
+| explicit StopRight trace BC | `scene_1..4 6470..6489` | `+0.008018` | `0.000000` | `6/0/74` | `0/0/80` |
+| explicit StopRight trace BC | combined `6410..6489` | `+0.008787` | `+0.001042` | `27/0/293` | `1/0/319` |
+
+- Decision: promote the explicit StopRight trace BC candidate. Compared with
+  the previous packaged v1plus2 Top-N candidate on `6410..6489`, reward W/L/T
+  improves from `25/0/295` to `27/0/293` with the same Success W/L/T
+  `1/0/319`. The checkpoint is packaged as
+  `submission/models/ecml_trace_stopright_bc_v1_s6900.pt`; the RiskVeto heads
+  and safety env remain unchanged.

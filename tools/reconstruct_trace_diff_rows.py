@@ -185,6 +185,13 @@ def reconstruct_seed_rows(
                 {
                     "scene": scene,
                     "trace_accepted": str(as_bool(event.get("accepted"))),
+                    "trace_candidate_source": str(event.get("candidate_source", "")),
+                    "trace_candidate_policy_rank": str(
+                        event.get("candidate_policy_rank", ""),
+                    ),
+                    "trace_candidate_policy_logit": str(
+                        event.get("candidate_policy_logit", ""),
+                    ),
                     "trace_selector_source": str(event.get("selector_source", "")),
                     "trace_reject_reason": str(event.get("reject_reason", "")),
                     "trace_action_match_status": (
