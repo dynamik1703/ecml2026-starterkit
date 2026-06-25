@@ -7823,6 +7823,7 @@ Prefix-Relax reward-risk regression tightening:
 | v1 + no reward-risk-regression relax | `scene_1..4 6450..6469` | `+0.007536` | `+0.004167` | `6/0/74` | `1/0/79` |
 | v1 + no reward-risk-regression relax | `scene_1..4 6470..6489` | `+0.008018` | `0.000000` | `6/0/74` | `0/0/80` |
 | v1 + no reward-risk-regression relax | `scene_1..4 6490..6509` | `+0.002719` | `0.000000` | `3/0/77` | `0/0/80` |
+| v1 + no reward-risk-regression relax | `scene_1..4 6510..6529` | `+0.004267` | `0.000000` | `3/0/77` | `0/0/80` |
 
 - Decision: promote the tighter Prefix-Relax config. It keeps the packaged v1
   reward/Success gains on the tested windows while removing a demonstrated
