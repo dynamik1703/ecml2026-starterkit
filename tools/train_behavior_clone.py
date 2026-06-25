@@ -109,6 +109,25 @@ def parse_scene_list(value: str | None) -> list[str]:
     return scenes
 
 
+def parse_seed_list(value: str | None) -> list[int]:
+    if not value:
+        return []
+    seeds = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        seeds.append(int(item))
+    return seeds
+
+
+def episode_seed(args: argparse.Namespace, episode: int) -> int:
+    training_seed_list = getattr(args, "training_seed_list", [])
+    if training_seed_list:
+        return int(training_seed_list[episode % len(training_seed_list)])
+    return int(args.seed + episode)
+
+
 def episode_scene(args: argparse.Namespace, episode: int) -> str | None:
     training_scene_list = getattr(args, "training_scene_list", [])
     if training_scene_list:
@@ -144,7 +163,7 @@ def collect_dataset(
     rng = np.random.default_rng(args.seed + 10_003)
 
     for episode in range(args.episodes):
-        seed = args.seed + episode
+        seed = episode_seed(args, episode)
         env, observations = make_env(args, seed, episode_scene(args, episode))
         reward_values: list[float] = []
         done = False
@@ -390,6 +409,14 @@ def parse_args() -> argparse.Namespace:
             "episodes. Defaults to --scene when omitted."
         ),
     )
+    parser.add_argument(
+        "--training-seeds",
+        help=(
+            "Comma-separated exact episode seeds to cycle through while "
+            "collecting teacher episodes. Defaults to --seed + episode when "
+            "omitted."
+        ),
+    )
     parser.add_argument("--obs-size", type=int)
     parser.add_argument("--n-actions", type=int, default=5)
     parser.add_argument("--hidden-size", type=int, default=128)
@@ -496,6 +523,7 @@ def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
         raise ValueError("--anchor-weight must be non-negative.")
     if args.disagreement_weight < 0.0:
         raise ValueError("--disagreement-weight must be non-negative.")
+    args.training_seed_list = parse_seed_list(args.training_seeds)
     args.training_scene_list = parse_scene_list(args.training_scenes)
     return args
 
@@ -513,6 +541,12 @@ def main() -> int:
         f"episodes={args.episodes} "
         f"num_agents={args.num_agents} "
         f"line_length={args.line_length}"
+        + (
+            " training_seeds="
+            + ",".join(str(seed) for seed in args.training_seed_list)
+            if args.training_seed_list
+            else ""
+        )
         + (
             " training_scenes="
             + ",".join(str(scene) for scene in args.training_scene_list)

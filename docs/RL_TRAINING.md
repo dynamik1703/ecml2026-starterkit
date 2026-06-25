@@ -7669,3 +7669,32 @@ Top-N teacher PPO v1plus3 probe:
   simply continuing conservative PPO from v1plus2, for example by distilling
   the accepted Top-N rescue action at only candidate-difference states or by
   adding explicit auxiliary labels for `STOP_MOVING -> MOVE_RIGHT` recall.
+
+Targeted Top-N disagreement BC probe:
+- Added `--training-seeds` to `tools/train_behavior_clone.py`, matching the
+  PPO trainer's exact-seed control. This lets BC collect paired seed/scene
+  episodes from known positive rescue windows instead of contiguous seed
+  ranges.
+- Trained `/private/tmp/ecml_bc_topn_disagreement_v1_s6800.pt` from the
+  packaged v1plus2 checkpoint with the current Top-N RiskVeto policy as
+  teacher, ActionConflict observations, `32` targeted episodes over `16`
+  known reward/Success-positive seed-scene pairs, `--disagreement-only`, LR
+  `5e-6`, `8` epochs, and max grad norm `0.25`.
+- Collection stats: `204` teacher/reference disagreements from `76,730` valid
+  teacher samples; disagreement action counts `{1: 32, 3: 68, 4: 104}`. Final
+  BC accuracy on the selected samples was `0.534314`, so this remained a
+  conservative partial distillation rather than a strong classifier.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| targeted disagreement BC under RiskVeto | `scene_1..4 6340..6344` | `+0.010870` | `0.000000` | `3/0/17` | `0/0/20` |
+| targeted disagreement BC under RiskVeto | `scene_1..4 6410..6429` | `+0.009350` | `0.000000` | `9/0/71` | `0/0/80` |
+
+- Decision: do not promote the BC checkpoint because it exactly matches, but
+  does not improve, the current packaged v1plus2 Top-N candidate on the first
+  OOD filter. This is still a useful result: targeted disagreement BC is much
+  safer than naive full-trajectory BC and more stable than the v1plus3 PPO
+  probe. The next higher-value RL/BC step should train from explicit
+  accepted-action trace labels, especially `STOP_MOVING -> MOVE_RIGHT`, rather
+  than relying on one-step teacher/reference disagreement collected from full
+  teacher trajectories.
