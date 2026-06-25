@@ -7602,3 +7602,20 @@ StopRight reward-risk recall probe:
 - Interpretation: this is a small but clean recall gain over the previous
   packaged v1plus2 setting (`+0.004503` combined on the same 160 episodes),
   with no reward or Success losses in the validation blocks.
+
+Final OOD freeze check:
+- Ran the current Docker-equivalent configuration on two additional fresh
+  out-of-sample windows after promoting the StopRight reward-risk limit.
+
+| candidate | window | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged v1plus2 + StopRight `0.52` | `scene_1..4 6450..6469` | `+0.006190` | `+0.004167` | `4/0/76` | `1/0/79` |
+| packaged v1plus2 + StopRight `0.52` | `scene_1..4 6470..6489` | `+0.006648` | `0.000000` | `5/0/75` | `0/0/80` |
+| packaged v1plus2 + StopRight `0.52` | combined `6450..6489` | `+0.006419` | `+0.002083` | `9/0/151` | `1/0/159` |
+
+- Interpretation: the final Docker-equivalent config stayed loss-free on
+  another 160 fresh episodes and even produced one Success win. Together with
+  `6410..6449`, the post-promotion StopRight config has 320 fresh OOD
+  episodes with reward W/L/T `20/0/300` and Success W/L/T `1/0/319`.
+  This is strong enough to freeze the current submission candidate unless a
+  later official/docker check reveals packaging issues.
