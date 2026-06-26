@@ -8150,3 +8150,29 @@ Trace-recall profile on the fresh default window:
   this fresh window. A stronger solution needs either better multi-step
   proposal policies or a selector trained on sparse genuinely positive events,
   not broader acceptance of the current rejected action pool.
+
+Second fresh default trace block:
+- Ran the same traced Docker/default-equivalent RiskVeto stack on
+  `scene_1..4 6750..6769`.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged rescue-v4b default | `scene_1..4 6750..6769` | `+0.009656` | `0.000000` | `9/0/71` | `0/0/80` |
+
+- Scene summaries: `scene_1` reward `+0.008981` with `3/0/17`,
+  `scene_2` reward `+0.010949` with `2/0/18`, `scene_3` reward
+  `+0.018693` with `4/0/16`, and `scene_4` neutral. All scenes had zero
+  Success losses.
+- Positive seeds were `scene_1` seeds `6753`, `6754`, `6759`; `scene_2`
+  seeds `6762`, `6768`; and `scene_3` seeds `6752`, `6760`, `6763`, `6765`.
+- Trace rows: `457` proposed deviations, `21` accepted, `436` rejected.
+  Accepted sources were `rerank=12`, `aux_listwise=6`, `listwise=2`,
+  `extra_aux_listwise=1`. Accepted transitions were dominated by
+  `STOP_MOVING -> MOVE_RIGHT` (`8`), `MOVE_FORWARD -> MOVE_RIGHT` (`7`), and
+  `STOP_MOVING -> MOVE_LEFT` (`4`).
+- Interpretation: this is the strongest current fresh validation for the
+  packaged v4b default. It is Success-safe and gives consistent small Reward
+  gains, but the effect size is still modest. The next high-leverage training
+  target is not broad guard relaxation; it is mining these accepted positive
+  `STOP_MOVING -> MOVE_*` events plus known hard negatives into a learned
+  event selector or rescue fine-tune.
