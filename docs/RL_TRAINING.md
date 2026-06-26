@@ -7999,3 +7999,35 @@ Fresh v4b direct OOD extension:
   step is not another narrow safety rule; it is a more aggressive RL/BC
   candidate that proposes more useful deviations while reusing the existing
   risk-veto shell to reject unsafe ones.
+
+PPO rescue v5 smoke rejection:
+- Built an Aux-BC cache from the v4b rescue-event CSV for a stronger PPO
+  fine-tune. Cache stats: `8,674` samples, `49` rescue hits, `2` avoidance
+  hits, `2` forbidden hits, `0` misses, `8,625` anchors. The full RiskVeto
+  Aux-BC replay is expensive; the first larger v5 launch was stopped after
+  cache creation and replaced with a smaller smoke run.
+- Trained `/private/tmp/ecml_ppo_rescue_v5_smoke_s7410.pt` from packaged v4b
+  with two PPO updates, ActionConflict observations, Aux-BC coefficient `0.60`,
+  forbidden coefficient `0.18`, anchor KL `0.08`, light terminal shaping, and
+  conflict penalties. Training stayed close to v4b (`anchor_kl=0.000231` after
+  update 2) and rollout Success was high (`0.958333` on update 2).
+- Direct smoke versus current/v4b on `scene_1..4 6340..6344` was neutral:
+  reward `0.000000`, Success `0.000000`, W/L/T `0/0/20`.
+- Fresh direct OOD versus current/v4b on `scene_1..4 6690..6709` failed:
+  reward `-0.002021`, Success `-0.002083`, reward W/L/T `0/1/79`, Success
+  W/L/T `0/1/79`. The loss was `scene_1 seed6692`, reward `0.726667 ->
+  0.565000`, Success `1.000000 -> 0.833333`.
+- RiskVeto trace attribution for the `6692` loss found one accepted v5
+  deviation: `env_time=125`, agent `2`, `MOVE_FORWARD -> MOVE_LEFT`, source
+  `rerank`. Success-risk and reward-risk heads preferred the candidate
+  (`risk_delta=-0.124348`, `reward_risk_delta=-0.022933`), but the action-value
+  head strongly disliked it (`value_delta=-0.142008`).
+- A targeted `ECML_RISK_VETO_MIN_VALUE_DELTA=-0.10` candidate-only guard
+  neutralized the `6692` Success loss, but did not make v5 useful. On the full
+  `6690..6709` window, v5+ValueGuard scored reward `-0.005741`, Success
+  `0.000000`, reward W/L/T `0/5/75`, Success W/L/T `0/0/80`.
+
+- Decision: reject v5 and keep packaged v4b. The useful learning is not "run
+  more PPO updates"; the next candidate needs checkpoint selection or a learned
+  action-value/return selector trained on hard negatives like `6692`, because
+  risk-head improvement alone can accept lower-return detours.
