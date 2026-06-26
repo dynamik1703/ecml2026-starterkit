@@ -40,12 +40,18 @@ from tools.evaluate_sampled import (
     normalized_reward,
     repo_root,
 )
+from submission import runtime_context
 from flatland.envs.persistence import RailEnvPersister
 from tools.train_counterfactual_gate import outcome_category
 
 
 MOVE_ACTIONS = (1, 2, 3)
 DEFAULT_ACTIONS = (1, 2, 3, 4)
+
+
+def set_runtime_context(args: argparse.Namespace, seed: int) -> None:
+    runtime_context.set_seed(seed)
+    runtime_context.set_scene(args.scene or "scene_5")
 
 
 def make_env(args: argparse.Namespace) -> tuple[Any, Any]:
@@ -403,6 +409,7 @@ def collect_decisions(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     env, obs_builder = make_env(args)
     observations, _ = env.reset(random_seed=seed)
+    set_runtime_context(args, seed)
     policy = instantiate_policy(args.policy, args.policy_checkpoint)
     reward_values: list[float] = []
     positions: dict[int, list[Any]] = defaultdict(list)
@@ -506,6 +513,7 @@ def run_forced_episode(
 ) -> dict[str, Any]:
     env, _ = make_env(args)
     observations, _ = env.reset(random_seed=seed)
+    set_runtime_context(args, seed)
     policy = instantiate_policy(args.policy, args.policy_checkpoint)
     reward_values: list[float] = []
     positions: dict[int, list[Any]] = defaultdict(list)

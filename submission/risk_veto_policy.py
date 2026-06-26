@@ -39,6 +39,22 @@ class RiskVetoPolicy:
         ).strip()
         self.baseline_policy = SequenceSuccessPolicy()
         self.candidate_policy = RerankPolicy(checkpoint_path=candidate_checkpoint)
+        self.extra_candidate_policies: list[tuple[str, RerankPolicy]] = []
+        for index, extra_checkpoint in enumerate(
+            item.strip()
+            for item in os.environ.get(
+                "ECML_RISK_VETO_EXTRA_CANDIDATE_CHECKPOINTS",
+                "",
+            ).split(",")
+        ):
+            if not extra_checkpoint:
+                continue
+            self.extra_candidate_policies.append(
+                (
+                    f"extra_rerank_{index}",
+                    RerankPolicy(checkpoint_path=extra_checkpoint),
+                )
+            )
         self.top_n_candidate_actions = max(
             1,
             int(os.environ.get("ECML_RISK_VETO_TOP_N_CANDIDATE_ACTIONS", "1") or "1"),
@@ -746,6 +762,9 @@ class RiskVetoPolicy:
         observations: List[Any],
         baseline_action_ids: dict[int, int],
         candidate_actions: Dict[int, RailEnvActions],
+        extra_candidate_actions: (
+            list[tuple[str, Dict[int, RailEnvActions]]] | None
+        ) = None,
     ) -> dict[int, list[tuple[int, dict[str, Any]]]]:
         result: dict[int, list[tuple[int, dict[str, Any]]]] = {}
         for handle in handles:
@@ -757,6 +776,20 @@ class RiskVetoPolicy:
                         {"candidate_source": "rerank"},
                     )
                 )
+            existing = {action for action, _ in result[handle]}
+            for source, actions_by_handle in extra_candidate_actions or []:
+                if handle not in actions_by_handle:
+                    continue
+                action_id = self._action_id(actions_by_handle[handle])
+                if action_id in existing:
+                    continue
+                result[handle].append(
+                    (
+                        action_id,
+                        {"candidate_source": source},
+                    )
+                )
+                existing.add(action_id)
 
         if self.top_n_candidate_actions <= 1:
             return result
@@ -812,6 +845,10 @@ class RiskVetoPolicy:
     ) -> Dict[int, RailEnvActions]:
         baseline_actions = self.baseline_policy.act_many(handles, observations, **kwargs)
         candidate_actions = self.candidate_policy.act_many(handles, observations, **kwargs)
+        extra_candidate_actions = [
+            (source, policy.act_many(handles, observations, **kwargs))
+            for source, policy in self.extra_candidate_policies
+        ]
         observations_by_handle = dict(zip(handles, observations))
         output = dict(baseline_actions)
         seed = None
@@ -838,6 +875,7 @@ class RiskVetoPolicy:
             observations,
             baseline_action_ids,
             candidate_actions,
+            extra_candidate_actions,
         )
 
         for handle in handles:

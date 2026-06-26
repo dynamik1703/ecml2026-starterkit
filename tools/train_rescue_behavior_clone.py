@@ -14,6 +14,7 @@ import torch
 import torch.nn.functional as F
 from flatland.envs.persistence import RailEnvPersister
 
+from submission import runtime_context
 from submission.my_policy import ActorCritic
 from tools.analyze_policy_action_diffs import policy_actions
 from tools.evaluate_sampled import (
@@ -249,6 +250,8 @@ def collect_training_samples(
 
     for scene, seed in sorted_contexts:
         env, observations = make_env(args, seed, scene)
+        runtime_context.set_seed(seed)
+        runtime_context.set_scene(scene or "scene_5")
         events_for_seed = rescue_events.get((scene, seed), {})
         seen_events: set[tuple[int, int]] = set()
         while int(env._elapsed_steps) < env._max_episode_steps:

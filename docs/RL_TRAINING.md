@@ -8538,3 +8538,49 @@ Scene-2 positive-only v8d and Top-N transition probe:
   We need a state-sensitive selector/gate for the specific high-slack early
   rescue pattern, or a proposal architecture that can score event-context
   actions without perturbing the robust default action set.
+
+Runtime-context fix and v10/v10b corrected rescue probe:
+- Found a critical analysis/training mismatch: `evaluate_sampled.py` set
+  `runtime_context.seed/scene`, but `tools/counterfactual_decision_eval.py`
+  and `tools/train_rescue_behavior_clone.py` did not. For policies using
+  runtime context this made some counterfactual labels off-policy relative to
+  live evaluation. Both tools now set the same runtime context before replay.
+- Re-ran `scene_2` failure mining on seeds `6830..6869` with Docker-equivalent
+  RiskVeto env. Corrected top-10 failure seeds were
+  `6855,6846,6836,6834,6845,6832,6851,6843,6856,6867`.
+- Corrected counterfactuals on those seeds produced `200` rows:
+  Reward W/L/T `4/109/87`, Success W/L/T `14/0/186`.
+  Clear high-value positives included:
+  - `seed6832 step207 agent5 MOVE_LEFT -> MOVE_FORWARD`
+    (`+0.013480` Reward, `+0.166667` Success).
+  - `seed6834 step53 agent0 MOVE_FORWARD -> STOP_MOVING`
+    (`+0.000000` Reward, `+0.166667` Success).
+  - `seed6843 step216 agent5 MOVE_RIGHT -> MOVE_FORWARD`
+    (`+0.120523` Reward, `+0.166667` Success).
+  Ambiguous `seed6843` Stop rescues improved Success but reduced normalized
+  Reward and were kept out of the strict promotion dataset.
+- Built strict deduplicated Aux dataset
+  `/private/tmp/ecml_scene2_runtimefix_rescue_aux_v10.csv`:
+  `21` events, `4` positive rescue and `17` negative baseline. Replay after
+  the runtime-context fix was clean: `20/20` hits, `0` invalid, `0` misses,
+  `0` baseline mismatches.
+- v10 conservative Rescue-BC
+  `/private/tmp/ecml_rescue_bc_scene2_runtimefix_v10_s8500.pt` was safe but
+  neutral on `scene_2 6830..6869`: Reward W/L/T `0/0/40`, Success W/L/T
+  `0/0/40`.
+- v10b aggressive Rescue-BC
+  `/private/tmp/ecml_rescue_bc_scene2_runtimefix_v10b_s8510.pt` did make the
+  corrected positive actions top-ranked in direct logit diagnostics, but as a
+  direct replacement it regressed slightly on the same block: mean Reward
+  delta `-0.001860`, Reward W/L/T `0/1/39`, Success W/L/T `0/0/40`.
+- Added optional multi-candidate support to `RiskVetoPolicy` via
+  `ECML_RISK_VETO_EXTRA_CANDIDATE_CHECKPOINTS`. Default behavior is unchanged
+  unless the env var is set. Testing v4b plus v10b as an extra candidate was
+  safe but neutral with default gates: Reward/Success W/L/T `0/0/40`.
+- Opening the candidate risk gate to `0.08` and reward-risk limit to `0.65`
+  accepted real extra rescues, including `seed6843 step216`, and was slightly
+  reward-positive on the 40-seed block (`+0.001637` mean), but not safe enough:
+  Reward W/L/T `3/3/34`, Success W/L/T `1/1/38`. Decision: do not promote this
+  global relaxation. The next step should be a source-/state-specific extra
+  rescue gate trained to accept the corrected positives while rejecting the
+  observed losses (`seed6834`, `seed6845`, `seed6857`).
