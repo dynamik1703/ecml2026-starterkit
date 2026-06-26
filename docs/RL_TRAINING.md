@@ -8584,3 +8584,32 @@ Runtime-context fix and v10/v10b corrected rescue probe:
   global relaxation. The next step should be a source-/state-specific extra
   rescue gate trained to accept the corrected positives while rejecting the
   observed losses (`seed6834`, `seed6845`, `seed6857`).
+
+Targeted extra-candidate relax:
+- Added an optional source-specific extra-candidate relax to `RiskVetoPolicy`.
+  It is disabled by default unless `ECML_RISK_VETO_EXTRA_RELAX_ENABLED=1` and
+  only applies to configured extra-candidate sources/transitions. It can
+  compute reward-risk scores even when the normal risk gate rejected before
+  reward-risk evaluation.
+- Promoted v10b as an extra candidate, not as a replacement:
+  `submission/models/ecml_rescue_bc_scene2_runtimefix_v10b_s8510.pt`.
+  v4b remains the main candidate.
+- The promoted Docker settings use a narrow relax for late
+  `MOVE_LEFT/MOVE_RIGHT -> MOVE_FORWARD` extra proposals:
+  risk delta in `[0.07, 0.08]`, `reward_risk <= 0.52`, reward-risk improvement
+  at least `0.10`, and `env_time >= 180`.
+- Validation:
+  - `scene_2 6830..6869`: mean Reward delta `+0.003013`, mean Success delta
+    `+0.004167`, Reward W/L/T `1/0/39`, Success W/L/T `1/0/39`. Exactly one
+    extra-relax action was accepted:
+    `seed6843 step216 agent5 MOVE_RIGHT -> MOVE_FORWARD`.
+  - Fresh `scene_2 6870..6909`: fully neutral, Reward/Success W/L/T
+    `0/0/40`, with one accepted extra-relax action that did not change the
+    final score.
+  - Fresh multi-scene check (`scene_1,3,4,5`, 20 episodes each from seed
+    `6870`): aggregate mean Reward delta `+0.001958`, Success delta `0`,
+    Reward W/L/T `1/0/79`, Success W/L/T `0/0/80`.
+- Current interpretation: this is a small but clean improvement over v4b on
+  the tested blocks. It is still heuristic-gated and narrow; the next RL step
+  is to replace the hand-tuned extra relax thresholds with a learned
+  source-specific event gate using the corrected runtime-context rows.
