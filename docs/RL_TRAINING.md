@@ -8620,7 +8620,7 @@ Targeted start-rescue relax:
   enabled in the Docker submission after validation.
 - The promoted profile only accepts main `rerank` proposals for
   `STOP_MOVING -> MOVE_FORWARD` (`4:2`) from `env_time >= 200`, with risk
-  delta in `[0.05, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
+  delta in `[0.045, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
   and reward-risk improvement at least `0.40`.
 - Validation against the current promoted RiskVeto default:
   - `scene_2 6830..6869`: mean Reward delta `+0.006641`, Success delta `0`,
@@ -8639,3 +8639,10 @@ Targeted start-rescue relax:
 - Current interpretation: this is still a narrow gate, but it is a useful
   improvement because it converts a repeatedly observed late-start bottleneck
   into reward gains without measured regressions on the validation windows.
+- Follow-up threshold ablation lowered the minimum risk delta from `0.05` to
+  `0.045`. Against the `0.05` default on fresh `scene_2 6870..6909`, this
+  added one more clean `STOP_MOVING -> MOVE_FORWARD` rescue
+  (`seed6891 step270 agent4`) and improved mean Reward by `+0.001880` with
+  Reward W/L/T `1/0/39`, Success W/L/T `0/0/40`. The same change was neutral
+  on fresh multi-scene (`scene_1,3,4,5`, 20 episodes each from seed `6870`):
+  aggregate Reward/Success W/L/T `0/0/80`.
