@@ -318,6 +318,18 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_START_RELAX_ACTIVE_FRACTION_MIN_REWARD_IMPROVEMENT",
             float("-inf"),
         )
+        self.start_relax_active_distance_guard_min = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_GUARD_MIN",
+            float("inf"),
+        )
+        self.start_relax_active_distance_max_delta = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_MAX_DELTA",
+            float("-inf"),
+        )
+        self.start_relax_active_distance_min_reward_improvement = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_MIN_REWARD_IMPROVEMENT",
+            float("-inf"),
+        )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
 
     @staticmethod
@@ -842,6 +854,48 @@ class RiskVetoPolicy:
             return True
         return False
 
+    def _start_relax_active_distance_veto(
+        self,
+        obs_builder: Any | None,
+        handle: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> bool:
+        if scores.get("selector_source") != "start_relax":
+            return False
+        active_fraction = scores.get("start_relax_obs_active_fraction")
+        try:
+            active_fraction = float(active_fraction)
+        except Exception:
+            return False
+        if active_fraction < self.start_relax_active_distance_guard_min:
+            return False
+
+        distance_delta = self._candidate_distance_delta(
+            obs_builder,
+            handle,
+            candidate_action,
+        )
+        if distance_delta is None:
+            return False
+        scores["start_relax_active_distance_delta"] = float(distance_delta)
+        if distance_delta > self.start_relax_active_distance_max_delta:
+            return False
+
+        reward_improvement = float(
+            scores.get(
+                "reward_risk_head_baseline_minus_candidate",
+                float("-inf"),
+            )
+        )
+        if (
+            reward_improvement
+            >= self.start_relax_active_distance_min_reward_improvement
+        ):
+            return False
+        scores["reject_reason"] = "start_relax_active_distance_reward_guard"
+        return True
+
     @staticmethod
     def _prefix_edges(
         prefix: list[dict[str, Any]],
@@ -1228,6 +1282,13 @@ class RiskVetoPolicy:
                         step,
                         scores,
                     )
+                if accepted and self._start_relax_active_distance_veto(
+                    obs_builder,
+                    int(handle),
+                    candidate_action,
+                    scores,
+                ):
+                    accepted = False
                 if not accepted:
                     accepted, scores = self._prefix_relax(
                         obs_builder,

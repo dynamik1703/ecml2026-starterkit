@@ -8703,3 +8703,27 @@ Targeted start-rescue relax:
   - The loss was `seed6854`, where the guard blocked an already validated
     small start-relax gain (`+0.011931` Reward, no Success change). Decision:
     do not enable this guard in Docker; use it only as an experiment hook.
+- Start-relax active-distance safety guard:
+  - Added a narrower default-off guard that combines the active-agent fraction
+    with the actual candidate distance delta:
+    `ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_GUARD_MIN`,
+    `ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_MAX_DELTA`, and
+    `ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_MIN_REWARD_IMPROVEMENT`.
+  - Promoted Docker values: active fraction at least `0.999`, candidate
+    distance delta at most `1.0`, and reward-risk improvement below `0.25`.
+    This targets the observed bad fully-active near-stationary start pattern
+    without blocking long-distance start escapes such as `seed6854`.
+  - RiskVeto-vs-RiskVeto A/B against the previous Docker default:
+    - `scene_2 6830..6869`: neutral, Reward/Success W/L/T `0/0/40`;
+      trace confirmed `seed6845 step387/388` were rejected by
+      `start_relax_active_distance_reward_guard`, while `seed6854 step200`
+      stayed accepted.
+    - `scene_2 6870..6909`: neutral, Reward/Success W/L/T `0/0/40`.
+    - Heldout `scene_1,4`, 20 episodes each from seed `6910`: neutral,
+      Reward/Success W/L/T `0/0/40`.
+    - Heldout `scene_2,3,5`, 20 episodes each from seed `6910`: neutral,
+      Reward/Success W/L/T `0/0/60`.
+  - Interpretation: this is not a score-positive change on measured seeds,
+    but it removes a labeled bad start-relax action with no observed
+    regression over `180` paired episodes. Treat it as a low-cost hidden-set
+    safety guard, not as evidence that the hand gate is sufficient.
