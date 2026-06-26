@@ -8665,3 +8665,12 @@ Targeted start-rescue relax:
     problem-seed block where earlier broad relaxations caused regressions.
   - Fresh multi-scene (`scene_1,3,4,5`, 20 episodes each from seed `6870`):
     Reward/Success W/L/T `0/0/80`.
+- Heldout validation on new seeds (`scene_1..5`, 20 episodes each from seed
+  `6910`) confirmed the high-delta profile against the previous `0.02`
+  default: aggregate mean Reward delta `+0.002963`, Success delta `+0.001667`,
+  Reward W/L/T `4/0/96`, Success W/L/T `1/0/99`. Positive scenes were
+  `scene_2` (`+0.011161`, Reward W/L/T `3/0/17`) and `scene_3` (`+0.003655`,
+  Reward W/L/T `1/0/19`, Success W/L/T `1/0/19`); `scene_1`, `scene_4`, and
+  `scene_5` were neutral. Traces showed accepted actions still matched the
+  intended `STOP_MOVING -> MOVE_FORWARD` rerank rescue pattern, while much
+  larger risk-delta candidates around `0.35` remained blocked.
