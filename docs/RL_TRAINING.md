@@ -8396,3 +8396,44 @@ Scene-3 counterfactual PPO v7:
   proposal under the existing RiskVeto stack. Next attempt should use the same
   labels to train/evaluate a selected-action risk/reward head or a stronger
   candidate generator with broader OOD validation, not promote this checkpoint.
+
+Scene-3 counterfactual head probes:
+- Converted the focused `scene_3` counterfactual labels into small selected-
+  action risk-head adapter splits. Training used seeds
+  `6805,6804,6806,6793` (`59` non-neutral rows: `10` good, `49` bad);
+  validation held out seed `6790` (`8` rows: `6` good, `2` bad).
+  Neutral rows were excluded, forced actions were used as the selected action,
+  and bad rows were mapped to risk labels.
+- Fine-tuned a success-risk head from
+  `submission/models/ecml_risk_head_v4_mc6270_6280_s123_val4.pt` to
+  `/private/tmp/ecml_risk_head_scene3_cf_v1_s8200.pt`. Held-out validation got
+  worse: AUC moved from `0.333333` before fine-tune to `0.166667` after
+  fine-tune, AP from `0.266667` to `0.226190`.
+- Fine-tuned the reward-risk head analog from
+  `submission/models/ecml_reward_risk_head_v4_lowreward09_mc6270_6280_s123_val4.pt`
+  to `/private/tmp/ecml_reward_risk_head_scene3_cf_v1_s8201.pt`. Held-out
+  validation also stayed poor/worse: AUC `0.166667`, AP `0.226190`.
+- Decision: do not promote either head. The counterfactual adapter split is too
+  small and skewed for direct head fine-tuning. It is useful as a diagnostic
+  set, but not enough to replace the current packaged heads.
+
+Scene-3 counterfactual feature/rule probe:
+- Analyzed the `216` focused counterfactual rows for simple signals that
+  separate reward-improving from reward-negative interventions.
+- The strongest contrast was not action identity alone. It was slack and route
+  distance:
+  - `slack`: good mean/median `26/26`, bad mean/median `-88.35/-98`.
+  - `forced_target_distance`: good mean `20.5`, bad mean `139.18`.
+  - `baseline_target_distance`: good mean `19.83`, bad mean `130.58`.
+  - `distance`: good mean `20.67`, bad mean `131.42`.
+- A brute-force scan of simple conjunctive rules found conservative local
+  candidates such as `slack >= 20 and distance <= 40`, which accepted
+  `6` good, `0` bad, and `7` neutral rows on this focused dataset.
+  A narrower stop rule, `forced_action=STOP_MOVING and distance<=40/50 and
+  env_time<=150`, accepted `5` good, `0` bad, and `0` neutral rows.
+- Interpretation: there is a real geometric signal in the failures, but the
+  current evidence is highly scene/window-specific. Treat these rules as
+  diagnostics or as candidates for OOD validation, not as submission logic yet.
+  The next useful step is to validate the slack/distance signal on other
+  scenes and fresh failure seeds before encoding it in RiskVeto or using it as
+  a reward/auxiliary target.
