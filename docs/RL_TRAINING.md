@@ -8063,3 +8063,23 @@ Old v4b-core candidate recheck:
 - Decision: reject the old v4b-core checkpoint as a replacement proposal
   source. The current packaged rescue-v4b proposal remains stronger on this
   fresh direct check.
+
+Fast exact-event gate retry:
+- Reused the existing exact-event gate infrastructure for a quick learned
+  accepted-action selector. Training data came from the available
+  accepted-event counterfactual CSVs, including known positives and hard
+  negatives such as `scene_3 seed6455`.
+- A multiclass gate was too conservative: it fit the small training set but
+  accepted `0` validation positives.
+- A binary gate was better offline. At threshold `0.70`, validation accepted
+  `1` good, `0` neutral, `0` bad event. Exported checkpoint:
+  `/private/tmp/ecml_exact_event_gate_fast_binary_v1.pt`.
+- Online smoke against Sequence on `scene_1..4 6340..6344` was not safe:
+  reward `+0.014320`, Success `-0.016667`, reward W/L/T `4/1/15`, Success
+  W/L/T `0/1/19`. The regression was `scene_1 seed6341`, reward
+  `0.796748 -> 0.769744`, Success `-0.333333`.
+
+- Decision: reject the fast exact-event gate. It confirms that learned
+  event-level selectors can find reward gains, but the current small
+  counterfactual set is not sufficient for Success-safe online deployment.
+  Keep packaged rescue-v4b as the default.
