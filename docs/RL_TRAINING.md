@@ -8295,3 +8295,27 @@ v6 rejection trace diagnosis:
   this smoke block. The blocked v6 actions are neutral or reward-negative.
   Further gains require a better proposal policy/trajectory objective, not
   looser Reward-Risk thresholds for this candidate.
+
+Existing RL proposal re-screen after v6:
+- Screened three stored RL proposal checkpoints under the current RiskVeto
+  stack, directly against packaged rescue-v4b on `scene_1..4 6750..6751`:
+  `ecml_ppo_actionobs_prefixrelax_ft_v1plus2_s6600.pt`,
+  `ecml_ppo_actionobs_multiscene_v1.pt`, and
+  `ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt`.
+- All three were outcome-neutral versus packaged v4b on the 8-episode screen:
+  reward W/L/T `0/0/8`, Success W/L/T `0/0/8`.
+- Trace summaries:
+  - `v1plus2`: `101` candidate trace rows, `0` accepted. Rejections were mostly
+    `candidate_risk_regression=95`.
+  - `multiscene_v1`: `82` candidate trace rows, `0` accepted. Rejections were
+    mostly `candidate_risk_regression=73`.
+  - old AuxPPO-v4b-core: `0` candidate trace rows, so it did not create useful
+    proposal diversity on this block.
+- Reconstructed `101/101` v1plus2 trace rows and ran exact one-step
+  counterfactuals on the first `40` rows with RiskVeto continuation. The sample
+  was fully neutral: reward W/L/T `0/0/40`, Success W/L/T `0/0/40`.
+- Decision: do not switch to an older stored RL checkpoint. The old RL
+  candidates either match current behavior or propose actions that the current
+  risk heads reject without obvious missed counterfactual gains. The next
+  improvement must come from better trajectory-level training/data, not
+  recycling older proposal checkpoints.
