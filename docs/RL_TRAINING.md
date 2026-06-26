@@ -8176,3 +8176,23 @@ Second fresh default trace block:
   target is not broad guard relaxation; it is mining these accepted positive
   `STOP_MOVING -> MOVE_*` events plus known hard negatives into a learned
   event selector or rescue fine-tune.
+
+Accepted-event counterfactual labeling:
+- Fixed `tools/reconstruct_trace_diff_rows.py` so trace rows without a `scene`
+  field inherit the scene from trace filenames such as
+  `scene_3_seed6750_n20_candidate_trace.jsonl`. Without this, internal
+  Aux/Listwise accepts were reconstructed under the default `scene_5`.
+- Reconstructed accepted events from the two fresh traced default windows
+  `6730..6749` and `6750..6769`: `43/43` trace rows reconstructed, no missing
+  rows.
+- Exact one-step counterfactual labeling over those accepted events produced
+  reward W/L/T `1/0/42`, Success W/L/T `1/0/42`, with `2` forced actions not
+  applicable in replay.
+- The single positive one-step event was `scene_3 seed6763`, `env_time=146`,
+  agent `5`, `STOP_MOVING -> MOVE_RIGHT`, source `rerank`: reward
+  `0.500000 -> 0.687391`, Success `0.500000 -> 0.833333`.
+- Most accepted events were neutral under a one-step forced-action replay,
+  including many full-episode Reward wins. This suggests that a large part of
+  the v4b gain is closed-loop/multi-step behavior rather than a single isolated
+  action. The next training target should therefore emphasize short rescue
+  sequences or event-triggered policy continuation, not only one-step labels.

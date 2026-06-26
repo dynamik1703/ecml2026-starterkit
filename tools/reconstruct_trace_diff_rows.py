@@ -42,12 +42,23 @@ def scene_value(row: dict[str, Any], fallback: str | None) -> str:
     return value or "scene_5"
 
 
-def keep_row(row: dict[str, Any], args: argparse.Namespace) -> bool:
+def scene_from_path(path: Path) -> str | None:
+    scene = path.name.split("_seed", 1)[0]
+    if scene in {"scene_1", "scene_2", "scene_3", "scene_4", "scene_5"}:
+        return scene
+    return None
+
+
+def keep_row(
+    row: dict[str, Any],
+    args: argparse.Namespace,
+    scene_fallback: str | None,
+) -> bool:
     if args.accepted is not None and as_bool(row.get("accepted")) != args.accepted:
         return False
     if args.selector_source and row.get("selector_source", "") != args.selector_source:
         return False
-    if args.scene and scene_value(row, args.scene) != args.scene:
+    if args.scene and scene_value(row, scene_fallback) != args.scene:
         return False
     return True
 
@@ -56,15 +67,16 @@ def read_trace_rows(paths: list[Path], args: argparse.Namespace) -> list[dict[st
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, int, int, int, int]] = set()
     for path in paths:
+        scene_fallback = args.scene or scene_from_path(path)
         with path.open() as handle:
             for line in handle:
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                if not keep_row(row, args):
+                if not keep_row(row, args, scene_fallback):
                     continue
                 key = (
-                    scene_value(row, args.scene),
+                    scene_value(row, scene_fallback),
                     int_value(row, "seed"),
                     int_value(row, "env_time"),
                     int_value(row, "agent_id"),
@@ -72,6 +84,8 @@ def read_trace_rows(paths: list[Path], args: argparse.Namespace) -> list[dict[st
                 )
                 if key in seen:
                     continue
+                if not row.get("scene"):
+                    row["scene"] = scene_value(row, scene_fallback)
                 seen.add(key)
                 rows.append(row)
     rows.sort(
