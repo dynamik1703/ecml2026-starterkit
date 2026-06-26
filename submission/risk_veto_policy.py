@@ -310,6 +310,14 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_START_RELAX_MIN_REWARD_BASELINE_MINUS_CANDIDATE",
             float("-inf"),
         )
+        self.start_relax_active_fraction_guard_min = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_ACTIVE_FRACTION_GUARD_MIN",
+            float("inf"),
+        )
+        self.start_relax_active_fraction_min_reward_improvement = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_ACTIVE_FRACTION_MIN_REWARD_IMPROVEMENT",
+            float("-inf"),
+        )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
 
     @staticmethod
@@ -318,6 +326,19 @@ class RiskVetoPolicy:
             return float(os.environ.get(name, default))
         except Exception:
             return default
+
+    @staticmethod
+    def _observation_scalar(observation: Any, index: int) -> float | None:
+        try:
+            values = np.asarray(observation, dtype=np.float32).reshape(-1)
+            if index < 0 or index >= values.shape[0]:
+                return None
+            value = float(values[index])
+            if not np.isfinite(value):
+                return None
+            return value
+        except Exception:
+            return None
 
     @staticmethod
     def _env_transition_set(name: str) -> set[tuple[int, int]]:
@@ -728,6 +749,19 @@ class RiskVetoPolicy:
             < self.start_relax_min_reward_baseline_minus_candidate
         ):
             scores["start_relax_reject_reason"] = "insufficient_reward_improvement"
+            return False
+        active_fraction = self._observation_scalar(observation, 32)
+        if active_fraction is not None:
+            scores["start_relax_obs_active_fraction"] = float(active_fraction)
+        if (
+            active_fraction is not None
+            and active_fraction >= self.start_relax_active_fraction_guard_min
+            and reward_baseline_minus_candidate
+            < self.start_relax_active_fraction_min_reward_improvement
+        ):
+            scores["start_relax_reject_reason"] = (
+                "active_fraction_insufficient_reward_improvement"
+            )
             return False
 
         scores["selector_source"] = "start_relax"

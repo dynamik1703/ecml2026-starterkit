@@ -8689,3 +8689,17 @@ Targeted start-rescue relax:
   caused a regression by blocking an already validated rescue, so the promoted
   profile only widens the risk-delta/reward-improvement thresholds and keeps
   the reward-risk ceiling at `0.66`.
+- Start-relax active-fraction guard probe:
+  - Added optional, default-off knobs
+    `ECML_RISK_VETO_START_RELAX_ACTIVE_FRACTION_GUARD_MIN` and
+    `ECML_RISK_VETO_START_RELAX_ACTIVE_FRACTION_MIN_REWARD_IMPROVEMENT`.
+    They allow future A/B tests to require a higher reward-risk improvement
+    only when the observation's active-agent fraction is high.
+  - A direct RiskVeto-vs-RiskVeto A/B with
+    `active_fraction >= 0.999` and minimum reward-risk improvement `0.25`
+    rejected this idea on `scene_2 6830..6869`: mean Reward delta
+    `-0.000298`, Success delta `0`, Reward W/L/T `0/1/39`, Success W/L/T
+    `0/0/40`.
+  - The loss was `seed6854`, where the guard blocked an already validated
+    small start-relax gain (`+0.011931` Reward, no Success change). Decision:
+    do not enable this guard in Docker; use it only as an experiment hook.
