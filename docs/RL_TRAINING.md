@@ -8319,3 +8319,80 @@ Existing RL proposal re-screen after v6:
   risk heads reject without obvious missed counterfactual gains. The next
   improvement must come from better trajectory-level training/data, not
   recycling older proposal checkpoints.
+
+Trajectory/prefix mining after stored-RL screen:
+- Mined exact diff-prefix outcomes for the packaged rescue-v4b default versus
+  `SequenceSuccessPolicy` on the 15 fresh Reward-win seeds from `6730..6789`.
+  Baseline was `SequenceSuccessPolicy`, candidate was the Docker-equivalent
+  `RiskVetoPolicy` with packaged rescue-v4b.
+- Scene-level result:
+  - `scene_1` positives `6753,6754,6759,6784`: prefix-1 reward W/L/T
+    `4/0/0`, mean Reward delta `+0.031164`; best prefixes reach
+    `+0.049633`.
+  - `scene_2` positives `6762,6768,6782,6784,6787`: prefix-1 reward W/L/T
+    `3/0/2`, prefix-2 `5/0/0`, prefix-3 `5/0/0`; mean Reward delta rises
+    from `+0.061157` to `+0.091649`.
+  - `scene_3` positives `6747,6752,6760,6763,6765`: prefix-1 already explains
+    all wins, reward W/L/T `5/0/0`, mean Reward delta `+0.141166`.
+  - `scene_4 seed6786`: prefix-1 explains the win, Reward delta `+0.065411`.
+- Interpretation: most current v4b wins are actually short one-event wins, but
+  `scene_1 seed6754`, `scene_2 seed6782`, and `scene_2 seed6787` need a
+  two- or three-event prefix for the full Reward gain. This confirms that
+  sequence-level labels exist, but the positive set remains small.
+- Converted best positive prefixes into
+  `/private/tmp/ecml_v4b_default_prefix_positive_events_v2.csv`: `18`
+  positive rescue events across `14` seeds. Transitions were mostly
+  `STOP_MOVING -> MOVE_LEFT` (`9`) and `STOP_MOVING -> MOVE_RIGHT` (`8`),
+  plus one `MOVE_FORWARD -> MOVE_LEFT`.
+
+Fresh failure mining and counterfactual labels:
+- Mined the current packaged rescue-v4b default on a fresh untouched block,
+  `scene_1..4 6790..6809`, selecting hard failure/low-reward seeds.
+- Mean default performance by scene on this block:
+  - `scene_1`: Reward `0.845121`, Success `0.883333`.
+  - `scene_2`: Reward `0.905894`, Success `0.908333`.
+  - `scene_3`: Reward `0.800127`, Success `0.866667`.
+  - `scene_4`: Reward `0.860245`, Success `0.916667`.
+- The richest new failure source was `scene_3`, with `13/20` candidate failure
+  seeds. Selected top hard seeds were `6805,6804,6806,6793,6790`.
+- Ran focused one-step counterfactual mining on those five `scene_3` seeds,
+  using the current RiskVeto policy as the baseline and sampling failed-agent
+  deadline/stationary windows. Output:
+  `/private/tmp/ecml_counterfactual_scene3_failures_6790_6809_top5.csv`.
+- Counterfactual label summary: `216` rows, Reward W/L/T `16/51/149`,
+  Success W/L/T `0/2/214`, `0` forced-not-applied.
+  Good labels were mostly reward-only:
+  `MOVE_FORWARD -> STOP_MOVING` (`5`),
+  `MOVE_FORWARD -> MOVE_LEFT` (`3`),
+  `MOVE_RIGHT -> MOVE_FORWARD` (`3`), plus a few Stop/Forward variants.
+  Bad labels were dominated by `MOVE_FORWARD -> STOP_MOVING` (`39`) and
+  `STOP_MOVING -> MOVE_FORWARD` (`7`).
+- Converted this into
+  `/private/tmp/ecml_scene3_failure_counterfactual_aux_events_v1.csv`: `67`
+  Aux-BC events, `16` positive rescue and `51` negative baseline events.
+- Interpretation: this is a better training set than the previous positive-only
+  traces because it contains both useful reward-improving interventions and
+  local counterexamples, including two Success-negative rows. It still did not
+  find Success-positive rescues; it is a Reward-improvement/safety dataset.
+
+Scene-3 counterfactual PPO v7:
+- Trained `/private/tmp/ecml_ppo_scene3_counterfactual_v7_s8100.pt` from
+  packaged rescue-v4b using the new Scene-3 counterfactual Aux-BC events.
+  The run used Action-Conflict observations, current RiskVeto as CE teacher,
+  KL anchoring, terminal success/failure shaping, action-conflict penalties,
+  positive rescue CE, and negative-baseline/forbid losses.
+- Aux replay was usable but not perfect: `36` rescue hits, `31` avoidance hits,
+  `6` forbidden hits, `31` rescue-invalid rows, `25` forbidden-invalid rows,
+  `4` baseline mismatches, and `1,361` anchors.
+- Training stayed relatively close to v4b (`anchor_kl=0.00589` after update 4)
+  but rollout Success stayed low on the intentionally hard training seeds
+  (`0.694444` across updates).
+- Direct RiskVeto proposal evaluation against packaged v4b on
+  `scene_3 6790..6809` was fully neutral: reward W/L/T `0/0/20`, Success W/L/T
+  `0/0/20`, mean deltas `0.000000 / 0.000000`.
+  Trace had `98` rows and `8` accepted overrides, but no outcome change.
+- Decision: do not promote v7. The new failure/counterfactual dataset is useful
+  and should be kept, but this first PPO use did not create a better live
+  proposal under the existing RiskVeto stack. Next attempt should use the same
+  labels to train/evaluate a selected-action risk/reward head or a stronger
+  candidate generator with broader OOD validation, not promote this checkpoint.
