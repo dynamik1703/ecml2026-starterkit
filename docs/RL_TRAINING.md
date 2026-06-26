@@ -8049,3 +8049,17 @@ Fast recall expansion check after v5 rejection:
 - Interpretation: opening raw Top-N StopLeft is safe on this first fresh
   window, but it adds no recall there. It is not worth promoting without a
   positive window. Keep the Docker default at `4:3`.
+
+Old v4b-core candidate recheck:
+- Tested the older historically strong
+  `submission/models/ecml_aux_bc_conflict_neg_currentinit_ppo_v4b.pt` as the
+  RiskVeto proposal checkpoint against packaged rescue-v4b on the same fresh
+  `scene_1..4 6690..6709` window.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| old v4b-core vs rescue-v4b | `scene_1..4 6690..6709` | `-0.003599` | `0.000000` | `0/3/77` | `0/0/80` |
+
+- Decision: reject the old v4b-core checkpoint as a replacement proposal
+  source. The current packaged rescue-v4b proposal remains stronger on this
+  fresh direct check.
