@@ -8083,3 +8083,21 @@ Fast exact-event gate retry:
   event-level selectors can find reward gains, but the current small
   counterfactual set is not sufficient for Success-safe online deployment.
   Keep packaged rescue-v4b as the default.
+
+Final default smoke after gate rejection:
+- Re-ran the Docker/default-equivalent RiskVeto stack against Sequence after
+  the rejected exact-event gate experiments. Configuration matched the current
+  Dockerfile default: packaged rescue-v4b candidate, v4 risk/reward-risk/value
+  heads, prefix relaxation, distance guards, unconflicted StopLeft guard,
+  same-edge StopLeft guard, and raw Top-N limited to `STOP_MOVING ->
+  MOVE_RIGHT`.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged rescue-v4b default | `scene_1..4 6340..6344` | `+0.015670` | `0.000000` | `4/0/16` | `0/0/20` |
+
+- Per-scene gains came from `scene_2` and `scene_4`; `scene_1` and `scene_3`
+  were neutral. No Success regression occurred.
+- Decision: the packaged rescue-v4b RiskVeto policy remains the submission
+  baseline. Failed learned selectors and PPO variants should stay out of the
+  Docker path until they pass fresh direct A/B windows with no Success losses.
