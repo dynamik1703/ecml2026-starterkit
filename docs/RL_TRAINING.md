@@ -8026,8 +8026,26 @@ PPO rescue v5 smoke rejection:
   neutralized the `6692` Success loss, but did not make v5 useful. On the full
   `6690..6709` window, v5+ValueGuard scored reward `-0.005741`, Success
   `0.000000`, reward W/L/T `0/5/75`, Success W/L/T `0/0/80`.
+- A finer `ECML_RISK_VETO_MIN_VALUE_DELTA=-0.14` also neutralized the Success
+  loss but remained reward-negative on the same window: reward `-0.003999`,
+  Success `0.000000`, reward W/L/T `0/4/76`, Success W/L/T `0/0/80`.
 
 - Decision: reject v5 and keep packaged v4b. The useful learning is not "run
   more PPO updates"; the next candidate needs checkpoint selection or a learned
   action-value/return selector trained on hard negatives like `6692`, because
   risk-head improvement alone can accept lower-return detours.
+
+Fast recall expansion check after v5 rejection:
+- Tested a safer non-PPO recall expansion by keeping packaged v4b but allowing
+  raw Top-N to also propose `STOP_MOVING -> MOVE_LEFT`:
+  `ECML_RISK_VETO_TOP_N_ALLOWED_TRANSITIONS=4:3,4:1`. Existing risk,
+  reward-risk, distance, unconflicted-StopLeft, and same-edge ETA guards
+  remained active.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v4b + raw Top-N StopLeft | `scene_1..4 6690..6709` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+
+- Interpretation: opening raw Top-N StopLeft is safe on this first fresh
+  window, but it adds no recall there. It is not worth promoting without a
+  positive window. Keep the Docker default at `4:3`.
