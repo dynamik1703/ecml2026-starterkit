@@ -8123,3 +8123,30 @@ Fresh default robustness check:
   vetoes are risky because they can suppress real wins; the next improvement
   needs a better event-level return selector trained on more counterfactual
   outcomes, not a simple value threshold.
+
+Trace-recall profile on the fresh default window:
+- Re-ran `scene_1..4 6730..6749` with candidate tracing enabled after fixing
+  `tools/evaluate_policy_ab_manifest.py` to set `ECML_RISK_VETO_TRACE_PATH` as
+  well as `ECML_SEQUENCE_TRACE_PATH`.
+- The traced run reproduced the same score: reward `+0.004150`, Success
+  `0.000000`, reward W/L/T `1/0/79`, Success W/L/T `0/0/80`.
+- Trace rows: `505` proposed deviations, `22` accepted, `483` rejected.
+  Accepted sources were `aux_listwise=9`, `extra_aux_listwise=5`,
+  `listwise=4`, `rerank=4`.
+- Rejected reasons were dominated by learned heads: `candidate_risk_regression`
+  `193`, `candidate_risk_too_high` `138`, `reward_risk_too_high` `124`,
+  `reward_risk_regression` `23`. Distance/StopLeft rules were minor:
+  `unconflicted_stop_left_distance_delta_too_high` `4`,
+  `candidate_distance_delta_too_high` `1`.
+- Reconstructed all `483` rejected trace rows into action-diff features with no
+  missing rows.
+- Built a diversified Top-80 rejected-event set prioritizing `STOP_MOVING ->
+  MOVE_*` rescues and high-scoring `MOVE_FORWARD -> TURN` alternatives across
+  scenes. Exact one-step counterfactual evaluation of those 80 events was
+  fully neutral: reward W/L/T `0/0/80`, Success W/L/T `0/0/80`, with `4`
+  forced actions not applicable in replay.
+- Interpretation: simply relaxing the current RiskVeto rejections is not a
+  high-value path. The rejected actions mostly have no episode-level effect on
+  this fresh window. A stronger solution needs either better multi-step
+  proposal policies or a selector trained on sparse genuinely positive events,
+  not broader acceptance of the current rejected action pool.
