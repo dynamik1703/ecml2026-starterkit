@@ -8739,3 +8739,36 @@ Targeted start-rescue relax:
     was neutral and the manifest confirmed the RiskVeto policy,
     ActionConflict observation builder, Docker checkpoints, and promoted
     active-distance guard env.
+- Last-hour failure mining from current Docker policy:
+  - Ran a single-policy current evaluation with Docker env on fresh
+    `7200..7239` seeds across all scenes. Weakest scenes were `scene_1`
+    (mean Reward `0.832360`, mean Success `0.825000`) and `scene_3`
+    (mean Reward `0.838420`, mean Success `0.912500`). `scene_2`,
+    `scene_4`, and `scene_5` were stronger on this slice.
+  - Focused first on `scene_1` failures. Rejected `LEFT` candidates in
+    `seed7238` were unsafe: direct counterfactuals were Reward W/L/T
+    `1/2/2`, Success W/L/T `0/1/4`. Rejected `FORWARD -> STOP` candidates
+    in `seed7218/7233` were also unsafe: Reward W/L/T `0/1/1`, Success W/L/T
+    `0/1/1`. Decision: do not broaden left/stop rescues from this evidence.
+  - Reverting accepted overrides exposed one useful failure class:
+    `scene_1 seed7218 step298 agent5 STOP_MOVING -> MOVE_FORWARD` via
+    `start_relax` was harmful. Forcing the baseline `STOP_MOVING` improved
+    Reward by `+0.040552`, Success by `+0.166667`, and reduced failed agents
+    by `1`.
+  - Added and promoted a narrow opposing-route start-relax guard. It blocks
+    `start_relax` only when the first train on the route is opposing and very
+    close (`route distance <= 0.05`), active fraction is in `[0.60, 0.75]`,
+    risk delta is at least `0.30`, and reward-risk improvement is at most
+    `0.25`.
+  - A/B against the previous Docker default:
+    - Mining block `scene_1 7200..7239`: mean Reward delta `+0.001014`,
+      mean Success delta `+0.004167`, Reward W/L/T `1/0/39`, Success W/L/T
+      `1/0/39`. The guard triggered exactly once, on `seed7218 step298`.
+    - Fresh `scene_1 7240..7279`: neutral, Reward/Success W/L/T `0/0/40`;
+      the guard did not trigger.
+    - Heldout `scene_1,4`, 20 episodes each from seed `6910`: neutral,
+      Reward/Success W/L/T `0/0/40`; the guard did not trigger and did not
+      remove the previous `scene_4` start-relax gain.
+  - Interpretation: this is still a small, targeted safety/rescue gain, not a
+    broad performance jump. It is worth promoting because it fixes a causal
+    Success failure with no observed regressions on fresh/heldout checks.

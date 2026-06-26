@@ -330,6 +330,26 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_START_RELAX_ACTIVE_DISTANCE_MIN_REWARD_IMPROVEMENT",
             float("-inf"),
         )
+        self.start_relax_opposing_route_max_distance = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_OPPOSING_ROUTE_MAX_DISTANCE",
+            float("-inf"),
+        )
+        self.start_relax_opposing_route_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_OPPOSING_ROUTE_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.start_relax_opposing_route_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_OPPOSING_ROUTE_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.start_relax_opposing_route_min_candidate_minus_baseline = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_OPPOSING_ROUTE_MIN_CANDIDATE_MINUS_BASELINE",
+            float("inf"),
+        )
+        self.start_relax_opposing_route_max_reward_improvement = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_OPPOSING_ROUTE_MAX_REWARD_IMPROVEMENT",
+            float("-inf"),
+        )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
 
     @staticmethod
@@ -896,6 +916,48 @@ class RiskVetoPolicy:
         scores["reject_reason"] = "start_relax_active_distance_reward_guard"
         return True
 
+    def _start_relax_opposing_route_veto(
+        self,
+        observation: Any,
+        scores: dict[str, Any],
+    ) -> bool:
+        if scores.get("selector_source") != "start_relax":
+            return False
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        active_fraction = self._observation_scalar(observation, 32)
+        if (
+            route_distance is None
+            or route_opposing is None
+            or active_fraction is None
+        ):
+            return False
+        scores["start_relax_route_occupancy_distance"] = float(route_distance)
+        scores["start_relax_route_occupancy_opposing"] = float(route_opposing)
+        risk_delta = float(
+            scores.get("risk_head_candidate_minus_baseline", float("-inf"))
+        )
+        reward_improvement = float(
+            scores.get(
+                "reward_risk_head_baseline_minus_candidate",
+                float("inf"),
+            )
+        )
+        if route_opposing < 0.5:
+            return False
+        if route_distance > self.start_relax_opposing_route_max_distance:
+            return False
+        if active_fraction < self.start_relax_opposing_route_min_active_fraction:
+            return False
+        if active_fraction > self.start_relax_opposing_route_max_active_fraction:
+            return False
+        if risk_delta < self.start_relax_opposing_route_min_candidate_minus_baseline:
+            return False
+        if reward_improvement > self.start_relax_opposing_route_max_reward_improvement:
+            return False
+        scores["reject_reason"] = "start_relax_opposing_route_reward_guard"
+        return True
+
     @staticmethod
     def _prefix_edges(
         prefix: list[dict[str, Any]],
@@ -1286,6 +1348,11 @@ class RiskVetoPolicy:
                     obs_builder,
                     int(handle),
                     candidate_action,
+                    scores,
+                ):
+                    accepted = False
+                if accepted and self._start_relax_opposing_route_veto(
+                    observations_by_handle.get(handle),
                     scores,
                 ):
                     accepted = False
