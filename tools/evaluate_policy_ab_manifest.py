@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections import Counter
@@ -21,13 +22,13 @@ os.environ.setdefault("XDG_CACHE_HOME", "/private/tmp/ecml_xdg_cache")
 
 from tools.evaluate_sampled import (
     DEFAULT_BASE_STATE,
-    DEFAULT_OBS_BUILDER,
     DEFAULT_REWARDS,
     repo_root,
 )
 
 
-DEFAULT_POLICY = "submission.sequence_success_policy.MyPolicy"
+DEFAULT_POLICY = "submission.risk_veto_policy.MyPolicy"
+DEFAULT_OBS_BUILDER = "submission.my_observation_builder.MyActionConflictObservationBuilder"
 ENV_PATH_HINTS = ("CHECKPOINT", "MODEL", "PATH", "PKL")
 
 
@@ -48,6 +49,29 @@ def env_items(items: list[str] | None) -> dict[str, str]:
     for item in items or []:
         key, value = parse_env_item(item)
         result[key] = value
+    return result
+
+
+def docker_env_items(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return result
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or not line.startswith("ENV "):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        for item in parts[1:]:
+            if "=" not in item:
+                continue
+            key, value = item.split("=", 1)
+            if key:
+                result[key] = value
     return result
 
 
@@ -488,6 +512,20 @@ def parse_args() -> argparse.Namespace:
         help="Environment override KEY=VALUE applied to both subprocesses.",
     )
     parser.add_argument(
+        "--use-docker-env",
+        action="store_true",
+        help=(
+            "Preload ENV values from the Dockerfile as shared env defaults; "
+            "explicit --shared-env values override them."
+        ),
+    )
+    parser.add_argument(
+        "--dockerfile",
+        type=Path,
+        default=repo_root() / "Dockerfile",
+        help="Dockerfile used by --use-docker-env.",
+    )
+    parser.add_argument(
         "--baseline-env",
         action="append",
         default=[],
@@ -532,7 +570,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    shared_env = env_items(args.shared_env)
+    shared_env = docker_env_items(args.dockerfile) if args.use_docker_env else {}
+    shared_env.update(env_items(args.shared_env))
     baseline_env_overrides = env_items(args.baseline_env)
     candidate_env_overrides = env_items(args.candidate_env)
 
@@ -568,6 +607,11 @@ def main() -> int:
             "line_length": args.line_length,
             "scenes": args.scenes,
             "python": args.python,
+            "use_docker_env": bool(args.use_docker_env),
+            "dockerfile": args.dockerfile,
+            "shared_env": shared_env,
+            "baseline_env": baseline_env_overrides,
+            "candidate_env": candidate_env_overrides,
         },
         "file_hashes": collect_file_hashes(
             args,

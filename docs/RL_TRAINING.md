@@ -8727,3 +8727,15 @@ Targeted start-rescue relax:
     but it removes a labeled bad start-relax action with no observed
     regression over `180` paired episodes. Treat it as a low-cost hidden-set
     safety guard, not as evidence that the hand gate is sufficient.
+- A/B tooling hardening:
+  - Updated `tools/evaluate_policy_ab_manifest.py` defaults to the current
+    Docker submission path (`submission.risk_veto_policy.MyPolicy` with
+    `MyActionConflictObservationBuilder`) instead of the older sequence policy.
+  - Added `--use-docker-env`, which preloads `ENV` values from the Dockerfile
+    as shared baseline/candidate env defaults. Explicit `--shared-env` values
+    still override Docker values. This reduces the risk of accidentally
+    running a neutral-looking A/B against the wrong policy stack.
+  - Smoke with `--use-docker-env --episodes 1 --seed 6910 --scenes scene_1`
+    was neutral and the manifest confirmed the RiskVeto policy,
+    ActionConflict observation builder, Docker checkpoints, and promoted
+    active-distance guard env.
