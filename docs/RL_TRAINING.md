@@ -8196,3 +8196,15 @@ Accepted-event counterfactual labeling:
   the v4b gain is closed-loop/multi-step behavior rather than a single isolated
   action. The next training target should therefore emphasize short rescue
   sequences or event-triggered policy continuation, not only one-step labels.
+- Extended `tools/evaluate_action_diff_counterfactuals.py` with an optional
+  continuation policy after the forced event. Testing the 16 accepted events
+  with real action changes under RiskVeto continuation also produced only one
+  positive event: reward W/L/T `1/0/15`, Success W/L/T `1/0/15`. The positive
+  event was again `scene_3 seed6763`, `env_time=146`, agent `5`,
+  `STOP_MOVING -> MOVE_RIGHT`.
+- Interpretation: single-event gating alone is unlikely to deliver a large
+  improvement. The observed v4b wins are sparse and often not recoverable from
+  isolated event interventions. More promising short-term work is to gather
+  more full-episode positive traces and train/fine-tune the rescue proposal on
+  the action sequences around those wins, while keeping the current RiskVeto
+  default as the safe submission fallback.

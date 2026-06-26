@@ -200,10 +200,16 @@ def run_episode(
     env, _obs_builder = make_env(args)
     observations, _ = env.reset(random_seed=seed)
     policy = instantiate_policy(args.baseline_policy, args.baseline_checkpoint)
+    continuation_policy = (
+        instantiate_policy(args.continuation_policy, args.continuation_checkpoint)
+        if forced_event is not None and args.continuation_policy
+        else None
+    )
     reward_values: list[float] = []
     positions: dict[int, list[Any]] = defaultdict(list)
     actions_by_agent: dict[int, list[int]] = defaultdict(list)
     forced_applied = False
+    continuation_active = False
     event_scores: dict[str, float] = {}
 
     force_step = None
@@ -217,7 +223,17 @@ def run_episode(
     while int(env._elapsed_steps) < env._max_episode_steps:
         handles = list(env.get_agent_handles())
         obs_list = observation_list(observations, handles)
-        actions = policy_actions(policy, handles, obs_list)
+        baseline_actions = policy_actions(policy, handles, obs_list)
+        continuation_actions = (
+            policy_actions(continuation_policy, handles, obs_list)
+            if continuation_policy is not None
+            else {}
+        )
+        actions = (
+            dict(continuation_actions)
+            if continuation_active and continuation_actions
+            else dict(baseline_actions)
+        )
         if (
             force_step is not None
             and int(env._elapsed_steps) == force_step
@@ -228,13 +244,14 @@ def run_episode(
                 event_scores = action_head_scores(
                     args._score_models,
                     observation,
-                    int(actions[force_handle]),
+                    int(baseline_actions[force_handle]),
                     int(force_action),
                 )
             except Exception:
                 event_scores = {"event_score_error": 1.0}
             actions[force_handle] = force_action
             forced_applied = True
+            continuation_active = continuation_policy is not None
 
         observations, rewards_by_agent, dones, _ = env.step(actions)
         for handle, action in actions.items():
@@ -247,6 +264,7 @@ def run_episode(
 
     result = final_result(args, seed, env, reward_values, positions, actions_by_agent)
     result["forced_applied"] = forced_applied
+    result["continuation_active"] = continuation_active
     result["event_scores"] = event_scores
     return result
 
@@ -279,6 +297,7 @@ def annotate(
         "baseline_failed_agent_ids": baseline["failed_agent_ids"],
         "forced_failed_agent_ids": forced["failed_agent_ids"],
         "forced_applied": forced["forced_applied"],
+        "continuation_active": forced.get("continuation_active", False),
         "pairwise_label": float(
             success_delta > success_epsilon
             or (abs(success_delta) <= success_epsilon and reward_delta > 1e-9)
@@ -331,6 +350,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--baseline-policy", default="submission.sequence_success_policy.MyPolicy")
     parser.add_argument("--baseline-checkpoint", type=Path)
+    parser.add_argument(
+        "--continuation-policy",
+        default="",
+        help=(
+            "Optional policy to use after the forced event. When omitted, the "
+            "baseline policy continues after the forced one-step action."
+        ),
+    )
+    parser.add_argument("--continuation-checkpoint", type=Path)
     parser.add_argument("--obs-builder", default=DEFAULT_OBS_BUILDER)
     parser.add_argument("--rewards", default=DEFAULT_REWARDS)
     parser.add_argument("--num-agents", type=int, default=6)
