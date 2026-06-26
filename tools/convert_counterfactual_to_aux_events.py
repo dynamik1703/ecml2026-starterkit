@@ -140,7 +140,7 @@ def event_rows(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dic
         seen.add(key)
         output.append(
             {
-                "scene": row.get("scene", ""),
+                "scene": str(row.get("scene", "")).strip() or args.scene or "",
                 "seed": seed,
                 "env_time": env_time,
                 "agent_id": agent_id,
@@ -186,6 +186,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("csv", nargs="+", type=Path)
     parser.add_argument("--output-csv", required=True, type=Path)
     parser.add_argument("--output-json", type=Path)
+    parser.add_argument(
+        "--scene",
+        choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
+        help="Scene label to use for input CSVs created before scene was emitted.",
+    )
     parser.add_argument("--reward-epsilon", type=float, default=1e-6)
     parser.add_argument("--success-weight", type=float, default=2.0)
     parser.add_argument("--failed-weight", type=float, default=0.75)

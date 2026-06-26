@@ -8437,3 +8437,81 @@ Scene-3 counterfactual feature/rule probe:
   The next useful step is to validate the slack/distance signal on other
   scenes and fresh failure seeds before encoding it in RiskVeto or using it as
   a reward/auxiliary target.
+
+Scene-2 success-rescue counterfactual probe:
+- Ran small OOD counterfactual screens on hard seeds from the fresh
+  `6790..6809` failure block:
+  - `scene_1` seeds `6796,6795,6792`: `36` rows, Reward W/L/T `0/12/24`,
+    Success W/L/T `0/0/36`.
+  - `scene_2` seeds `6801,6797,6803`: `36` rows, Reward W/L/T `12/6/18`,
+    Success W/L/T `11/0/25`.
+  - `scene_4` seeds `6806,6791,6801`: `36` rows, Reward W/L/T `1/31/4`,
+    Success W/L/T `0/0/36`.
+- The key finding is that `scene_2` contains dense Success-rescue signal, while
+  the same action families are often harmful in other scenes. This argues
+  against a hard global Stop rule and for a learned selector/proposal policy
+  with scene- and state-sensitive features.
+- A simple rule screen over the first four-scene dataset found no-bad
+  candidates such as `STOP_MOVING and slack>=80 and env_time<=80`
+  (`10` good, `0` neutral, `0` bad) and
+  `slack>=20 and forced_target_distance<=40` (`6` good, `8` neutral, `0` bad).
+  These are diagnostic only; they are not robust enough to promote directly.
+- Validated on a fresh `scene_2 6810..6829` failure block. Selected seeds were
+  `6813,6816,6820,6823,6826`; counterfactuals produced `80` rows with Reward
+  W/L/T `1/44/35`, Success W/L/T `1/0/79`. The only fresh Success win was
+  `seed6823 step259 agent3 MOVE_RIGHT -> MOVE_FORWARD`
+  (`+0.071592` Reward, `+0.166667` Success), not a Stop action.
+- Combined `scene_2` counterfactual rows from both blocks:
+  `116` rows, `13` good, `53` neutral, `50` bad. Feature contrast still
+  favored high slack and early timing: `obs_time_slack` good mean `0.701`
+  vs bad `0.351`, `env_time` good mean `81.6` vs bad `222.2`, and `slack`
+  good mean `85.7` vs bad `19.6`.
+- Converted the combined `scene_2` rows to
+  `/private/tmp/ecml_scene2_success_counterfactual_aux_events_v2.csv`:
+  `63` Aux events, `13` positive rescue and `50` negative baseline.
+
+Scene-2 v8/v8b/v8c proposal attempts:
+- Trained `/private/tmp/ecml_ppo_scene2_success_cf_v8_s8300.pt` from packaged
+  rescue-v4b with the new `scene_2` Aux-BC dataset, stronger success-rescue
+  weights, negative-baseline/forbid losses, RiskVeto teacher CE, and weaker
+  KL anchoring than v7. Training became more exploratory (`anchor_kl` peaked
+  near `0.084`; one update dropped rollout Success to `0.667`), but direct
+  RiskVeto A/B on the eight rescue/failure seeds was fully neutral:
+  reward W/L/T `0/0/8`, Success W/L/T `0/0/8`.
+- Trace on `scene_2 seed6803` showed the main blocker: v8 did not propose the
+  early positive Stop actions at all (`early candidate stop=0`). The problem
+  was candidate recall, not the gate, for that motif.
+- Tried a targeted Rescue-BC proposal checkpoint,
+  `/private/tmp/ecml_rescue_bc_scene2_success_v8b_s8310.pt`, with stronger
+  event weights and fewer anchors. It was also fully neutral on the same
+  eight-seed screen.
+- Diagnosis exposed a data/replay issue: the counterfactual CSVs did not carry
+  a `scene` column into the Aux event CSV, and the v8/v8b Aux collectors were
+  not given `--scene scene_2`. They replayed the events in the default scene,
+  causing `45` rescue-invalid rows and only action `MOVE_FORWARD` to survive
+  as valid training targets.
+- Hardened the tooling:
+  - `tools/counterfactual_decision_eval.py` now emits `scene` on every
+    counterfactual row.
+  - `tools/convert_counterfactual_to_aux_events.py` now supports `--scene` as
+    a fallback for old CSVs and writes the resolved scene into Aux events.
+  - Regenerated
+    `/private/tmp/ecml_scene2_success_counterfactual_aux_events_v2_scene.csv`.
+- Re-trained corrected targeted Rescue-BC
+  `/private/tmp/ecml_rescue_bc_scene2_success_v8c_s8320.pt` with
+  `--scene scene_2`. Event replay was now clean: `63/63` rescue hits,
+  `0` invalid, `0` misses, `0` baseline mismatches; target action counts were
+  `{MOVE_LEFT: 5, MOVE_FORWARD: 40, MOVE_RIGHT: 7, STOP_MOVING: 11}`.
+- v8c did affect behavior, but negatively. RiskVeto A/B on the eight
+  rescue/failure seeds was reward W/L/T `0/1/7`, Success W/L/T `0/0/8`,
+  mean Reward delta `-0.016747`. The sole regression was `scene_2 seed6803`
+  (`-0.133976` Reward, no Success change).
+- Trace of the v8c regression showed exactly one accepted override:
+  `seed6803 step118 agent5 STOP_MOVING -> MOVE_LEFT`. It had high same-edge
+  prefix conflicts (`29`) and was accepted because risk/reward-risk improved;
+  it was not one of the desired early Stop-rescue actions.
+- Decision: do not promote v8, v8b, or v8c. The corrected scene replay is a
+  real process improvement, but the current learned proposal is not yet safe.
+  The next high-leverage step is to train/evaluate a selector or proposal loss
+  that raises recall on the actual positive event states while adding a guard
+  against the newly observed bad same-edge Stop-start accept.

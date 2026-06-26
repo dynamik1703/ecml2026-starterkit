@@ -345,6 +345,7 @@ def decision_row(
             - baseline_prefix_features[f"baseline_{suffix}"]
         )
     return {
+        "scene": args.scene or "scene_5",
         "seed": seed,
         "decision_index": decision_index,
         "env_time": int(env._elapsed_steps),
