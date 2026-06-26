@@ -8515,3 +8515,26 @@ Scene-2 v8/v8b/v8c proposal attempts:
   The next high-leverage step is to train/evaluate a selector or proposal loss
   that raises recall on the actual positive event states while adding a guard
   against the newly observed bad same-edge Stop-start accept.
+
+Scene-2 positive-only v8d and Top-N transition probe:
+- Trained `/private/tmp/ecml_rescue_bc_scene2_positive_v8d_s8330.pt` from
+  packaged rescue-v4b using only the `13` positive `scene_2` rescue events
+  plus sparse low-weight anchors. Correct scene replay was clean:
+  `13/13` rescue hits, `0` invalid, `0` misses, `0` mismatches, with target
+  action counts `{MOVE_FORWARD: 1, MOVE_RIGHT: 1, STOP_MOVING: 11}`.
+- v8d still reproduced the same bad live outcome as v8c under the current
+  RiskVeto settings: on the eight rescue/failure seeds, reward W/L/T `0/1/7`,
+  Success W/L/T `0/0/8`, mean Reward delta `-0.016747`. The regression was
+  again `scene_2 seed6803` (`-0.133976` Reward, no Success change).
+- Tested a wider candidate recall setting with
+  `ECML_RISK_VETO_TOP_N_CANDIDATE_ACTIONS=5` and
+  `ECML_RISK_VETO_TOP_N_ALLOWED_TRANSITIONS=4:3,1:4,2:4,3:4`, plus a tighter
+  same-edge Stop-Left guard (`STOP_LEFT_SAME_EDGE_MAX_ETA_GAP=20`). This was
+  not usable: the modified env changed the v4b baseline itself on `seed6803`
+  to the lower reward (`0.650054` instead of `0.784030`) and the v8d candidate
+  was exactly neutral relative to that degraded baseline.
+- Interpretation: globally opening raw Top-N Stop transitions is too blunt.
+  The actual path forward is not "let more Stop actions through everywhere".
+  We need a state-sensitive selector/gate for the specific high-slack early
+  rescue pattern, or a proposal architecture that can score event-context
+  actions without perturbing the robust default action set.
