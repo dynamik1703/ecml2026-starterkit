@@ -8279,3 +8279,19 @@ Conservative PPO rescue v6 smoke:
   anchored/teacher-dominated to create new accepted actions under RiskVeto.
   The next RL change should increase useful proposal diversity while keeping
   the current v4b default as the safety baseline.
+
+v6 rejection trace diagnosis:
+- Re-ran a small traced v6-vs-v4b smoke on `scene_1..4 6750..6751`.
+  It was again fully neutral: reward W/L/T `0/0/8`, Success W/L/T `0/0/8`,
+  with `45` candidate trace rows and `0` accepted overrides.
+- Rejection reasons were dominated by the learned Reward-Risk head:
+  `reward_risk_too_high=32`, `candidate_risk_too_high=5`,
+  `reward_risk_regression=3`, `candidate_risk_regression=3`, and
+  `unconflicted_stop_left_distance_delta_too_high=2`.
+- Exact one-step counterfactuals with RiskVeto continuation over all `45`
+  rejected v6 trace rows produced reward W/L/T `0/4/41`, Success W/L/T
+  `0/0/45`, with `5` forced actions not applicable in replay.
+- Interpretation: the current gate is not hiding a useful v6 improvement on
+  this smoke block. The blocked v6 actions are neutral or reward-negative.
+  Further gains require a better proposal policy/trajectory objective, not
+  looser Reward-Risk thresholds for this candidate.
