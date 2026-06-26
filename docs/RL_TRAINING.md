@@ -8620,8 +8620,8 @@ Targeted start-rescue relax:
   enabled in the Docker submission after validation.
 - The promoted profile only accepts main `rerank` proposals for
   `STOP_MOVING -> MOVE_FORWARD` (`4:2`) from `env_time >= 200`, with risk
-  delta in `[0.0, 0.18]`, `reward_risk <= 0.66`, no reward-risk regression,
-  and reward-risk improvement at least `0.30`.
+  delta in `[0.0, 0.37]`, `reward_risk <= 0.66`, no reward-risk regression,
+  and reward-risk improvement at least `0.20`.
 - Validation against the current promoted RiskVeto default:
   - `scene_2 6830..6869`: mean Reward delta `+0.006641`, Success delta `0`,
     Reward W/L/T `2/0/38`, Success W/L/T `0/0/40`. Accepted start-relax
@@ -8674,3 +8674,18 @@ Targeted start-rescue relax:
   `scene_5` were neutral. Traces showed accepted actions still matched the
   intended `STOP_MOVING -> MOVE_FORWARD` rerank rescue pattern, while much
   larger risk-delta candidates around `0.35` remained blocked.
+- Very-high-delta superset ablation then tested whether those blocked
+  `STOP_MOVING -> MOVE_FORWARD` candidates were actually useful. The promoted
+  version keeps `reward_risk <= 0.66` unchanged, widens risk delta to `0.37`,
+  and lowers the required reward-risk improvement to `0.20`.
+  - Heldout `scene_1,4`, 20 episodes each from seed `6910`: mean Reward delta
+    `+0.007628`, Reward W/L/T `3/0/37`, Success W/L/T `0/0/40`.
+  - Heldout `scene_2,3,5`, 20 episodes each from seed `6910`: neutral,
+    Reward/Success W/L/T `0/0/60`.
+  - `scene_2 6830..6869`: mean Reward delta `+0.008461`, Reward W/L/T
+    `4/0/36`, Success W/L/T `0/0/40`.
+  - `scene_2 6870..6909`: neutral, Reward/Success W/L/T `0/0/40`.
+  A discarded intermediate scout lowered `max_reward_risk` to `0.64`; that
+  caused a regression by blocking an already validated rescue, so the promoted
+  profile only widens the risk-delta/reward-improvement thresholds and keeps
+  the reward-risk ceiling at `0.66`.
