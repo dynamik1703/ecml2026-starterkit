@@ -8208,3 +8208,24 @@ Accepted-event counterfactual labeling:
   more full-episode positive traces and train/fine-tune the rescue proposal on
   the action sequences around those wins, while keeping the current RiskVeto
   default as the safe submission fallback.
+
+Third fresh default trace block:
+- Ran the traced Docker/default-equivalent RiskVeto stack on
+  `scene_1..4 6770..6789`.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged rescue-v4b default | `scene_1..4 6770..6789` | `+0.004045` | `0.000000` | `5/0/75` | `0/0/80` |
+
+- Positive seeds were `scene_1 seed6784`, `scene_2` seeds `6782`, `6784`,
+  `6787`, and `scene_4 seed6786`.
+- Trace rows: `587` proposed deviations, `25` accepted, `562` rejected.
+  Accepted sources were `rerank=10`, `aux_listwise=9`, `listwise=6`.
+  Accepted transitions were mainly `MOVE_FORWARD -> MOVE_RIGHT` (`9`),
+  `STOP_MOVING -> MOVE_LEFT` (`8`), and `STOP_MOVING -> MOVE_RIGHT` (`5`).
+- Across the three fresh traced default windows `6730..6789`, the packaged v4b
+  default is now reward-positive on `240` episodes with reward W/L/T
+  `15/0/225`, Success W/L/T `0/0/240`, and mean Reward delta about
+  `+0.00595`. This is a strong safety signal for submission, but still a
+  modest score lift. Treat it as the fallback to submit while using the
+  positive trace windows for sequence-level rescue training.
