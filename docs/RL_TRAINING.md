@@ -8241,3 +8241,21 @@ Positive-trace BC v4c smoke:
   W/L/T `0/0/20`, accepted `{}`.
 - Decision: do not promote v4c. The positive trace BC was too small and did
   not change accepted behavior. Keep packaged v4b as the default.
+
+Positive sequence-event BC v4d smoke:
+- Built `/private/tmp/ecml_positive_trace_sequence_events_v1.csv` from all
+  accepted action-diff events in the 15 Reward-win episodes across the three
+  fresh trace windows. It contained `19` weak positive sequence events:
+  `STOP_MOVING -> MOVE_RIGHT` (`9`), `STOP_MOVING -> MOVE_LEFT` (`9`), and
+  `MOVE_FORWARD -> MOVE_LEFT` (`1`).
+- Trained `/private/tmp/ecml_positive_trace_sequence_bc_v4d_s7900.pt` from
+  packaged v4b with Action-Conflict observations. Reconstruction was clean
+  enough for a smoke: `16` rescue hits, `3` rescue-invalid rows, `0` rescue
+  misses, `0` baseline mismatches, and `9,755` anchor samples.
+- Direct RiskVeto proposal comparison against packaged v4b on
+  `scene_1..4 6750..6754` was worse: reward W/L/T `0/1/19`, Success W/L/T
+  `0/0/20`, mean Reward delta `-0.000771`.
+- Decision: do not promote v4d. The positive sequence-event set is still too
+  small/noisy to improve the live RiskVeto proposal. Keep packaged v4b as the
+  default. The next meaningful RL step needs a larger trajectory-level update
+  or online fine-tune objective, not another tiny BC-only patch.
