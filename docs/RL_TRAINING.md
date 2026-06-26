@@ -7982,3 +7982,20 @@ Rescue BC v4/v4b candidate:
   modest, but it is the first broader rescue-BC candidate that improves fresh
   direct OOD checks without losing the old 6410 guardrail after adding an
   explicit negative label.
+
+Fresh v4b direct OOD extension:
+- After packaging v4b, ran two additional direct current-vs-v4b windows on
+  unseen seeds. `scene_1..4 6690..6709` produced one extra reward win and no
+  losses; `scene_1..4 6710..6729` was fully neutral.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| v4b vs current | `scene_1..4 6690..6709` | `+0.001742` | `0.000000` | `1/0/79` | `0/0/80` |
+| v4b vs current | `scene_1..4 6710..6729` | `0.000000` | `0.000000` | `0/0/80` | `0/0/80` |
+| v4b vs current | combined checked direct windows | `+0.000946` | `0.000000` | `5/0/575` | `0/0/580` |
+
+- Interpretation: v4b remains regression-free across the currently checked
+  direct windows, but the recall gain is still too sparse. The next high-value
+  step is not another narrow safety rule; it is a more aggressive RL/BC
+  candidate that proposes more useful deviations while reusing the existing
+  risk-veto shell to reject unsafe ones.
