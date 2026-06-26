@@ -8101,3 +8101,25 @@ Final default smoke after gate rejection:
 - Decision: the packaged rescue-v4b RiskVeto policy remains the submission
   baseline. Failed learned selectors and PPO variants should stay out of the
   Docker path until they pass fresh direct A/B windows with no Success losses.
+
+Fresh default robustness check:
+- Ran the same Docker/default-equivalent RiskVeto stack on a fresh window,
+  `scene_1..4 6730..6749`, against Sequence.
+
+| candidate | direct comparison | reward delta | Success delta | reward W/L/T | Success W/L/T |
+| --- | --- | ---: | ---: | ---: | ---: |
+| packaged rescue-v4b default | `scene_1..4 6730..6749` | `+0.004150` | `0.000000` | `1/0/79` | `0/0/80` |
+
+- `scene_1`, `scene_2`, and `scene_4` were neutral. The single reward win was
+  `scene_3 seed6747`: reward `0.646858 -> 0.978825`, Success unchanged at
+  `1.000000`.
+- A replay with `ECML_RISK_VETO_TRACE_PATH` found exactly one accepted event
+  for that win: at `env_time=78`, agent `5`, `STOP_MOVING -> MOVE_LEFT`, source
+  `rerank`. Risk and reward-risk heads preferred the candidate
+  (`risk_delta=-0.080783`, `reward_risk_delta=-0.398058`), while the value head
+  strongly disliked it (`value_delta=-0.575052`).
+- Interpretation: the current default is stable and Success-safe on this fresh
+  block, but still too conservative for a winner-level jump. Hard value-delta
+  vetoes are risky because they can suppress real wins; the next improvement
+  needs a better event-level return selector trained on more counterfactual
+  outcomes, not a simple value threshold.

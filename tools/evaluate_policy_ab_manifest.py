@@ -298,7 +298,8 @@ def trace_summary(path: Path | None) -> dict[str, Any]:
                 continue
             if payload.get("accepted"):
                 accepted += 1
-                accepted_by_source[str(payload.get("selector_source", ""))] += 1
+                source = payload.get("selector_source", payload.get("candidate_source", ""))
+                accepted_by_source[str(source)] += 1
     return {
         "path": str(path),
         "exists": True,
@@ -379,6 +380,7 @@ def run_block(
         candidate_trace_path = args.output_dir / f"{block_name}_candidate_trace.jsonl"
         candidate_trace_path.unlink(missing_ok=True)
         candidate_specific["ECML_SEQUENCE_TRACE_PATH"] = str(candidate_trace_path)
+        candidate_specific["ECML_RISK_VETO_TRACE_PATH"] = str(candidate_trace_path)
     if args.candidate_trace_all:
         candidate_specific["ECML_SEQUENCE_TRACE_ALL"] = "1"
 
@@ -505,7 +507,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--candidate-trace",
         action="store_true",
-        help="Set ECML_SEQUENCE_TRACE_PATH for candidate runs and summarize the trace.",
+        help=(
+            "Set supported candidate trace env vars, including "
+            "ECML_SEQUENCE_TRACE_PATH and ECML_RISK_VETO_TRACE_PATH, and "
+            "summarize the trace."
+        ),
     )
     parser.add_argument(
         "--candidate-trace-all",
