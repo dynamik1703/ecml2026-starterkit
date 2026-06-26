@@ -8620,8 +8620,8 @@ Targeted start-rescue relax:
   enabled in the Docker submission after validation.
 - The promoted profile only accepts main `rerank` proposals for
   `STOP_MOVING -> MOVE_FORWARD` (`4:2`) from `env_time >= 200`, with risk
-  delta in `[0.02, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
-  and reward-risk improvement at least `0.40`.
+  delta in `[0.0, 0.18]`, `reward_risk <= 0.66`, no reward-risk regression,
+  and reward-risk improvement at least `0.30`.
 - Validation against the current promoted RiskVeto default:
   - `scene_2 6830..6869`: mean Reward delta `+0.006641`, Success delta `0`,
     Reward W/L/T `2/0/38`, Success W/L/T `0/0/40`. Accepted start-relax
@@ -8655,3 +8655,13 @@ Targeted start-rescue relax:
   it added one clean `scene_5` rescue
   (`seed6887 step242 agent1 STOP_MOVING -> MOVE_FORWARD`) and improved mean
   Reward by `+0.001280`, with Reward W/L/T `1/0/79`, Success W/L/T `0/0/80`.
+- High-delta start-relax ablation then widened the same narrow transition to
+  risk delta `[0.0, 0.18]`, `reward_risk <= 0.66`, and reward-risk improvement
+  at least `0.30`. Against the `0.02` default:
+  - `scene_2 6870..6909`: mean Reward delta `+0.004120`, Success delta `0`,
+    Reward W/L/T `2/0/38`, Success W/L/T `0/0/40`. The additional gains were
+    `seed6872` and `seed6892`, both `STOP_MOVING -> MOVE_FORWARD`.
+  - `scene_2 6830..6869`: Reward/Success W/L/T `0/0/40`, including the old
+    problem-seed block where earlier broad relaxations caused regressions.
+  - Fresh multi-scene (`scene_1,3,4,5`, 20 episodes each from seed `6870`):
+    Reward/Success W/L/T `0/0/80`.
