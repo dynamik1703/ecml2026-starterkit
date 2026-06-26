@@ -8259,3 +8259,23 @@ Positive sequence-event BC v4d smoke:
   small/noisy to improve the live RiskVeto proposal. Keep packaged v4b as the
   default. The next meaningful RL step needs a larger trajectory-level update
   or online fine-tune objective, not another tiny BC-only patch.
+
+Conservative PPO rescue v6 smoke:
+- Trained `/private/tmp/ecml_ppo_rescue_v6_conservative_s8000.pt` from the
+  packaged rescue-v4b checkpoint. The run used Action-Conflict observations,
+  `4` complete-episode PPO updates on the positive trace seed families,
+  current RiskVeto as a CE teacher, strong KL anchoring to v4b, mild terminal
+  success/failure shaping, action-conflict penalties, and the positive
+  sequence-event CSV as low-weight Aux-BC.
+- Aux-BC replay remained clean enough: `16` rescue hits, `3` rescue-invalid
+  rows, `0` rescue misses, `0` baseline mismatches, and `7,845` anchors.
+  PPO stayed close to the initial policy (`anchor_kl=0.00311` after update 4),
+  but rollout success was not consistently improving (`0.9375`, `0.9167`,
+  `0.8750`, `0.9167` across updates).
+- Direct RiskVeto proposal comparison against packaged v4b on
+  `scene_1..4 6750..6754` was fully neutral: reward W/L/T `0/0/20`, Success
+  W/L/T `0/0/20`, mean Reward delta `0.000000`, accepted `{}`.
+- Decision: do not promote v6. This conservative PPO setup is safe but too
+  anchored/teacher-dominated to create new accepted actions under RiskVeto.
+  The next RL change should increase useful proposal diversity while keeping
+  the current v4b default as the safety baseline.
