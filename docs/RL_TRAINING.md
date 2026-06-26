@@ -8620,7 +8620,7 @@ Targeted start-rescue relax:
   enabled in the Docker submission after validation.
 - The promoted profile only accepts main `rerank` proposals for
   `STOP_MOVING -> MOVE_FORWARD` (`4:2`) from `env_time >= 200`, with risk
-  delta in `[0.045, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
+  delta in `[0.02, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
   and reward-risk improvement at least `0.40`.
 - Validation against the current promoted RiskVeto default:
   - `scene_2 6830..6869`: mean Reward delta `+0.006641`, Success delta `0`,
@@ -8646,3 +8646,12 @@ Targeted start-rescue relax:
   Reward W/L/T `1/0/39`, Success W/L/T `0/0/40`. The same change was neutral
   on fresh multi-scene (`scene_1,3,4,5`, 20 episodes each from seed `6870`):
   aggregate Reward/Success W/L/T `0/0/80`.
+- A second threshold ablation lowered the minimum risk delta from `0.045` to
+  `0.02`. Against the `0.045` default, it was neutral on both `scene_2`
+  validation blocks:
+  - `scene_2 6830..6869`: Reward/Success W/L/T `0/0/40`.
+  - `scene_2 6870..6909`: Reward/Success W/L/T `0/0/40`.
+  On fresh multi-scene (`scene_1,3,4,5`, 20 episodes each from seed `6870`)
+  it added one clean `scene_5` rescue
+  (`seed6887 step242 agent1 STOP_MOVING -> MOVE_FORWARD`) and improved mean
+  Reward by `+0.001280`, with Reward W/L/T `1/0/79`, Success W/L/T `0/0/80`.
