@@ -8229,3 +8229,15 @@ Third fresh default trace block:
   `+0.00595`. This is a strong safety signal for submission, but still a
   modest score lift. Treat it as the fallback to submit while using the
   positive trace windows for sequence-level rescue training.
+
+Positive-trace BC v4c smoke:
+- Trained `/private/tmp/ecml_positive_trace_bc_v4c_s7800.pt` from packaged v4b
+  using RiskVeto as teacher on the 15 Reward-win episodes from the fresh trace
+  windows. Collection produced only `53` teacher/reference disagreement
+  samples from `38,201` valid teacher samples; final training accuracy was
+  `0.358491`.
+- Direct RiskVeto proposal comparison against packaged v4b on
+  `scene_1..4 6750..6754` was fully neutral: reward W/L/T `0/0/20`, Success
+  W/L/T `0/0/20`, accepted `{}`.
+- Decision: do not promote v4c. The positive trace BC was too small and did
+  not change accepted behavior. Keep packaged v4b as the default.
