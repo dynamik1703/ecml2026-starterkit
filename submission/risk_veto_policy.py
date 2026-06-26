@@ -256,6 +256,60 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_EXTRA_RELAX_MIN_REWARD_BASELINE_MINUS_CANDIDATE",
             float("-inf"),
         )
+        self.start_relax_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_START_RELAX_ENABLED", "0") or "0")
+        )
+        self.start_relax_allowed_sources = {
+            source.strip()
+            for source in os.environ.get(
+                "ECML_RISK_VETO_START_RELAX_ALLOWED_SOURCES",
+                "rerank",
+            ).split(",")
+            if source.strip()
+        }
+        self.start_relax_allowed_reject_reasons = {
+            reason.strip()
+            for reason in os.environ.get(
+                "ECML_RISK_VETO_START_RELAX_ALLOWED_REJECT_REASONS",
+                "candidate_risk_regression,reward_risk_too_high,reward_risk_regression",
+            ).split(",")
+            if reason.strip()
+        }
+        self.start_relax_transitions = self._env_transition_set(
+            "ECML_RISK_VETO_START_RELAX_TRANSITIONS",
+        )
+        self.start_relax_min_step = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MIN_STEP",
+            float("-inf"),
+        )
+        self.start_relax_max_step = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MAX_STEP",
+            float("inf"),
+        )
+        self.start_relax_min_candidate_minus_baseline = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MIN_CANDIDATE_MINUS_BASELINE",
+            float("-inf"),
+        )
+        self.start_relax_max_candidate_minus_baseline = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MAX_CANDIDATE_MINUS_BASELINE",
+            float("inf"),
+        )
+        self.start_relax_max_candidate_risk = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MAX_CANDIDATE_RISK",
+            float("inf"),
+        )
+        self.start_relax_max_reward_risk = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MAX_REWARD_RISK",
+            float("inf"),
+        )
+        self.start_relax_max_reward_candidate_minus_baseline = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MAX_REWARD_CANDIDATE_MINUS_BASELINE",
+            float("inf"),
+        )
+        self.start_relax_min_reward_baseline_minus_candidate = self._env_float(
+            "ECML_RISK_VETO_START_RELAX_MIN_REWARD_BASELINE_MINUS_CANDIDATE",
+            float("-inf"),
+        )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
 
     @staticmethod
@@ -590,6 +644,94 @@ class RiskVetoPolicy:
 
         scores["selector_source"] = "extra_relax"
         scores["extra_relax_accepted"] = 1.0
+        scores.pop("reject_reason", None)
+        return True
+
+    def _start_candidate_rescue_relax(
+        self,
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+        step: int | None,
+        scores: dict[str, Any],
+    ) -> bool:
+        if not self.start_relax_enabled:
+            return False
+        source = str(scores.get("candidate_source", ""))
+        if source not in self.start_relax_allowed_sources:
+            return False
+        reject_reason = str(scores.get("reject_reason", ""))
+        if (
+            self.start_relax_allowed_reject_reasons
+            and reject_reason not in self.start_relax_allowed_reject_reasons
+        ):
+            return False
+        if self.start_relax_transitions and (
+            int(baseline_action),
+            int(candidate_action),
+        ) not in self.start_relax_transitions:
+            return False
+        if step is not None and (
+            step < self.start_relax_min_step or step > self.start_relax_max_step
+        ):
+            return False
+
+        if self.reward_risk_policy is not None and (
+            "reward_risk_head_candidate" not in scores
+        ):
+            try:
+                scores.update(
+                    self._action_risk_scores(
+                        self.reward_risk_policy,
+                        observation,
+                        baseline_action,
+                        candidate_action,
+                        "reward_risk_head",
+                    )
+                )
+            except Exception:
+                scores["start_relax_reject_reason"] = "reward_risk_score_error"
+                return False
+
+        candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
+        risk_delta = float(
+            scores.get("risk_head_candidate_minus_baseline", float("inf"))
+        )
+        if candidate_risk > self.start_relax_max_candidate_risk:
+            scores["start_relax_reject_reason"] = "candidate_risk_too_high"
+            return False
+        if risk_delta < self.start_relax_min_candidate_minus_baseline:
+            scores["start_relax_reject_reason"] = "candidate_risk_delta_too_low"
+            return False
+        if risk_delta > self.start_relax_max_candidate_minus_baseline:
+            scores["start_relax_reject_reason"] = "candidate_risk_delta_too_high"
+            return False
+
+        reward_risk = float(scores.get("reward_risk_head_candidate", float("inf")))
+        reward_delta = float(
+            scores.get("reward_risk_head_candidate_minus_baseline", float("inf"))
+        )
+        reward_baseline_minus_candidate = float(
+            scores.get(
+                "reward_risk_head_baseline_minus_candidate",
+                -reward_delta,
+            )
+        )
+        if reward_risk > self.start_relax_max_reward_risk:
+            scores["start_relax_reject_reason"] = "reward_risk_too_high"
+            return False
+        if reward_delta > self.start_relax_max_reward_candidate_minus_baseline:
+            scores["start_relax_reject_reason"] = "reward_risk_regression"
+            return False
+        if (
+            reward_baseline_minus_candidate
+            < self.start_relax_min_reward_baseline_minus_candidate
+        ):
+            scores["start_relax_reject_reason"] = "insufficient_reward_improvement"
+            return False
+
+        scores["selector_source"] = "start_relax"
+        scores["start_relax_accepted"] = 1.0
         scores.pop("reject_reason", None)
         return True
 
@@ -1038,6 +1180,14 @@ class RiskVetoPolicy:
                 scores.update(candidate_metadata)
                 if not accepted:
                     accepted = self._extra_candidate_rescue_relax(
+                        observations_by_handle.get(handle),
+                        baseline_action,
+                        candidate_action,
+                        step,
+                        scores,
+                    )
+                if not accepted:
+                    accepted = self._start_candidate_rescue_relax(
                         observations_by_handle.get(handle),
                         baseline_action,
                         candidate_action,

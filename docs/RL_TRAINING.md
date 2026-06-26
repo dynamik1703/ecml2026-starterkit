@@ -8613,3 +8613,29 @@ Targeted extra-candidate relax:
   the tested blocks. It is still heuristic-gated and narrow; the next RL step
   is to replace the hand-tuned extra relax thresholds with a learned
   source-specific event gate using the corrected runtime-context rows.
+
+Targeted start-rescue relax:
+- Added a separate optional `ECML_RISK_VETO_START_RELAX_*` profile to
+  `RiskVetoPolicy`. It is source-specific and defaults off in code, but is now
+  enabled in the Docker submission after validation.
+- The promoted profile only accepts main `rerank` proposals for
+  `STOP_MOVING -> MOVE_FORWARD` (`4:2`) from `env_time >= 200`, with risk
+  delta in `[0.05, 0.075]`, `reward_risk <= 0.57`, no reward-risk regression,
+  and reward-risk improvement at least `0.40`.
+- Validation against the current promoted RiskVeto default:
+  - `scene_2 6830..6869`: mean Reward delta `+0.006641`, Success delta `0`,
+    Reward W/L/T `2/0/38`, Success W/L/T `0/0/40`. Accepted start-relax
+    rescues were `seed6836 step245 agent3 STOP_MOVING -> MOVE_FORWARD` and
+    `seed6865 step279 agent2 STOP_MOVING -> MOVE_FORWARD`.
+  - Fresh `scene_2 6870..6909`: mean Reward delta `+0.005973`, Success delta
+    `0`, Reward W/L/T `3/0/37`, Success W/L/T `0/0/40`. Accepted start-relax
+    rescues were `seed6884 step345 agent1`, `seed6890 step396 agent3`, and
+    `seed6904 step252 agent2`, all `STOP_MOVING -> MOVE_FORWARD`.
+  - Fresh multi-scene check (`scene_1,3,4,5`, 20 episodes each from seed
+    `6870`): aggregate mean Reward delta `+0.002083`, Success delta `0`,
+    Reward W/L/T `1/0/79`, Success W/L/T `0/0/80`. The only start-relax
+    accepts were in `scene_3` (`seed6883 step200 agent1` and
+    `seed6886 step251 agent2`).
+- Current interpretation: this is still a narrow gate, but it is a useful
+  improvement because it converts a repeatedly observed late-start bottleneck
+  into reward gains without measured regressions on the validation windows.
