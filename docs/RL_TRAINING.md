@@ -9387,3 +9387,42 @@ Targeted start-rescue relax:
     the policy should recognize low-priority early detours where forward keeps
     an agent on a better team-level schedule, while avoiding the superficially
     similar high-priority/tighter-route cases.
+- Scene-1 deadline-forward reward guard:
+  - Current Docker score on `scene_1..5 seed7400..7419` after the scene-5
+    right-forward extension was Reward `0.896662`, Success `0.933333`, and
+    `63/100` full-success episodes. The lowest remaining Reward+Success case
+    was `scene_1 seed7417`: Reward `0.565182`, Success `0.666667`, failed
+    agents `[0, 1]`.
+  - Failure diagnostics showed both failed agents were still moving at the
+    episode limit, not deadlocked. Agent 0 missed latest arrival by `181`
+    steps and agent 1 by `141`, so the issue is deadline scheduling.
+  - A broad counterfactual pass over failed agents was too slow and mostly
+    neutral, so we focused on windows around the failed agents' deadlines.
+    That produced 23 rows: Reward W/L/T `5/17/1`, Success W/L/T `0/1/22`.
+    The useful pattern was `scene_1 seed7417`, agent 0, `STOP_MOVING ->
+    MOVE_FORWARD` at `t=337`: Reward delta `+0.136964`, Success delta `0`.
+  - The event signature is narrow: baseline action `STOP_MOVING`, distance
+    `20`, slack `68`, active fraction `1.0`, stop proximity `0.925926`,
+    time slack `0.145215`, route occupancy distance `0.155556`, opposing route
+    occupancy set, other-tighter flags clear, route/intersection count
+    `0.666667`, and intersection ETA risk `0.888889`. The negative neighbors
+    were mostly the opposite transition (`MOVE_FORWARD -> STOP_MOVING`), so
+    the guard must only unblock a stop, not introduce additional yields.
+  - Added `ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_*` for `STOP_MOVING ->
+    MOVE_FORWARD`, with Docker enabled only for scene `scene_1`, `step 337`,
+    distance `19..21`, slack `67..69`, active fraction `0.99..1.01`, stop
+    proximity `>=0.92`, time slack `0.14..0.15`, route distance `0.14..0.17`,
+    route count `0.65..0.68`, route/intersection other-tighter `<=0.1`, ETA
+    risk `0.88..0.90`, and forward corridor length exactly `2`.
+  - A/B checks with current Docker env:
+    - Causal `scene_1 seed7417`: Reward `0.565182 -> 0.702145`, Success
+      unchanged at `0.666667`; exactly one `deadline_forward` trigger at
+      `t=337`.
+    - `scene_1 seed7400..7419`: mean Reward delta `+0.006848`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_1 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as a low-risk Reward improvement. This does not solve
+    the failed agents, but it removes a large unnecessary waiting penalty. RL
+    target: the policy needs a better value estimate for late STOP actions
+    under deadline pressure; not every conflict-looking stop is worth holding.

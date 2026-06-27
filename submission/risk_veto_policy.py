@@ -1029,6 +1029,105 @@ class RiskVetoPolicy:
         self._right_forward_counts: dict[int, int] = {}
         self._right_forward_last_step: int | None = None
         self._right_forward_last_seed: int | None = None
+        self.deadline_forward_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_ENABLED", "0") or "0")
+        )
+        self.deadline_forward_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.deadline_forward_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_STEP",
+            0.0,
+        )
+        self.deadline_forward_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_STEP",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_DISTANCE",
+            0.0,
+        )
+        self.deadline_forward_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_SLACK",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_SLACK",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_min_time_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_TIME_SLACK",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_time_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_TIME_SLACK",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_route_count = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_ROUTE_COUNT",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_route_count = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_ROUTE_COUNT",
+            float("inf"),
+        )
+        self.deadline_forward_guard_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_ROUTE_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.deadline_forward_guard_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.deadline_forward_guard_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_INTERSECTION_ETA_RISK",
+            float("inf"),
+        )
+        self.deadline_forward_guard_max_intersection_other_tighter = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_INTERSECTION_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.deadline_forward_guard_min_forward_corridor_len = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MIN_FORWARD_CORRIDOR_LEN",
+            0.0,
+        )
+        self.deadline_forward_guard_max_forward_corridor_len = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_FORWARD_GUARD_MAX_FORWARD_CORRIDOR_LEN",
+            float("inf"),
+        )
         self.inf_right_guard_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_INF_RIGHT_GUARD_ENABLED", "0") or "0")
         )
@@ -4252,6 +4351,185 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _deadline_forward_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.deadline_forward_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if int(action) != 4:
+            return False, scores
+        if (
+            step < self.deadline_forward_guard_min_step
+            or step > self.deadline_forward_guard_max_step
+        ):
+            return False, scores
+        if self.deadline_forward_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.deadline_forward_guard_allowed_scenes:
+                return False, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING", "STOPPED"):
+                return False, scores
+            if agent.position is None:
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+            target_position, target_direction = obs_builder._action_target(handle, 2)
+            forward_corridor_len = len(obs_builder._corridor_edges_for_action(handle, 2))
+        except Exception:
+            return False, scores
+
+        if (
+            target_position is None
+            or target_direction is None
+            or local_mask[2] < 0.5
+            or coordinated_mask[2] < 0.5
+        ):
+            return False, scores
+        try:
+            if obs_builder._occupied_by_other(target_position, handle):
+                return False, scores
+        except Exception:
+            return False, scores
+
+        on_switch = self._observation_scalar(observation, 7)
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        time_slack = self._observation_scalar(observation, 35)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_same_direction = self._observation_scalar(observation, 38)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        obs_checks = {
+            "deadline_forward_guard_on_switch": on_switch,
+            "deadline_forward_guard_active_fraction": active_fraction,
+            "deadline_forward_guard_stop_proximity": stop_proximity,
+            "deadline_forward_guard_time_slack": time_slack,
+            "deadline_forward_guard_route_distance": route_distance,
+            "deadline_forward_guard_route_opposing": route_opposing,
+            "deadline_forward_guard_route_same_direction": route_same_direction,
+            "deadline_forward_guard_route_other_tighter": route_other_tighter,
+            "deadline_forward_guard_route_count": route_count,
+            "deadline_forward_guard_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "deadline_forward_guard_intersection_eta_risk": intersection_eta_risk,
+            "deadline_forward_guard_intersection_other_first": (
+                intersection_other_first
+            ),
+            "deadline_forward_guard_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "switch_forward_guard_profile": "deadline_forward",
+                "deadline_forward_guard_distance": float(distance),
+                "deadline_forward_guard_slack": float(slack),
+                "deadline_forward_guard_forward_corridor_len": int(
+                    forward_corridor_len
+                ),
+                "deadline_forward_guard_forward_target": str(target_position),
+            }
+        )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.deadline_forward_guard_min_distance
+            or distance > self.deadline_forward_guard_max_distance
+            or not np.isfinite(slack)
+            or slack < self.deadline_forward_guard_min_slack
+            or slack > self.deadline_forward_guard_max_slack
+            or on_switch < 0.5
+            or active_fraction < self.deadline_forward_guard_min_active_fraction
+            or active_fraction > self.deadline_forward_guard_max_active_fraction
+            or stop_proximity < self.deadline_forward_guard_min_stop_proximity
+            or time_slack < self.deadline_forward_guard_min_time_slack
+            or time_slack > self.deadline_forward_guard_max_time_slack
+            or route_distance < self.deadline_forward_guard_min_route_distance
+            or route_distance > self.deadline_forward_guard_max_route_distance
+            or route_opposing < 0.5
+            or route_same_direction > 0.5
+            or route_other_tighter
+            > self.deadline_forward_guard_max_route_other_tighter
+            or route_count < self.deadline_forward_guard_min_route_count
+            or route_count > self.deadline_forward_guard_max_route_count
+            or intersection_own_distance
+            > self.deadline_forward_guard_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.deadline_forward_guard_min_intersection_eta_risk
+            or intersection_eta_risk
+            > self.deadline_forward_guard_max_intersection_eta_risk
+            or intersection_other_first > 0.5
+            or intersection_other_tighter
+            > self.deadline_forward_guard_max_intersection_other_tighter
+            or forward_corridor_len
+            < self.deadline_forward_guard_min_forward_corridor_len
+            or forward_corridor_len
+            > self.deadline_forward_guard_max_forward_corridor_len
+        ):
+            return False, scores
+        return True, scores
+
+    def _apply_deadline_forward_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.deadline_forward_guard_enabled or obs_builder is None:
+            return output
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._deadline_forward_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.MOVE_FORWARD
+            self._trace_switch_forward_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _inf_right_target_scores(
         self,
         obs_builder: Any,
@@ -5408,6 +5686,14 @@ class RiskVetoPolicy:
             step,
         )
         output = self._apply_right_forward_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        output = self._apply_deadline_forward_guard(
             output,
             handles,
             obs_builder,
