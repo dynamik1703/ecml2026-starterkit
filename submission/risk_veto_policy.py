@@ -531,6 +531,56 @@ class RiskVetoPolicy:
         self._yield_stop_counts: dict[int, int] = {}
         self._yield_stop_last_step: int | None = None
         self._yield_stop_last_seed: int | None = None
+        self.detour_left_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_DETOUR_LEFT_GUARD_ENABLED", "0") or "0")
+        )
+        self.detour_left_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MIN_STEP",
+            60.0,
+        )
+        self.detour_left_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_STEP",
+            80.0,
+        )
+        self.detour_left_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.detour_left_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MIN_SLACK",
+            80.0,
+        )
+        self.detour_left_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_SLACK",
+            85.0,
+        )
+        self.detour_left_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MIN_DISTANCE",
+            235.0,
+        )
+        self.detour_left_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_DISTANCE",
+            250.0,
+        )
+        self.detour_left_guard_max_tighter_agents = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_TIGHTER_AGENTS",
+            1.0,
+        )
+        self.detour_left_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MIN_INTERSECTION_ETA_RISK",
+            0.30,
+        )
+        self.detour_left_guard_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_INTERSECTION_ETA_RISK",
+            0.45,
+        )
+        self.detour_left_guard_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_DETOUR_LEFT_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
+            0.03,
+        )
+        self._detour_left_counts: dict[int, int] = {}
+        self._detour_left_last_step: int | None = None
+        self._detour_left_last_seed: int | None = None
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -1554,6 +1604,36 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_detour_left_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": 1,
+            "candidate_action_name": self._action_name(1),
+            "accepted": True,
+            "candidate_source": "detour_left_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _reset_start_delay_guard_state(
         self,
         seed: int | None,
@@ -1585,6 +1665,22 @@ class RiskVetoPolicy:
             self._yield_stop_counts = {}
         self._yield_stop_last_seed = seed
         self._yield_stop_last_step = step
+
+    def _reset_detour_left_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._detour_left_last_seed != seed
+            or self._detour_left_last_step is None
+            or step < self._detour_left_last_step
+        ):
+            self._detour_left_counts = {}
+        self._detour_left_last_seed = seed
+        self._detour_left_last_step = step
 
     @staticmethod
     def _guard_speed(agent: Any) -> float:
@@ -2101,6 +2197,170 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _detour_left_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.detour_left_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if step < self.detour_left_guard_min_step or step > self.detour_left_guard_max_step:
+            return False, scores
+        if int(action) != 2:
+            return False, scores
+        holds = self._detour_left_counts.get(handle, 0)
+        if holds >= self.detour_left_guard_max_holds:
+            return False, scores
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            target_position, target_direction = obs_builder._action_target(handle, 1)
+            if target_position is None or target_direction is None:
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+        except Exception:
+            return False, scores
+
+        tighter_agents = 0
+        try:
+            for other_handle in obs_builder.env.get_agent_handles():
+                if other_handle == handle:
+                    continue
+                other_distance = float(
+                    obs_builder._current_distance_to_waypoint(other_handle)
+                )
+                other_slack = self._guard_effective_slack(
+                    obs_builder,
+                    other_handle,
+                    other_distance,
+                )
+                if np.isfinite(other_slack) and other_slack < slack:
+                    tighter_agents += 1
+        except Exception:
+            tighter_agents = 0
+
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        priority_tighter_fraction = self._observation_scalar(observation, 53)
+        route_occupancy_opposing = self._observation_scalar(observation, 37)
+        route_occupancy_count = self._observation_scalar(observation, 43)
+        scores.update(
+            {
+                "detour_left_guard_distance": float(distance),
+                "detour_left_guard_slack": float(slack),
+                "detour_left_guard_tighter_agents": int(tighter_agents),
+                "detour_left_guard_holds": int(holds),
+            }
+        )
+        obs_checks = {
+            "detour_left_guard_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "detour_left_guard_intersection_eta_risk": intersection_eta_risk,
+            "detour_left_guard_intersection_other_first": intersection_other_first,
+            "detour_left_guard_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+            "detour_left_guard_priority_tighter_fraction": (
+                priority_tighter_fraction
+            ),
+            "detour_left_guard_route_occupancy_opposing": route_occupancy_opposing,
+            "detour_left_guard_route_occupancy_count": route_occupancy_count,
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.detour_left_guard_min_distance
+            or distance > self.detour_left_guard_max_distance
+        ):
+            return False, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.detour_left_guard_min_slack
+            or slack > self.detour_left_guard_max_slack
+        ):
+            return False, scores
+        try:
+            other_count = max(1, obs_builder.env.get_num_agents() - 1)
+        except Exception:
+            other_count = 1
+        if priority_tighter_fraction is not None:
+            max_tighter_fraction = (
+                self.detour_left_guard_max_tighter_agents / other_count
+            )
+            scores["detour_left_guard_max_tighter_fraction"] = float(
+                max_tighter_fraction
+            )
+            if priority_tighter_fraction > max_tighter_fraction + 1e-6:
+                return False, scores
+        elif tighter_agents > self.detour_left_guard_max_tighter_agents:
+            return False, scores
+        if (
+            intersection_eta_risk < self.detour_left_guard_min_intersection_eta_risk
+            or intersection_eta_risk > self.detour_left_guard_max_intersection_eta_risk
+            or intersection_other_first > 0.5
+            or intersection_other_tighter > 0.5
+            or intersection_own_distance
+            > self.detour_left_guard_max_intersection_own_distance
+            or route_occupancy_opposing > 0.5
+            or route_occupancy_count > 0.01
+        ):
+            return False, scores
+        return True, scores
+
+    def _apply_detour_left_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.detour_left_guard_enabled or obs_builder is None:
+            return output
+        self._reset_detour_left_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._detour_left_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.MOVE_LEFT
+            self._detour_left_counts[int(handle)] = (
+                self._detour_left_counts.get(int(handle), 0) + 1
+            )
+            self._trace_detour_left_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _candidate_action_lists(
         self,
         handles: List[int],
@@ -2322,7 +2582,15 @@ class RiskVetoPolicy:
             seed,
             step,
         )
-        return self._apply_yield_stop_guard(
+        output = self._apply_yield_stop_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        return self._apply_detour_left_guard(
             output,
             handles,
             obs_builder,

@@ -8946,3 +8946,33 @@ Targeted start-rescue relax:
   - Decision: promote the narrow profile to Docker. This is a small targeted
     gain, not a broad scheduling solution. Broader yield-stop profiles were
     rejected because they introduced reward losses and one success regression.
+- Moving detour-left micro guard:
+  - Next failure mining target after the yield-stop promotion was
+    `scene_1 seed7406`: Reward `0.465517`, Success `0.5`, failed agents
+    `1`, `4`, and `5`. Current Docker trace had no accepted RiskVeto
+    overrides, so this was again a coordination/baseline failure.
+  - Route-variant analysis showed ideal greedy routes arrive before deadlines
+    but have unresolved mid-route conflicts around `t=118`, `145`, and `147`.
+  - Docker-env counterfactuals on involved agents `2,3,4,5` found the strongest
+    positive intervention at `agent5`: `MOVE_FORWARD -> MOVE_LEFT` around
+    `t=68..76`, with Reward delta `+0.041762` and Success delta `+0.333333`.
+    Broader stop interventions either helped Success with reward cost or were
+    mixed.
+  - Added a default-off `ECML_RISK_VETO_DETOUR_LEFT_GUARD_*` mechanism for a
+    narrow MOVING `MOVE_FORWARD -> MOVE_LEFT` detour. Docker promotes only the
+    tested profile: one hold, `step 60..80`, `slack 80..85`,
+    `distance 235..250`, at most one tighter-priority train by observation
+    fraction, moderate route-intersection ETA risk `0.30..0.45`, near
+    intersection own-distance `<=0.03`, and no route occupancy ahead.
+  - A/B checks with current Docker env:
+    - Causal `scene_1 seed7406`: Reward delta `+0.041762`, Success delta
+      `+0.333333`; exactly one detour-left trigger.
+    - `scene_1 seed7400..7419`: mean Reward delta `+0.002088`, mean Success
+      delta `+0.016667`, Reward/Success W/L/T `1/0/19`; exactly one trigger.
+    - Cross-scene `scene_1..5 seed7400..7419`: aggregate Reward delta
+      `+0.000418`, Success delta `+0.003333`, Reward/Success W/L/T `1/0/99`.
+    - Heldout `scene_1..5 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/50`; no detour-left triggers.
+  - Decision: promote the narrow profile to Docker. As with yield-stop, this
+    is a targeted failure-class fix, not evidence that broad handcrafted
+    detours are safe.
