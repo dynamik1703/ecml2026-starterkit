@@ -772,6 +772,108 @@ class RiskVetoPolicy:
         self._switch_forward_counts: dict[int, int] = {}
         self._switch_forward_last_step: int | None = None
         self._switch_forward_last_seed: int | None = None
+        self.inf_right_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_INF_RIGHT_GUARD_ENABLED", "0") or "0")
+        )
+        self.inf_right_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_INF_RIGHT_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.inf_right_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_STEP",
+            72.0,
+        )
+        self.inf_right_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_STEP",
+            72.0,
+        )
+        self.inf_right_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.inf_right_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_DISTANCE",
+            230.0,
+        )
+        self.inf_right_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_DISTANCE",
+            240.0,
+        )
+        self.inf_right_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_SLACK",
+            135.0,
+        )
+        self.inf_right_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_SLACK",
+            145.0,
+        )
+        self.inf_right_guard_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_ACTIVE_FRACTION",
+            0.60,
+        )
+        self.inf_right_guard_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_ACTIVE_FRACTION",
+            0.70,
+        )
+        self.inf_right_guard_max_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_STOP_PROXIMITY",
+            0.20,
+        )
+        self.inf_right_guard_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_ROUTE_DISTANCE",
+            0.05,
+        )
+        self.inf_right_guard_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_ROUTE_DISTANCE",
+            0.08,
+        )
+        self.inf_right_guard_min_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_INTERSECTION_OWN_DISTANCE",
+            0.10,
+        )
+        self.inf_right_guard_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
+            0.12,
+        )
+        self.inf_right_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_INTERSECTION_ETA_RISK",
+            0.90,
+        )
+        self.inf_right_guard_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_INTERSECTION_ETA_RISK",
+            0.93,
+        )
+        self.inf_right_guard_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_PREFIX_CONFLICT_COUNT",
+            0.30,
+        )
+        self.inf_right_guard_max_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_PREFIX_CONFLICT_COUNT",
+            0.35,
+        )
+        self.inf_right_guard_min_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_PRIORITY_TIGHTER_FRACTION",
+            0.55,
+        )
+        self.inf_right_guard_max_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_PRIORITY_TIGHTER_FRACTION",
+            0.65,
+        )
+        self.inf_right_guard_min_right_distance_delta = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MIN_RIGHT_DISTANCE_DELTA",
+            -1.5,
+        )
+        self.inf_right_guard_max_right_distance_delta = self._env_float(
+            "ECML_RISK_VETO_INF_RIGHT_GUARD_MAX_RIGHT_DISTANCE_DELTA",
+            -0.5,
+        )
+        self._inf_right_counts: dict[int, int] = {}
+        self._inf_right_last_step: int | None = None
+        self._inf_right_last_seed: int | None = None
         self.head_on_yield_guard_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_ENABLED", "0") or "0")
         )
@@ -1996,6 +2098,36 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_inf_right_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": 3,
+            "candidate_action_name": self._action_name(3),
+            "accepted": True,
+            "candidate_source": "inf_right_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _reset_start_delay_guard_state(
         self,
         seed: int | None,
@@ -2091,6 +2223,22 @@ class RiskVetoPolicy:
             self._switch_forward_counts = {}
         self._switch_forward_last_seed = seed
         self._switch_forward_last_step = step
+
+    def _reset_inf_right_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._inf_right_last_seed != seed
+            or self._inf_right_last_step is None
+            or step < self._inf_right_last_step
+        ):
+            self._inf_right_counts = {}
+        self._inf_right_last_seed = seed
+        self._inf_right_last_step = step
 
     @staticmethod
     def _guard_speed(agent: Any) -> float:
@@ -3142,6 +3290,261 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _inf_right_target_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        try:
+            agent = obs_builder.env.agents[handle]
+            position = agent.position
+            direction = (
+                agent.direction
+                if agent.direction is not None
+                else agent.initial_direction
+            )
+            if position is None or direction is None:
+                return None, scores
+            distance_map = obs_builder._get_distance_map(handle)
+            current_distance = float(distance_map[position[0], position[1], direction])
+            forward_target, forward_direction = obs_builder._action_target(handle, 2)
+            right_target, right_direction = obs_builder._action_target(handle, 3)
+            if (
+                forward_target is None
+                or forward_direction is None
+                or right_target is None
+                or right_direction is None
+            ):
+                return None, scores
+            forward_distance = float(
+                distance_map[
+                    forward_target[0],
+                    forward_target[1],
+                    forward_direction,
+                ]
+            )
+            right_distance = float(
+                distance_map[right_target[0], right_target[1], right_direction]
+            )
+            scores.update(
+                {
+                    "inf_right_guard_current_distance": float(current_distance),
+                    "inf_right_guard_forward_distance": float(forward_distance),
+                    "inf_right_guard_right_distance": float(right_distance),
+                    "inf_right_guard_right_distance_delta": float(
+                        right_distance - current_distance
+                    )
+                    if np.isfinite(right_distance) and np.isfinite(current_distance)
+                    else float("inf"),
+                    "inf_right_guard_forward_target": str(forward_target),
+                    "inf_right_guard_right_target": str(right_target),
+                }
+            )
+            return {
+                "current_distance": current_distance,
+                "forward_distance": forward_distance,
+                "right_distance": right_distance,
+                "right_delta": right_distance - current_distance,
+                "right_target": right_target,
+            }, scores
+        except Exception:
+            return None, scores
+
+    def _inf_right_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.inf_right_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if int(action) != 2:
+            return False, scores
+        if step < self.inf_right_guard_min_step or step > self.inf_right_guard_max_step:
+            return False, scores
+        if self.inf_right_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.inf_right_guard_allowed_scenes:
+                return False, scores
+        holds = self._inf_right_counts.get(handle, 0)
+        if holds >= self.inf_right_guard_max_holds:
+            return False, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+        except Exception:
+            return False, scores
+
+        if (
+            local_mask[2] < 0.5
+            or coordinated_mask[2] < 0.5
+            or local_mask[3] >= 0.5
+            or coordinated_mask[3] >= 0.5
+        ):
+            return False, scores
+
+        target_scores, target_trace = self._inf_right_target_scores(
+            obs_builder,
+            handle,
+        )
+        scores.update(target_trace)
+        if target_scores is None:
+            return False, scores
+        right_target = target_scores["right_target"]
+        try:
+            if obs_builder._occupied_by_other(right_target, handle):
+                return False, scores
+        except Exception:
+            return False, scores
+
+        on_switch = self._observation_scalar(observation, 7)
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_same_direction = self._observation_scalar(observation, 38)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        prefix_conflict_count = self._observation_scalar(observation, 51)
+        priority_tighter_fraction = self._observation_scalar(observation, 53)
+        obs_checks = {
+            "inf_right_guard_on_switch": on_switch,
+            "inf_right_guard_active_fraction": active_fraction,
+            "inf_right_guard_stop_proximity": stop_proximity,
+            "inf_right_guard_route_distance": route_distance,
+            "inf_right_guard_route_opposing": route_opposing,
+            "inf_right_guard_route_same_direction": route_same_direction,
+            "inf_right_guard_route_other_tighter": route_other_tighter,
+            "inf_right_guard_route_count": route_count,
+            "inf_right_guard_intersection_own_distance": intersection_own_distance,
+            "inf_right_guard_intersection_eta_risk": intersection_eta_risk,
+            "inf_right_guard_intersection_other_first": intersection_other_first,
+            "inf_right_guard_intersection_other_tighter": intersection_other_tighter,
+            "inf_right_guard_prefix_conflict_count": prefix_conflict_count,
+            "inf_right_guard_priority_tighter_fraction": priority_tighter_fraction,
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "inf_right_guard_distance": float(distance),
+                "inf_right_guard_slack": float(slack),
+                "inf_right_guard_holds": int(holds),
+            }
+        )
+
+        right_delta = float(target_scores["right_delta"])
+        if (
+            not np.isfinite(distance)
+            or distance < self.inf_right_guard_min_distance
+            or distance > self.inf_right_guard_max_distance
+        ):
+            return False, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.inf_right_guard_min_slack
+            or slack > self.inf_right_guard_max_slack
+        ):
+            return False, scores
+        if (
+            np.isfinite(float(target_scores["forward_distance"]))
+            or not np.isfinite(float(target_scores["right_distance"]))
+            or not np.isfinite(right_delta)
+            or right_delta < self.inf_right_guard_min_right_distance_delta
+            or right_delta > self.inf_right_guard_max_right_distance_delta
+        ):
+            return False, scores
+        if (
+            on_switch < 0.5
+            or active_fraction < self.inf_right_guard_min_active_fraction
+            or active_fraction > self.inf_right_guard_max_active_fraction
+            or stop_proximity > self.inf_right_guard_max_stop_proximity
+            or route_distance < self.inf_right_guard_min_route_distance
+            or route_distance > self.inf_right_guard_max_route_distance
+            or route_opposing > 0.5
+            or route_same_direction < 0.5
+            or route_other_tighter < 0.5
+            or route_count < 0.5
+            or intersection_own_distance
+            < self.inf_right_guard_min_intersection_own_distance
+            or intersection_own_distance
+            > self.inf_right_guard_max_intersection_own_distance
+            or intersection_eta_risk < self.inf_right_guard_min_intersection_eta_risk
+            or intersection_eta_risk > self.inf_right_guard_max_intersection_eta_risk
+            or intersection_other_first < 0.5
+            or intersection_other_tighter < 0.5
+            or prefix_conflict_count
+            < self.inf_right_guard_min_prefix_conflict_count
+            or prefix_conflict_count
+            > self.inf_right_guard_max_prefix_conflict_count
+            or priority_tighter_fraction
+            < self.inf_right_guard_min_priority_tighter_fraction
+            or priority_tighter_fraction
+            > self.inf_right_guard_max_priority_tighter_fraction
+        ):
+            return False, scores
+        return True, scores
+
+    def _apply_inf_right_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.inf_right_guard_enabled or obs_builder is None:
+            return output
+        self._reset_inf_right_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._inf_right_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.MOVE_RIGHT
+            self._inf_right_counts[int(handle)] = (
+                self._inf_right_counts.get(int(handle), 0) + 1
+            )
+            self._trace_inf_right_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _switch_escape_candidate_actions(
         self,
         obs_builder: Any,
@@ -3574,6 +3977,14 @@ class RiskVetoPolicy:
             step,
         )
         output = self._apply_detour_left_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        output = self._apply_inf_right_guard(
             output,
             handles,
             obs_builder,

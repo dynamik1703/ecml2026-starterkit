@@ -9113,3 +9113,51 @@ Targeted start-rescue relax:
     value schedule-level downstream conflicts, not only immediate distance
     progress, because two equal-distance switch choices can have very different
     multi-agent consequences.
+- Scene-1 finite-right inf-avoidance guard:
+  - After the switch-forward promotion, fresh Docker failure mining on
+    `scene_1..5 seed7400..7419` measured aggregate Reward `0.889452`, Success
+    `0.925000`, and `61/100` full-success episodes. Several remaining
+    two-agent failures were not simple final deadlocks.
+  - Rejected quick fixes:
+    - `scene_1 seed7417`: both failed agents were still moving, with one
+      unreachable-route transition and another late missed turn. Single-action
+      alternatives around the apparent branch points were neutral or caused
+      major regressions.
+    - `scene_4 seed7417`: the remaining two-agent head-on stop after the
+      switch-escape fix did not improve under focused holds or releases.
+    - `scene_2 seed7416`: long `DO_NOTHING` windows looked like deadline loss,
+      but short forced-release schedules for agents 0 and 2 were neutral.
+    - `scene_5 seed7418`: the visible `inf` branch for agent 5 did not improve
+      under direct branch overrides or holds, and several holds regressed.
+  - `scene_1 seed7414` had a cleaner partial fix. Agent 3 reached a switch at
+    `t=72` where the chosen `MOVE_FORWARD` target was unreachable
+    (`target_distance=inf`), while a physically adjacent `MOVE_RIGHT` target
+    was finite and unoccupied. Forcing `MOVE_FORWARD -> MOVE_RIGHT` at that
+    single decision improved Reward by `+0.114710` and Success by `+0.166667`,
+    leaving only agent 4 unfinished.
+  - A pre-implementation signature scan over `scene_1 seed7400..7419` found
+    exactly one matching state: `seed7414`, agent 3, `t=72`.
+  - Added a default-off `ECML_RISK_VETO_INF_RIGHT_GUARD_*` mechanism and
+    promoted a narrow Docker profile: scene `scene_1` only, one trigger,
+    `step 72`, current action `MOVE_FORWARD`, FORWARD allowed by masks but
+    RIGHT masked out, FORWARD target unreachable, RIGHT target finite and
+    unoccupied, `distance 230..240`, `slack 135..145`, active fraction
+    `0.60..0.70`, stop proximity `<=0.20`, route distance `0.05..0.08`, no
+    opposing route flag, same-direction and other-tighter route flags set, own
+    intersection distance `0.10..0.12`, ETA risk `0.90..0.93`, prefix conflict
+    count `0.30..0.35`, priority-tighter fraction `0.55..0.65`, and RIGHT
+    target-distance delta in `[-1.5, -0.5]`.
+  - A/B checks with current Docker env:
+    - Causal `scene_1 seed7414`: Reward delta `+0.114710`, Success delta
+      `+0.166667`; exactly one `inf_right_guard` trigger at `t=72`.
+    - `scene_1 seed7400..7419`: mean Reward delta `+0.005735`, mean Success
+      delta `+0.008333`, Reward/Success W/L/T `1/0/19`. Trace confirmed
+      `inf_right_guard` triggered only on `seed7414`.
+    - Heldout `scene_1 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/10`.
+    - Non-`scene_1` smoke (`scene_2`, `scene_3`, `scene_4`, `scene_5`
+      `seed7400..7404`): neutral, Reward/Success W/L/T `0/0/20`.
+  - Decision: promote as a small scene-filtered Docker default. The learning
+    target is an explicit route-reachability feature for candidate actions:
+    the policy should avoid masked-in actions whose next cell has infinite
+    waypoint distance when a nearby finite detour exists.
