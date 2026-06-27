@@ -8920,3 +8920,29 @@ Targeted start-rescue relax:
     Next useful learning step is either more diverse labelled start-delay
     groups or a schedule-level critic trained on full grouped interventions,
     not a row-level classifier.
+- Moving yield-stop micro guard:
+  - Fresh failure mining of the current Docker policy on `scene_1..5`
+    `seed7400..7419` showed the worst `scene_3` case at `seed7401`
+    (Reward `0.340934`, Success `0.5`). Route-variant analysis showed ideal
+    routes have enough slack, but early route interactions around the shared
+    corridor cause three agents to miss deadlines.
+  - Counterfactual single-action tests on `scene_3 seed7401` found that an
+    early `MOVE_FORWARD/MOVE_RIGHT -> STOP_MOVING` for the high-slack yielding
+    train can rescue the episode, while broader stop rules hurt other agents.
+  - Added a default-off `ECML_RISK_VETO_YIELD_STOP_GUARD_*` mechanism for
+    MOVING trains. It is promoted in Docker only with a very narrow profile:
+    one hold per train, `step 4..12`, `slack 88..88.5`, `distance 100..190`,
+    and at least four other trains with tighter effective slack.
+  - A/B checks with current Docker env:
+    - Causal `scene_3 seed7401`: Reward delta `+0.333333`, Success delta
+      `+0.333333`; exactly one yield-stop trigger.
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.016667`, mean Success
+      delta `+0.016667`, Reward/Success W/L/T `1/0/19`; exactly one trigger.
+    - Cross-scene `scene_1..5 seed7400..7419`: aggregate Reward delta
+      `+0.003333`, Success delta `+0.003333`, Reward/Success W/L/T `1/0/99`;
+      the only yield-stop trigger was the causal `scene_3 seed7401` event.
+    - Heldout `scene_1..5 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/50`; no yield-stop triggers.
+  - Decision: promote the narrow profile to Docker. This is a small targeted
+    gain, not a broad scheduling solution. Broader yield-stop profiles were
+    rejected because they introduced reward losses and one success regression.

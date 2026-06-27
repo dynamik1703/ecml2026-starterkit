@@ -482,6 +482,55 @@ class RiskVetoPolicy:
         self._start_delay_counts: dict[int, int] = {}
         self._start_delay_last_step: int | None = None
         self._start_delay_last_seed: int | None = None
+        self.yield_stop_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_YIELD_STOP_GUARD_ENABLED", "0") or "0")
+        )
+        self.yield_stop_guard_transitions = self._env_transition_set(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_TRANSITIONS",
+        ) or {(2, 4), (3, 4)}
+        self.yield_stop_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MIN_STEP",
+            0.0,
+        )
+        self.yield_stop_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_STEP",
+            90.0,
+        )
+        self.yield_stop_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.yield_stop_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MIN_SLACK",
+            85.0,
+        )
+        self.yield_stop_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_SLACK",
+            float("inf"),
+        )
+        self.yield_stop_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MIN_DISTANCE",
+            100.0,
+        )
+        self.yield_stop_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.yield_stop_guard_min_tighter_agents = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MIN_TIGHTER_AGENTS",
+            2.0,
+        )
+        self.yield_stop_guard_max_route_occupancy_count = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_ROUTE_OCCUPANCY_COUNT",
+            0.01,
+        )
+        self.yield_stop_guard_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_INTERSECTION_ETA_RISK",
+            0.20,
+        )
+        self._yield_stop_counts: dict[int, int] = {}
+        self._yield_stop_last_step: int | None = None
+        self._yield_stop_last_seed: int | None = None
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -1475,6 +1524,36 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_yield_stop_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": 4,
+            "candidate_action_name": self._action_name(4),
+            "accepted": True,
+            "candidate_source": "yield_stop_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _reset_start_delay_guard_state(
         self,
         seed: int | None,
@@ -1490,6 +1569,22 @@ class RiskVetoPolicy:
             self._start_delay_counts = {}
         self._start_delay_last_seed = seed
         self._start_delay_last_step = step
+
+    def _reset_yield_stop_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._yield_stop_last_seed != seed
+            or self._yield_stop_last_step is None
+            or step < self._yield_stop_last_step
+        ):
+            self._yield_stop_counts = {}
+        self._yield_stop_last_seed = seed
+        self._yield_stop_last_step = step
 
     @staticmethod
     def _guard_speed(agent: Any) -> float:
@@ -1866,6 +1961,146 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _yield_stop_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.yield_stop_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None:
+            return False, scores
+        if step < self.yield_stop_guard_min_step or step > self.yield_stop_guard_max_step:
+            return False, scores
+        if (int(action), 4) not in self.yield_stop_guard_transitions:
+            return False, scores
+        holds = self._yield_stop_counts.get(handle, 0)
+        if holds >= self.yield_stop_guard_max_holds:
+            return False, scores
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+        except Exception:
+            return False, scores
+        tighter_agents = 0
+        try:
+            for other_handle in obs_builder.env.get_agent_handles():
+                if other_handle == handle:
+                    continue
+                other_distance = float(
+                    obs_builder._current_distance_to_waypoint(other_handle)
+                )
+                other_slack = self._guard_effective_slack(
+                    obs_builder,
+                    other_handle,
+                    other_distance,
+                )
+                if np.isfinite(other_slack) and other_slack < slack:
+                    tighter_agents += 1
+        except Exception:
+            tighter_agents = 0
+
+        route_occupancy_count = (
+            self._observation_scalar(observation, 43)
+            if observation is not None
+            else None
+        )
+        intersection_eta_risk = (
+            self._observation_scalar(observation, 46)
+            if observation is not None
+            else None
+        )
+        scores.update(
+            {
+                "yield_stop_guard_distance": float(distance),
+                "yield_stop_guard_slack": float(slack),
+                "yield_stop_guard_tighter_agents": int(tighter_agents),
+                "yield_stop_guard_holds": int(holds),
+            }
+        )
+        if route_occupancy_count is not None:
+            scores["yield_stop_guard_route_occupancy_count"] = float(
+                route_occupancy_count
+            )
+        if intersection_eta_risk is not None:
+            scores["yield_stop_guard_intersection_eta_risk"] = float(
+                intersection_eta_risk
+            )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.yield_stop_guard_min_distance
+            or distance > self.yield_stop_guard_max_distance
+        ):
+            return False, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.yield_stop_guard_min_slack
+            or slack > self.yield_stop_guard_max_slack
+        ):
+            return False, scores
+        if tighter_agents < self.yield_stop_guard_min_tighter_agents:
+            return False, scores
+        if (
+            route_occupancy_count is not None
+            and route_occupancy_count
+            > self.yield_stop_guard_max_route_occupancy_count
+        ):
+            return False, scores
+        if (
+            intersection_eta_risk is not None
+            and intersection_eta_risk
+            > self.yield_stop_guard_max_intersection_eta_risk
+        ):
+            return False, scores
+        return True, scores
+
+    def _apply_yield_stop_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.yield_stop_guard_enabled or obs_builder is None:
+            return output
+        self._reset_yield_stop_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._yield_stop_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.STOP_MOVING
+            self._yield_stop_counts[int(handle)] = (
+                self._yield_stop_counts.get(int(handle), 0) + 1
+            )
+            self._trace_yield_stop_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _candidate_action_lists(
         self,
         handles: List[int],
@@ -2079,7 +2314,15 @@ class RiskVetoPolicy:
                 if accepted:
                     output[handle] = RailEnvActions(candidate_action)
                     break
-        return self._apply_start_delay_guard(
+        output = self._apply_start_delay_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        return self._apply_yield_stop_guard(
             output,
             handles,
             obs_builder,
