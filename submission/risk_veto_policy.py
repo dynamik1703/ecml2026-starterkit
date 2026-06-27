@@ -946,6 +946,10 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MAX_ROUTE_COUNT",
             float("inf"),
         )
+        self.right_forward_guard_min_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MIN_ROUTE_OTHER_TIGHTER",
+            0.5,
+        )
         self.right_forward_guard_min_intersection_eta_risk = self._env_float(
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MIN_INTERSECTION_ETA_RISK",
             float("-inf"),
@@ -957,6 +961,10 @@ class RiskVetoPolicy:
         self.right_forward_guard_max_intersection_own_distance = self._env_float(
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
             float("inf"),
+        )
+        self.right_forward_guard_min_intersection_other_tighter = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MIN_INTERSECTION_OTHER_TIGHTER",
+            0.5,
         )
         self.right_forward_guard_min_prefix_conflict_count = self._env_float(
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MIN_PREFIX_CONFLICT_COUNT",
@@ -989,6 +997,34 @@ class RiskVetoPolicy:
         self.right_forward_guard_max_right_distance_delta = self._env_float(
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_MAX_RIGHT_DISTANCE_DELTA",
             float("inf"),
+        )
+        self.right_forward_guard_scene5_max_step = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_STEP",
+            float("inf"),
+        )
+        self.right_forward_guard_scene5_max_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.right_forward_guard_scene5_max_slack = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_SLACK",
+            float("inf"),
+        )
+        self.right_forward_guard_scene5_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_ROUTE_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.right_forward_guard_scene5_max_intersection_other_tighter = (
+            self._env_float(
+                "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_INTERSECTION_OTHER_TIGHTER",
+                float("inf"),
+            )
+        )
+        self.right_forward_guard_scene5_max_priority_tighter_fraction = (
+            self._env_float(
+                "ECML_RISK_VETO_RIGHT_FORWARD_GUARD_SCENE5_MAX_PRIORITY_TIGHTER_FRACTION",
+                float("inf"),
+            )
         )
         self._right_forward_counts: dict[int, int] = {}
         self._right_forward_last_step: int | None = None
@@ -4005,11 +4041,11 @@ class RiskVetoPolicy:
             or step > self.right_forward_guard_max_step
         ):
             return False, scores
+        try:
+            scene = runtime_context.get().scene
+        except Exception:
+            scene = None
         if self.right_forward_guard_allowed_scenes:
-            try:
-                scene = runtime_context.get().scene
-            except Exception:
-                scene = None
             if scene not in self.right_forward_guard_allowed_scenes:
                 return False, scores
         holds = self._right_forward_counts.get(handle, 0)
@@ -4135,7 +4171,7 @@ class RiskVetoPolicy:
             or route_distance > self.right_forward_guard_max_route_distance
             or route_opposing < 0.5
             or route_same_direction > 0.5
-            or route_other_tighter < 0.5
+            or route_other_tighter < self.right_forward_guard_min_route_other_tighter
             or route_count < self.right_forward_guard_min_route_count
             or route_count > self.right_forward_guard_max_route_count
             or intersection_own_distance
@@ -4145,7 +4181,8 @@ class RiskVetoPolicy:
             or intersection_eta_risk
             > self.right_forward_guard_max_intersection_eta_risk
             or intersection_other_first > 0.5
-            or intersection_other_tighter < 0.5
+            or intersection_other_tighter
+            < self.right_forward_guard_min_intersection_other_tighter
             or prefix_conflict_count
             < self.right_forward_guard_min_prefix_conflict_count
             or prefix_conflict_count
@@ -4160,6 +4197,18 @@ class RiskVetoPolicy:
             > self.right_forward_guard_max_forward_distance_delta
             or right_distance_delta < self.right_forward_guard_min_right_distance_delta
             or right_distance_delta > self.right_forward_guard_max_right_distance_delta
+        ):
+            return False, scores
+        if scene == "scene_5" and (
+            step > self.right_forward_guard_scene5_max_step
+            or distance > self.right_forward_guard_scene5_max_distance
+            or slack > self.right_forward_guard_scene5_max_slack
+            or route_other_tighter
+            > self.right_forward_guard_scene5_max_route_other_tighter
+            or intersection_other_tighter
+            > self.right_forward_guard_scene5_max_intersection_other_tighter
+            or priority_tighter_fraction
+            > self.right_forward_guard_scene5_max_priority_tighter_fraction
         ):
             return False, scores
         return True, scores

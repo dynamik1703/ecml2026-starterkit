@@ -9335,7 +9335,7 @@ Targeted start-rescue relax:
     fraction `0.80`. The chosen `MOVE_RIGHT` worsens immediate target distance
     by `+1`, while `MOVE_FORWARD` improves it by `-1`.
   - Added a narrow `ECML_RISK_VETO_RIGHT_FORWARD_GUARD_*` mechanism for
-    `MOVE_RIGHT -> MOVE_FORWARD`. Docker enables only the tested profile:
+    `MOVE_RIGHT -> MOVE_FORWARD`. The initial Docker profile targeted:
     scene `scene_2`, `step 203`, one trigger, distance `114..116`, slack
     `123..125`, active fraction `0.82..0.84`, stop proximity `0.57..0.58`,
     route distance `0.44..0.45`, route count `0.65..0.68`, intersection
@@ -9353,3 +9353,37 @@ Targeted start-rescue relax:
     late branch selection should account for route pressure and downstream
     deadline completion, not only the immediate candidate selected by the
     current policy.
+- Scene-5 right-forward rescue extension:
+  - Focused counterfactual mining on the current Docker policy found another
+    Reward+Success-positive `MOVE_RIGHT -> MOVE_FORWARD` event:
+    `scene_5 seed7418`, agent 5, `t=139`, Reward delta `+0.155411`,
+    Success delta `+0.166667`, failed agents `2 -> 1`.
+  - A first broad extension of the scene-2 right-forward profile also hit
+    `scene_5 seed7401` and regressed that seed: Reward
+    `0.819753 -> 0.778601`, Success `0.833333 -> 0.666667`. Trace comparison
+    showed the separating features:
+    - Bad `7401`: step `160`, distance `93`, slack `92`,
+      route/intersection other-tighter `1.0`, priority tighter fraction `0.60`.
+    - Good `7418`: step `139`, distance `82`, slack `55`,
+      route/intersection other-tighter `0.0`, priority tighter fraction `0.0`.
+  - Kept the shared right-forward mechanism for scene 2 and scene 5, but added
+    scene-5-specific caps: max step `145`, max distance `85`, max slack `60`,
+    max route/intersection other-tighter `0.1`, and max priority tighter
+    fraction `0.1`. Scene 2 remains allowed to use the high-pressure
+    other-tighter profile.
+  - A/B checks with current Docker env:
+    - Causal `scene_5 seed7418`: Reward `0.801299 -> 0.956710`, Success
+      `0.666667 -> 0.833333`; exactly one `right_forward` trigger at `t=139`.
+    - Regression smoke `scene_5 seed7401`: neutral after the scene-5 caps,
+      Reward/Success unchanged at `0.819753` / `0.833333`.
+    - Scene-2 smoke `scene_2 seed7416`: original gain preserved, Reward
+      `0.782445 -> 0.860997`, Success `0.666667 -> 0.833333`.
+    - `scene_5 seed7400..7419`: mean Reward delta `+0.007771`, mean Success
+      delta `+0.008333`, Reward/Success W/L/T `1/0/19`.
+    - Heldout `scene_5 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as another low-risk full-success improvement. This is a
+    concrete RL target for branch-value learning under local route conflicts:
+    the policy should recognize low-priority early detours where forward keeps
+    an agent on a better team-level schedule, while avoiding the superficially
+    similar high-priority/tighter-route cases.
