@@ -9073,3 +9073,43 @@ Targeted start-rescue relax:
     large rescue on one failure seed, but still a narrow rule; the broader
     lesson is that the learned policy needs a schedule-level value model for
     early yielding before head-on corridor locks.
+- Scene-4 switch-forward guard:
+  - After the head-on-yield promotion, fresh Docker failure mining on
+    `scene_1..5 seed7400..7419` measured aggregate Reward `0.885733`, Success
+    `0.920000`, and `60/100` full-success episodes. The worst remaining case
+    was `scene_4 seed7401`: Reward `0.628105`, Success `0.5`, failed agents
+    `0`, `2`, and `3`.
+  - Feature tracing around the block showed the useful root decision at
+    `t=279`: agent 3 was moving on a switch at `(20,117)`, the selected action
+    was `MOVE_LEFT`, and both `MOVE_LEFT` and `MOVE_FORWARD` had equal
+    target-distance delta. The left branch led to the later stop at
+    `(22,118)` and blocked two other agents.
+  - Exact counterfactual sweeps found that forcing agent 3 at `t=279` from
+    `MOVE_LEFT` to `MOVE_FORWARD` fully solved the episode: Reward delta
+    `+0.371895`, Success delta `+0.500000`, failed agents `3 -> 0`. Later
+    forced move actions at `t=282..287` helped only partially
+    (`+0.090850` Reward, `+0.166667` Success).
+  - Added a default-off `ECML_RISK_VETO_SWITCH_FORWARD_GUARD_*` mechanism and
+    promoted a very narrow Docker profile: scene `scene_4` only, one trigger,
+    `step 279`, current action `MOVE_LEFT`, local and coordinated FORWARD
+    available, `distance 110..118`, `slack 72..78`, active fraction
+    `0.45..0.55`, stop proximity `>=0.55`, route distance `0.48..0.54`,
+    opposing route occupancy, no same-direction or tighter-route flags, own
+    intersection distance `<=0.03`, ETA risk `0.64..0.70`, prefix conflict
+    count `0.60..0.70`, priority-tighter fraction `0.55..0.65`, and both
+    LEFT and FORWARD target-distance deltas in `[-1.5, -0.5]`.
+  - A/B checks with current Docker env:
+    - Causal `scene_4 seed7401`: Reward delta `+0.371895`, Success delta
+      `+0.500000`; exactly one `switch_forward_guard` trigger at `t=279`.
+    - `scene_4 seed7400..7419`: mean Reward delta `+0.018595`, mean Success
+      delta `+0.025000`, Reward/Success W/L/T `1/0/19`. Trace confirmed
+      `switch_forward_guard` triggered only on `seed7401`.
+    - Heldout `scene_4 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/10`.
+    - Non-`scene_4` smoke (`scene_1`, `scene_2`, `scene_3`, `scene_5`
+      `seed7400..7404`): neutral, Reward/Success W/L/T `0/0/20`.
+  - Decision: promote as a scene-filtered Docker default. This is still
+    heuristic, but it exposes a clear learning target: the policy/gate must
+    value schedule-level downstream conflicts, not only immediate distance
+    progress, because two equal-distance switch choices can have very different
+    multi-agent consequences.
