@@ -1,5 +1,7 @@
 name: Build ECML 2026 Starterkit Docker Image and upload to ghcr.io
 
+# Dispatch target for Flatland competition submission images.
+
 on:
   workflow_dispatch:
     inputs:
