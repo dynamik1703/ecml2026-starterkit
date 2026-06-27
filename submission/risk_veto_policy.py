@@ -666,6 +666,71 @@ class RiskVetoPolicy:
         self._switch_escape_counts: dict[int, int] = {}
         self._switch_escape_last_step: int | None = None
         self._switch_escape_last_seed: int | None = None
+        self.head_on_yield_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_ENABLED", "0") or "0")
+        )
+        self.head_on_yield_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.head_on_yield_guard_actions = self._env_action_set(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_ACTIONS",
+        ) or {2}
+        self.head_on_yield_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_STEP",
+            138.0,
+        )
+        self.head_on_yield_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_STEP",
+            139.0,
+        )
+        self.head_on_yield_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.head_on_yield_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_DISTANCE",
+            165.0,
+        )
+        self.head_on_yield_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_DISTANCE",
+            175.0,
+        )
+        self.head_on_yield_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_SLACK",
+            125.0,
+        )
+        self.head_on_yield_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_SLACK",
+            130.0,
+        )
+        self.head_on_yield_guard_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_ROUTE_DISTANCE",
+            0.15,
+        )
+        self.head_on_yield_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_INTERSECTION_ETA_RISK",
+            0.90,
+        )
+        self.head_on_yield_guard_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
+            0.05,
+        )
+        self.head_on_yield_guard_min_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_PRIORITY_TIGHTER_FRACTION",
+            0.55,
+        )
+        self.head_on_yield_guard_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_MIN_PREFIX_CONFLICT_COUNT",
+            0.25,
+        )
+        self._head_on_yield_counts: dict[int, int] = {}
+        self._head_on_yield_last_step: int | None = None
+        self._head_on_yield_last_seed: int | None = None
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -1704,6 +1769,36 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_head_on_yield_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": 4,
+            "candidate_action_name": self._action_name(4),
+            "accepted": True,
+            "candidate_source": "head_on_yield_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _trace_detour_left_guard(
         self,
         *,
@@ -1796,6 +1891,22 @@ class RiskVetoPolicy:
             self._yield_stop_counts = {}
         self._yield_stop_last_seed = seed
         self._yield_stop_last_step = step
+
+    def _reset_head_on_yield_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._head_on_yield_last_seed != seed
+            or self._head_on_yield_last_step is None
+            or step < self._head_on_yield_last_step
+        ):
+            self._head_on_yield_counts = {}
+        self._head_on_yield_last_seed = seed
+        self._head_on_yield_last_step = step
 
     def _reset_detour_left_guard_state(
         self,
@@ -2343,6 +2454,151 @@ class RiskVetoPolicy:
                 self._yield_stop_counts.get(int(handle), 0) + 1
             )
             self._trace_yield_stop_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
+    def _head_on_yield_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.head_on_yield_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if int(action) not in self.head_on_yield_guard_actions:
+            return False, scores
+        if (
+            step < self.head_on_yield_guard_min_step
+            or step > self.head_on_yield_guard_max_step
+        ):
+            return False, scores
+        if self.head_on_yield_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.head_on_yield_guard_allowed_scenes:
+                return False, scores
+        holds = self._head_on_yield_counts.get(handle, 0)
+        if holds >= self.head_on_yield_guard_max_holds:
+            return False, scores
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+        except Exception:
+            return False, scores
+
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        prefix_conflict_count = self._observation_scalar(observation, 51)
+        priority_tighter_fraction = self._observation_scalar(observation, 53)
+        obs_checks = {
+            "head_on_yield_guard_route_distance": route_distance,
+            "head_on_yield_guard_route_opposing": route_opposing,
+            "head_on_yield_guard_route_other_tighter": route_other_tighter,
+            "head_on_yield_guard_route_count": route_count,
+            "head_on_yield_guard_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "head_on_yield_guard_intersection_eta_risk": intersection_eta_risk,
+            "head_on_yield_guard_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+            "head_on_yield_guard_prefix_conflict_count": prefix_conflict_count,
+            "head_on_yield_guard_priority_tighter_fraction": (
+                priority_tighter_fraction
+            ),
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "head_on_yield_guard_distance": float(distance),
+                "head_on_yield_guard_slack": float(slack),
+                "head_on_yield_guard_holds": int(holds),
+            }
+        )
+        if (
+            not np.isfinite(distance)
+            or distance < self.head_on_yield_guard_min_distance
+            or distance > self.head_on_yield_guard_max_distance
+        ):
+            return False, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.head_on_yield_guard_min_slack
+            or slack > self.head_on_yield_guard_max_slack
+        ):
+            return False, scores
+        if (
+            route_distance > self.head_on_yield_guard_max_route_distance
+            or route_opposing < 0.5
+            or route_other_tighter < 0.5
+            or route_count <= 0.0
+            or intersection_own_distance
+            > self.head_on_yield_guard_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.head_on_yield_guard_min_intersection_eta_risk
+            or intersection_other_tighter < 0.5
+            or prefix_conflict_count
+            < self.head_on_yield_guard_min_prefix_conflict_count
+            or priority_tighter_fraction
+            < self.head_on_yield_guard_min_priority_tighter_fraction
+        ):
+            return False, scores
+        return True, scores
+
+    def _apply_head_on_yield_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.head_on_yield_guard_enabled or obs_builder is None:
+            return output
+        self._reset_head_on_yield_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._head_on_yield_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.STOP_MOVING
+            self._head_on_yield_counts[int(handle)] = (
+                self._head_on_yield_counts.get(int(handle), 0) + 1
+            )
+            self._trace_head_on_yield_guard(
                 handle=int(handle),
                 seed=seed,
                 step=step,
@@ -2931,6 +3187,14 @@ class RiskVetoPolicy:
             step,
         )
         output = self._apply_yield_stop_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        output = self._apply_head_on_yield_guard(
             output,
             handles,
             obs_builder,

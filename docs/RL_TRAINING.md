@@ -9039,3 +9039,37 @@ Targeted start-rescue relax:
   - Decision: promote as a scene-filtered Docker default. This fixes a concrete
     over-conservative-mask failure class without broadening action masking
     globally.
+- Scene-5 head-on yield guard:
+  - After the switch-escape promotion, fresh Docker failure mining on
+    `scene_1..5 seed7400..7419` selected `scene_5 seed7409` as the worst
+    remaining case: Reward `0.539579`, Success `0.5`, failed agents `0`, `2`,
+    and `4`.
+  - Final blocked-cluster analysis showed an early head-on block at
+    `(50,69)/(50,68)`: agents 0 and 2 stopped nose-to-nose around `t=141`,
+    and the later-departing agent 4 eventually got stuck behind them. The
+    useful intervention must happen before the final stop state.
+  - Exact single-action schedule sweeps found that forcing a one-step STOP for
+    agent 0 at `t=138..140` or agent 2 at `t=138..139` resolves the episode.
+    The safer feature signature is the agent-2 yield case: route occupancy is
+    opposing, the other train has tighter priority, ETA overlap risk is high,
+    and the conflict is still one to two cells ahead.
+  - Added a default-off `ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_*` mechanism for
+    MOVING trains. Docker promotes only the narrow scene-5 profile: one hold,
+    action `MOVE_FORWARD`, `step 138..139`, `distance 165..175`,
+    `slack 125..130`, route distance `<=0.15`, opposing route occupancy,
+    route/intersection other-tighter flags, ETA risk `>=0.90`, own
+    intersection distance `<=0.05`, priority-tighter fraction `>=0.55`, and
+    prefix conflict count `>=0.25`.
+  - A/B checks with current Docker env:
+    - Causal `scene_5 seed7409`: Reward delta `+0.305813`, Success delta
+      `+0.500000`; exactly one `head_on_yield_guard` trigger.
+    - `scene_5 seed7400..7419`: mean Reward delta `+0.015291`, mean Success
+      delta `+0.025000`, Reward/Success W/L/T `1/0/19`.
+    - Heldout `scene_5 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/10`.
+    - Non-`scene_5` smoke (`scene_1..4 seed7400..7404`): neutral,
+      Reward/Success W/L/T `0/0/20`.
+  - Decision: promote as another scene-filtered Docker default. This is a real
+    large rescue on one failure seed, but still a narrow rule; the broader
+    lesson is that the learned policy needs a schedule-level value model for
+    early yielding before head-on corridor locks.
