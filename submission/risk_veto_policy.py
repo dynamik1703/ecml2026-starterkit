@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 import torch
+from flatland.core.grid.grid4_utils import get_new_position
 from flatland.envs.rail_env_action import RailEnvActions
 
 from submission import runtime_context
@@ -435,6 +436,52 @@ class RiskVetoPolicy:
             float("-inf"),
         )
         self.trace_path = os.environ.get("ECML_RISK_VETO_TRACE_PATH", "").strip()
+        self.start_delay_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_START_DELAY_GUARD_ENABLED", "0") or "0")
+        )
+        self.start_delay_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MIN_STEP",
+            0.0,
+        )
+        self.start_delay_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MAX_STEP",
+            140.0,
+        )
+        self.start_delay_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MAX_HOLDS",
+            24.0,
+        )
+        self.start_delay_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MIN_SLACK",
+            55.0,
+        )
+        self.start_delay_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MAX_SLACK",
+            float("inf"),
+        )
+        self.start_delay_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MIN_DISTANCE",
+            120.0,
+        )
+        self.start_delay_guard_lookahead = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_LOOKAHEAD",
+            320.0,
+        )
+        self.start_delay_guard_eta_window = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_ETA_WINDOW",
+            12.0,
+        )
+        self.start_delay_guard_min_other_slack_advantage = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MIN_OTHER_SLACK_ADVANTAGE",
+            5.0,
+        )
+        self.start_delay_guard_min_priority_conflicts = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_MIN_PRIORITY_CONFLICTS",
+            1.0,
+        )
+        self._start_delay_counts: dict[int, int] = {}
+        self._start_delay_last_step: int | None = None
+        self._start_delay_last_seed: int | None = None
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -1398,6 +1445,380 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_start_delay_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": 0,
+            "candidate_action_name": self._action_name(0),
+            "accepted": True,
+            "candidate_source": "start_delay_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
+    def _reset_start_delay_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._start_delay_last_seed != seed
+            or self._start_delay_last_step is None
+            or step < self._start_delay_last_step
+        ):
+            self._start_delay_counts = {}
+        self._start_delay_last_seed = seed
+        self._start_delay_last_step = step
+
+    @staticmethod
+    def _guard_speed(agent: Any) -> float:
+        try:
+            speed = float(agent.speed_counter.speed)
+            return speed if speed > 0.0 else 1.0
+        except Exception:
+            return 1.0
+
+    def _guard_route_prefix(
+        self,
+        obs_builder: Any,
+        handle: int,
+        first_action: int | None,
+        max_cells: int,
+    ) -> list[dict[str, Any]]:
+        try:
+            agent = obs_builder.env.agents[handle]
+            if obs_builder._state_matches(agent.state, "DONE", "DONE_REMOVED"):
+                return []
+            if first_action in (1, 2, 3):
+                target_position, target_direction = obs_builder._action_target(
+                    handle,
+                    first_action,
+                )
+                if target_position is None or target_direction is None:
+                    return []
+                prefix = [
+                    {
+                        "step": 1,
+                        "prev_position": agent.position,
+                        "position": target_position,
+                        "direction": target_direction,
+                    }
+                ]
+                current_position = target_position
+                current_direction = target_direction
+                next_step = 2
+            else:
+                current_position, current_direction = obs_builder._agent_route_start(handle)
+                if current_position is None and getattr(agent, "initial_position", None) is not None:
+                    current_position = agent.initial_position
+                    current_direction = agent.initial_direction
+                if current_position is None or current_direction is None:
+                    return []
+                prefix = [
+                    {
+                        "step": 0,
+                        "prev_position": None,
+                        "position": current_position,
+                        "direction": current_direction,
+                    }
+                ]
+                next_step = 1
+
+            if not obs_builder._is_in_bounds(current_position):
+                return []
+            distance_map = obs_builder._get_distance_map(handle)
+            seen = {(current_position, current_direction)}
+            for step_index in range(next_step, max_cells + 1):
+                transitions = obs_builder.env.rail.get_transitions(
+                    (current_position, current_direction)
+                )
+                next_direction = obs_builder._best_progress_direction(
+                    transitions,
+                    current_position,
+                    distance_map,
+                )
+                if next_direction is None:
+                    break
+                next_position = get_new_position(current_position, next_direction)
+                if not obs_builder._is_in_bounds(next_position):
+                    break
+                state = (next_position, next_direction)
+                if state in seen:
+                    break
+                seen.add(state)
+                prefix.append(
+                    {
+                        "step": step_index,
+                        "prev_position": current_position,
+                        "position": next_position,
+                        "direction": next_direction,
+                    }
+                )
+                current_position = next_position
+                current_direction = next_direction
+            return prefix
+        except Exception:
+            return []
+
+    @staticmethod
+    def _guard_departure_offset(obs_builder: Any, handle: int) -> float:
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "WAITING"):
+                return 0.0
+            earliest_departure = getattr(agent, "earliest_departure", None)
+            if earliest_departure is None:
+                return 0.0
+            return max(0.0, float(earliest_departure) - float(obs_builder.env._elapsed_steps))
+        except Exception:
+            return 0.0
+
+    def _guard_effective_slack(
+        self,
+        obs_builder: Any,
+        handle: int,
+        distance: float,
+    ) -> float:
+        try:
+            slack = float(obs_builder._deadline_slack(handle, distance))
+            return slack - self._guard_departure_offset(obs_builder, handle)
+        except Exception:
+            return float("inf")
+
+    def _guard_route_priority_conflicts(
+        self,
+        obs_builder: Any,
+        handle: int,
+        own_prefix: list[dict[str, Any]],
+        own_slack: float,
+        max_cells: int,
+    ) -> tuple[int, dict[str, Any]]:
+        try:
+            own_agent = obs_builder.env.agents[handle]
+        except Exception:
+            return 0, {}
+        own_speed = self._guard_speed(own_agent)
+        own_positions: dict[tuple[int, int], float] = {}
+        own_edges: dict[tuple[tuple[int, int] | None, tuple[int, int]], float] = {}
+        for node in own_prefix:
+            try:
+                eta = float(node["step"]) / own_speed
+                position = node["position"]
+                prev_position = node.get("prev_position")
+            except Exception:
+                continue
+            own_positions.setdefault(position, eta)
+            own_edges.setdefault((prev_position, position), eta)
+
+        conflicts = 0
+        min_other_slack = float("inf")
+        min_eta_gap = float("inf")
+        first_other = None
+        env = obs_builder.env
+        for other_handle, other_agent in enumerate(env.agents):
+            if other_handle == handle:
+                continue
+            try:
+                if (
+                    self._start_delay_counts.get(other_handle, 0) > 0
+                    and obs_builder._state_matches(other_agent.state, "READY_TO_DEPART")
+                ):
+                    continue
+                if obs_builder._state_matches(
+                    other_agent.state,
+                    "DONE",
+                    "DONE_REMOVED",
+                ):
+                    continue
+                other_distance = float(obs_builder._current_distance_to_waypoint(other_handle))
+                other_slack = self._guard_effective_slack(
+                    obs_builder,
+                    other_handle,
+                    other_distance,
+                )
+            except Exception:
+                continue
+            if not np.isfinite(other_slack):
+                continue
+            if (
+                own_slack - other_slack
+                < self.start_delay_guard_min_other_slack_advantage
+            ):
+                continue
+            other_prefix = self._guard_route_prefix(
+                obs_builder,
+                other_handle,
+                None,
+                max_cells,
+            )
+            if not other_prefix:
+                continue
+            other_speed = self._guard_speed(other_agent)
+            other_offset = self._guard_departure_offset(obs_builder, other_handle)
+            has_conflict = False
+            best_gap = float("inf")
+            for node in other_prefix:
+                try:
+                    other_eta = other_offset + float(node["step"]) / other_speed
+                    position = node["position"]
+                    prev_position = node.get("prev_position")
+                except Exception:
+                    continue
+                own_eta = own_positions.get(position)
+                if own_eta is not None:
+                    gap = abs(own_eta - other_eta)
+                    if gap <= self.start_delay_guard_eta_window:
+                        has_conflict = True
+                        best_gap = min(best_gap, gap)
+                reverse_eta = own_edges.get((position, prev_position))
+                if reverse_eta is not None:
+                    gap = abs(reverse_eta - other_eta)
+                    if gap <= self.start_delay_guard_eta_window:
+                        has_conflict = True
+                        best_gap = min(best_gap, gap)
+                if has_conflict and best_gap <= 0.0:
+                    break
+            if not has_conflict:
+                continue
+            conflicts += 1
+            if other_slack < min_other_slack:
+                min_other_slack = other_slack
+                first_other = other_handle
+            min_eta_gap = min(min_eta_gap, best_gap)
+
+        return conflicts, {
+            "start_delay_guard_priority_conflicts": int(conflicts),
+            "start_delay_guard_min_other_slack": (
+                float(min_other_slack) if np.isfinite(min_other_slack) else None
+            ),
+            "start_delay_guard_min_eta_gap": (
+                float(min_eta_gap) if np.isfinite(min_eta_gap) else None
+            ),
+            "start_delay_guard_first_other": first_other,
+        }
+
+    def _start_delay_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.start_delay_guard_enabled:
+            return False, scores
+        if obs_builder is None or step is None:
+            return False, scores
+        if step < self.start_delay_guard_min_step or step > self.start_delay_guard_max_step:
+            return False, scores
+        if action not in (1, 2, 3):
+            return False, scores
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "READY_TO_DEPART"):
+                return False, scores
+        except Exception:
+            return False, scores
+        holds = self._start_delay_counts.get(handle, 0)
+        if holds >= self.start_delay_guard_max_holds:
+            return False, scores
+        try:
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+        except Exception:
+            return False, scores
+        scores.update(
+            {
+                "start_delay_guard_distance": float(distance),
+                "start_delay_guard_slack": float(slack),
+                "start_delay_guard_holds": int(holds),
+            }
+        )
+        if not np.isfinite(distance) or distance < self.start_delay_guard_min_distance:
+            return False, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.start_delay_guard_min_slack
+            or slack > self.start_delay_guard_max_slack
+        ):
+            return False, scores
+
+        own_prefix = self._guard_route_prefix(
+            obs_builder,
+            handle,
+            action,
+            int(self.start_delay_guard_lookahead),
+        )
+        if not own_prefix:
+            return False, scores
+        conflicts, conflict_scores = self._guard_route_priority_conflicts(
+            obs_builder,
+            handle,
+            own_prefix,
+            slack,
+            int(self.start_delay_guard_lookahead),
+        )
+        scores.update(conflict_scores)
+        return conflicts >= self.start_delay_guard_min_priority_conflicts, scores
+
+    def _apply_start_delay_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.start_delay_guard_enabled or obs_builder is None:
+            return output
+        self._reset_start_delay_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            accepted, scores = self._start_delay_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+            )
+            if not accepted:
+                continue
+            adjusted[handle] = RailEnvActions.DO_NOTHING
+            self._start_delay_counts[int(handle)] = (
+                self._start_delay_counts.get(int(handle), 0) + 1
+            )
+            self._trace_start_delay_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _candidate_action_lists(
         self,
         handles: List[int],
@@ -1611,7 +2032,7 @@ class RiskVetoPolicy:
                 if accepted:
                     output[handle] = RailEnvActions(candidate_action)
                     break
-        return output
+        return self._apply_start_delay_guard(output, handles, obs_builder, seed, step)
 
 
 MyPolicy = RiskVetoPolicy

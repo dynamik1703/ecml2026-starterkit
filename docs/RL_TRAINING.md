@@ -8852,3 +8852,41 @@ Targeted start-rescue relax:
     reward-only micro-relaxes, but still not a broad policy improvement. The
     high-risk `STOP_MOVING -> MOVE_FORWARD` part remains unpromoted until it
     can be separated by a learned or multi-seed gate.
+- Start-delay / departure-priority guard probe:
+  - Route-variant analysis on fresh `scene_3` failures showed that at least
+    one hard case (`seed7395`) is not caused by accepted local RiskVeto
+    overrides. A simple scheduled-route oracle resolves the conflict by
+    delaying slack-rich, long-route departures (`agent4` by about 14 steps and
+    `agent5` by about 21 steps).
+  - Added a default-off `ECML_RISK_VETO_START_DELAY_GUARD_*` mechanism. It can
+    hold `READY_TO_DEPART` trains with high slack and long remaining route when
+    their future route has ETA-aligned conflicts with tighter-priority trains,
+    including trains that are still waiting for their earliest departure. A
+    cascade guard prevents trains already delayed by this mechanism from
+    becoming the reason to delay additional ready trains.
+  - Best tested profile:
+    `ENABLED=1`, `MAX_HOLDS=21`, `MIN_SLACK=55`, `MIN_DISTANCE=170`,
+    `LOOKAHEAD=320`, `ETA_WINDOW=12`, minimum other-slack advantage `5`, and
+    at least one priority conflict.
+  - Positive checks:
+    - Causal `scene_3 seed7395`: Reward delta `+0.029791`, Success delta
+      `+0.166667`; the guard delayed exactly agents `4` and `5` for 21 steps
+      each.
+    - `scene_3 7360..7399`: mean Reward delta `+0.027680`, mean Success delta
+      `+0.020833`, Reward W/L/T `15/7/18`, Success W/L/T `6/2/32`.
+  - Regression checks:
+    - Earlier broad profile with `MIN_DISTANCE=150` was weaker on the same
+      40-seed block: mean Reward delta `+0.005141`, Success delta `+0.008333`,
+      Reward W/L/T `13/12/15`.
+    - `MIN_STEP=20` was rejected; it removed too many useful early delays and
+      made `scene_3 7360..7399` worse.
+    - Small cross-scene smoke (`scene_1..5`, three seeds each from `6910`)
+      was mixed: aggregate Reward delta `-0.016395`, Success delta
+      `+0.033333`, Reward W/L/T `3/5/7`, Success W/L/T `3/0/12`.
+      The worst case (`scene_3 seed6910`) improved Success by one train but
+      lost `-0.276081` normalized reward.
+  - Decision: keep this as a default-off candidate, not a Docker default. It is
+    a real Success lever for some `scene_3` failures, but current filters still
+    trade too much normalized reward on small heldout checks. A future version
+    needs a better learned reward-risk or schedule-value selector before
+    promotion.
