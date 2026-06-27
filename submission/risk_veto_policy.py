@@ -874,6 +874,71 @@ class RiskVetoPolicy:
         self._inf_right_counts: dict[int, int] = {}
         self._inf_right_last_step: int | None = None
         self._inf_right_last_seed: int | None = None
+        self.short_block_stop_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_ENABLED", "0") or "0")
+        )
+        self.short_block_stop_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.short_block_stop_guard_actions = self._env_action_set(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_ACTIONS",
+        ) or {1, 3}
+        self.short_block_stop_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_STEP",
+            0.0,
+        )
+        self.short_block_stop_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_STEP",
+            float("inf"),
+        )
+        self.short_block_stop_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.short_block_stop_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_DISTANCE",
+            0.0,
+        )
+        self.short_block_stop_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.short_block_stop_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_SLACK",
+            float("-inf"),
+        )
+        self.short_block_stop_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_SLACK",
+            float("inf"),
+        )
+        self.short_block_stop_guard_min_detour_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_DETOUR_DISTANCE_DELTA",
+            100.0,
+        )
+        self.short_block_stop_guard_max_forward_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_FORWARD_DISTANCE_DELTA",
+            0.0,
+        )
+        self.short_block_stop_guard_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.short_block_stop_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.short_block_stop_guard_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_MIN_PREFIX_CONFLICT_COUNT",
+            float("-inf"),
+        )
+        self._short_block_stop_counts: dict[int, int] = {}
+        self._short_block_stop_last_step: int | None = None
+        self._short_block_stop_last_seed: int | None = None
         self.head_on_yield_guard_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_HEAD_ON_YIELD_GUARD_ENABLED", "0") or "0")
         )
@@ -2128,6 +2193,37 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_short_block_stop_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": int(candidate_action),
+            "candidate_action_name": self._action_name(int(candidate_action)),
+            "accepted": True,
+            "candidate_source": "short_block_stop_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _reset_start_delay_guard_state(
         self,
         seed: int | None,
@@ -2239,6 +2335,22 @@ class RiskVetoPolicy:
             self._inf_right_counts = {}
         self._inf_right_last_seed = seed
         self._inf_right_last_step = step
+
+    def _reset_short_block_stop_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._short_block_stop_last_seed != seed
+            or self._short_block_stop_last_step is None
+            or step < self._short_block_stop_last_step
+        ):
+            self._short_block_stop_counts = {}
+        self._short_block_stop_last_seed = seed
+        self._short_block_stop_last_step = step
 
     @staticmethod
     def _guard_speed(agent: Any) -> float:
@@ -3545,6 +3657,176 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _short_block_stop_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[int | None, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.short_block_stop_guard_enabled:
+            return None, scores
+        if obs_builder is None or step is None or observation is None:
+            return None, scores
+        if int(action) not in self.short_block_stop_guard_actions:
+            return None, scores
+        if (
+            step < self.short_block_stop_guard_min_step
+            or step > self.short_block_stop_guard_max_step
+        ):
+            return None, scores
+        if self.short_block_stop_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.short_block_stop_guard_allowed_scenes:
+                return None, scores
+        holds = self._short_block_stop_counts.get(handle, 0)
+        if holds >= self.short_block_stop_guard_max_holds:
+            return None, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return None, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+            forward_target, _forward_direction = obs_builder._action_target(handle, 2)
+            detour_target, _detour_direction = obs_builder._action_target(handle, int(action))
+            forward_distance = float(obs_builder._target_distance(handle, 2))
+            detour_distance = float(obs_builder._target_distance(handle, int(action)))
+        except Exception:
+            return None, scores
+
+        if forward_target is None or detour_target is None:
+            return None, scores
+        try:
+            forward_occupied = obs_builder._occupied_by_other(forward_target, handle)
+            detour_occupied = obs_builder._occupied_by_other(detour_target, handle)
+        except Exception:
+            return None, scores
+        if not forward_occupied or detour_occupied:
+            return None, scores
+
+        if coordinated_mask[4] >= 0.5:
+            wait_action = 4
+        elif coordinated_mask[0] >= 0.5:
+            wait_action = 0
+        else:
+            return None, scores
+
+        detour_distance_delta = detour_distance - distance
+        forward_distance_delta = forward_distance - distance
+        route_distance = self._observation_scalar(observation, 36)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        prefix_conflict_count = self._observation_scalar(observation, 51)
+        scores.update(
+            {
+                "short_block_stop_guard_distance": float(distance),
+                "short_block_stop_guard_slack": float(slack),
+                "short_block_stop_guard_holds": int(holds),
+                "short_block_stop_guard_forward_distance": float(forward_distance),
+                "short_block_stop_guard_detour_distance": float(detour_distance),
+                "short_block_stop_guard_forward_distance_delta": float(
+                    forward_distance_delta
+                ),
+                "short_block_stop_guard_detour_distance_delta": float(
+                    detour_distance_delta
+                ),
+                "short_block_stop_guard_forward_target": str(forward_target),
+                "short_block_stop_guard_detour_target": str(detour_target),
+            }
+        )
+        if route_distance is not None:
+            scores["short_block_stop_guard_route_distance"] = float(route_distance)
+        if intersection_eta_risk is not None:
+            scores["short_block_stop_guard_intersection_eta_risk"] = float(
+                intersection_eta_risk
+            )
+        if prefix_conflict_count is not None:
+            scores["short_block_stop_guard_prefix_conflict_count"] = float(
+                prefix_conflict_count
+            )
+
+        if (
+            not np.isfinite(distance)
+            or not np.isfinite(slack)
+            or not np.isfinite(forward_distance)
+            or not np.isfinite(detour_distance)
+            or distance < self.short_block_stop_guard_min_distance
+            or distance > self.short_block_stop_guard_max_distance
+            or slack < self.short_block_stop_guard_min_slack
+            or slack > self.short_block_stop_guard_max_slack
+            or detour_distance_delta
+            < self.short_block_stop_guard_min_detour_distance_delta
+            or forward_distance_delta
+            > self.short_block_stop_guard_max_forward_distance_delta
+        ):
+            return None, scores
+        if (
+            route_distance is not None
+            and route_distance > self.short_block_stop_guard_max_route_distance
+        ):
+            return None, scores
+        if (
+            intersection_eta_risk is not None
+            and intersection_eta_risk
+            < self.short_block_stop_guard_min_intersection_eta_risk
+        ):
+            return None, scores
+        if (
+            prefix_conflict_count is not None
+            and prefix_conflict_count
+            < self.short_block_stop_guard_min_prefix_conflict_count
+        ):
+            return None, scores
+        return wait_action, scores
+
+    def _apply_short_block_stop_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.short_block_stop_guard_enabled or obs_builder is None:
+            return output
+        self._reset_short_block_stop_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            candidate_action, scores = self._short_block_stop_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if candidate_action is None:
+                continue
+            adjusted[handle] = RailEnvActions(candidate_action)
+            self._short_block_stop_counts[int(handle)] = (
+                self._short_block_stop_counts.get(int(handle), 0) + 1
+            )
+            self._trace_short_block_stop_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                candidate_action=candidate_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _switch_escape_candidate_actions(
         self,
         obs_builder: Any,
@@ -3985,6 +4267,14 @@ class RiskVetoPolicy:
             step,
         )
         output = self._apply_inf_right_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        output = self._apply_short_block_stop_guard(
             output,
             handles,
             obs_builder,

@@ -9161,3 +9161,44 @@ Targeted start-rescue relax:
     target is an explicit route-reachability feature for candidate actions:
     the policy should avoid masked-in actions whose next cell has infinite
     waypoint distance when a nearby finite detour exists.
+- Scene-1 short-block stop guard:
+  - Fresh failure mining after the finite-right guard measured aggregate
+    Reward `0.890599`, Success `0.926667`, and `61/100` full-success episodes
+    on `scene_1..5 seed7400..7419`. The main remaining two-agent failures
+    were not clean single-action rescues.
+  - Rechecked `scene_4 seed7402` under the exact Docker environment because
+    the local tools default to older Starterkit policy/observation settings.
+    The apparent `MOVE_FORWARD -> MOVE_LEFT` rescue near `t=194` was harmful
+    under the real policy: focused forced schedules over `t=193..195` produced
+    Reward W/L/T `0/5/4`, Success W/L/T `0/1/8`. Decision: reject this
+    cluster for a quick guard.
+  - `scene_1 seed7406` was a cleaner reward rescue. Agent 1 waited until
+    `t=147`, followed a short route, then at `t=173` was at distance `19`
+    with slack `45`. The forward cell `(4,117)` was occupied by agent 0, so
+    the coordinated mask allowed `MOVE_LEFT` and `STOP_MOVING` but not
+    `MOVE_FORWARD`. The policy chose `MOVE_LEFT`; the target distance jumped
+    from `19` to `312`, causing a long detour and a missed deadline.
+  - Exact forced schedules showed that replacing that one action with
+    `STOP_MOVING` avoids the large detour and improves Reward by `+0.044444`
+    while leaving Success unchanged. Longer one-to-three-step holds were
+    equivalent on this seed.
+  - Added a default-off `ECML_RISK_VETO_SHORT_BLOCK_STOP_GUARD_*` mechanism
+    and promoted a narrow Docker profile: scene `scene_1`, current action
+    `MOVE_LEFT`, `step 170..175`, one hold, finite current distance `15..25`,
+    slack `40..50`, forward target occupied by another agent, detour target
+    unoccupied, forward target-distance delta `<=0`, detour target-distance
+    delta `>=150`, route distance `<=0.05`, ETA risk `>=0.90`, and prefix
+    conflict count `>=0.25`. The guard emits `STOP_MOVING` if available, else
+    `DO_NOTHING`.
+  - A/B checks with current Docker env:
+    - Causal `scene_1 seed7406`: Reward `0.507280 -> 0.551724`, Success
+      unchanged at `0.833333`; exactly one `short_block_stop_guard` trigger
+      at `t=173`.
+    - `scene_1 seed7400..7419`: mean Reward delta `+0.002222`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_1 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: keep as a low-risk reward improvement. This is another explicit
+    learning target: the policy should treat "short forward route temporarily
+    occupied" differently from "side branch is genuinely better"; the current
+    action mask alone cannot distinguish those cases.
