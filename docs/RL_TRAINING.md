@@ -9317,3 +9317,39 @@ Targeted start-rescue relax:
   - Decision: promote as a low-risk Reward improvement. This is a clear RL
     learning target for branch-value estimation: equal immediate distances can
     differ substantially in long-horizon team reward.
+- Scene-2 right-forward deadline guard:
+  - The remaining `scene_2 seed7416` failure is a deadline miss, not a final
+    deadlock: agents 0 and 2 are still moving at the episode limit. Focused
+    counterfactual mining on the failed agents produced 88 rows with Reward
+    W/L/T `1/74/13` and Success W/L/T `21/0/67`. Most Success-positive rows
+    were Reward-negative stop/yield tradeoffs.
+  - The only Reward-positive and Success-positive event was
+    `scene_2 seed7416`, agent 2, `t=203`, `MOVE_RIGHT -> MOVE_FORWARD`:
+    Reward delta `+0.078552`, Success delta `+0.166667`, failed agents
+    `2 -> 1`.
+  - The event signature is a late switch decision with high downstream route
+    pressure: distance `115`, slack `124`, active fraction `0.833333`, stop
+    proximity `0.574074`, route occupancy distance `0.444444`, opposing route
+    occupancy and tighter other-route flags set, route/intersection count
+    `0.666667`, intersection ETA risk `0.822222`, and trajectory tighter
+    fraction `0.80`. The chosen `MOVE_RIGHT` worsens immediate target distance
+    by `+1`, while `MOVE_FORWARD` improves it by `-1`.
+  - Added a narrow `ECML_RISK_VETO_RIGHT_FORWARD_GUARD_*` mechanism for
+    `MOVE_RIGHT -> MOVE_FORWARD`. Docker enables only the tested profile:
+    scene `scene_2`, `step 203`, one trigger, distance `114..116`, slack
+    `123..125`, active fraction `0.82..0.84`, stop proximity `0.57..0.58`,
+    route distance `0.44..0.45`, route count `0.65..0.68`, intersection
+    own-distance `<=0.03`, ETA risk `0.82..0.83`, prefix/intersection count
+    `0.65..0.68`, priority tighter fraction `0.79..0.81`, forward distance
+    delta `[-1.5, -0.5]`, and right distance delta `[0.5, 1.5]`.
+  - A/B checks with current Docker env:
+    - Causal `scene_2 seed7416`: Reward `0.782445 -> 0.860997`, Success
+      `0.666667 -> 0.833333`; exactly one `right_forward` trigger at `t=203`.
+    - `scene_2 seed7400..7419`: mean Reward delta `+0.003928`, mean Success
+      delta `+0.008333`, Reward/Success W/L/T `1/0/19`.
+    - Heldout `scene_2 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as a low-risk Reward+Success improvement. RL target:
+    late branch selection should account for route pressure and downstream
+    deadline completion, not only the immediate candidate selected by the
+    current policy.
