@@ -8890,3 +8890,33 @@ Targeted start-rescue relax:
     trade too much normalized reward on small heldout checks. A future version
     needs a better learned reward-risk or schedule-value selector before
     promotion.
+- Start-delay selector dataset and first learned-selector check:
+  - Added `tools/build_start_delay_dataset.py`, which joins accepted
+    `start_delay_guard` trace rows with A/B compare CSVs. It can emit either
+    every delay step or only the first delay per `scene/seed/agent`, which is
+    the cleaner learning target for "should this train be delayed at all?".
+  - Re-ran traced `scene_3 7360..7399` with the d170 guard. The per-step
+    dataset has 928 rows: `479` good, `208` bad, `241` neutral. Because this
+    repeats the same sequence outcome over many hold steps, the first learned
+    row-level selector overfit badly: high train precision but poor seed
+    validation precision.
+  - The first-event-per-agent dataset has 56 rows: `27` good, `14` bad,
+    `15` neutral. Binary and multiclass MLPs were trained with only online
+    features (`env_time`, action ids, and `trace_start_delay_*`, including
+    risk/reward-risk/value head scores).
+  - Explicit OOD validation was built from traced cross-scene
+    `scene_1..5 seed6910..6912`, 25 first-event rows: `10` good, `5` bad,
+    `10` neutral.
+  - Learned-selector result:
+    - Binary selector, trained on scene3 and validated cross-scene, still
+      accepted bad rows. At threshold `0.70`, validation was
+      `7` good / `5` neutral / `2` bad accepted.
+    - Multiclass selector with bad-probability veto avoided bad rows on the
+      cross-scene validation (`7` good / `5` neutral / `0` bad), but accepted
+      only `1` good row on the scene3 training set under the same veto. That
+      would remove most of the measured scene3 gain.
+  - Decision: do not deploy a learned start-delay selector yet. The tooling is
+    useful, but the current labels are too few and too sequence-level/noisy.
+    Next useful learning step is either more diverse labelled start-delay
+    groups or a schedule-level critic trained on full grouped interventions,
+    not a row-level classifier.

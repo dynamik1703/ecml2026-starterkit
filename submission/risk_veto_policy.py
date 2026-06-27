@@ -1724,6 +1724,7 @@ class RiskVetoPolicy:
         handle: int,
         action: int,
         step: int | None,
+        observation: Any | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         scores: dict[str, Any] = {}
         if not self.start_delay_guard_enabled:
@@ -1755,6 +1756,50 @@ class RiskVetoPolicy:
                 "start_delay_guard_holds": int(holds),
             }
         )
+        if observation is not None and self.risk_policy is not None:
+            try:
+                scores.update(
+                    self._action_risk_scores(
+                        self.risk_policy,
+                        observation,
+                        action,
+                        0,
+                        "start_delay_risk_head",
+                    )
+                )
+            except Exception:
+                scores["start_delay_risk_score_error"] = 1.0
+        if observation is not None and self.reward_risk_policy is not None:
+            try:
+                scores.update(
+                    self._action_risk_scores(
+                        self.reward_risk_policy,
+                        observation,
+                        action,
+                        0,
+                        "start_delay_reward_risk_head",
+                    )
+                )
+            except Exception:
+                scores["start_delay_reward_risk_score_error"] = 1.0
+        if observation is not None and self.value_policy is not None:
+            try:
+                with torch.no_grad():
+                    values = self.value_policy.action_value_scores(
+                        np.asarray(observation, dtype=np.float32)
+                    ).squeeze(0).cpu().numpy()
+                move_value = float(values[action])
+                delay_value = float(values[0])
+                scores.update(
+                    {
+                        "start_delay_value_head_move": move_value,
+                        "start_delay_value_head_delay": delay_value,
+                        "start_delay_value_head_delay_minus_move": delay_value
+                        - move_value,
+                    }
+                )
+            except Exception:
+                scores["start_delay_value_score_error"] = 1.0
         if not np.isfinite(distance) or distance < self.start_delay_guard_min_distance:
             return False, scores
         if (
@@ -1787,6 +1832,7 @@ class RiskVetoPolicy:
         output: dict[int, RailEnvActions],
         handles: List[int],
         obs_builder: Any,
+        observations_by_handle: dict[int, Any],
         seed: int | None,
         step: int | None,
     ) -> dict[int, RailEnvActions]:
@@ -1803,6 +1849,7 @@ class RiskVetoPolicy:
                 int(handle),
                 previous_action,
                 step,
+                observations_by_handle.get(int(handle)),
             )
             if not accepted:
                 continue
@@ -2032,7 +2079,14 @@ class RiskVetoPolicy:
                 if accepted:
                     output[handle] = RailEnvActions(candidate_action)
                     break
-        return self._apply_start_delay_guard(output, handles, obs_builder, seed, step)
+        return self._apply_start_delay_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
 
 
 MyPolicy = RiskVetoPolicy
