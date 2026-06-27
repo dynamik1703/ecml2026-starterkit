@@ -201,6 +201,65 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_MIN_REWARD_IMPROVEMENT",
             float("inf"),
         )
+        self.deadline_right_relax_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_ENABLED", "0") or "0")
+        )
+        self.deadline_right_relax_min_step = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_STEP",
+            250.0,
+        )
+        self.deadline_right_relax_max_step = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_STEP",
+            float("inf"),
+        )
+        self.deadline_right_relax_max_candidate_risk = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_CANDIDATE_RISK",
+            0.17,
+        )
+        self.deadline_right_relax_min_risk_improvement = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_RISK_IMPROVEMENT",
+            0.32,
+        )
+        self.deadline_right_relax_max_reward_risk = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_REWARD_RISK",
+            0.56,
+        )
+        self.deadline_right_relax_min_reward_improvement = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_REWARD_IMPROVEMENT",
+            0.32,
+        )
+        self.deadline_right_relax_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_ACTIVE_FRACTION",
+            0.75,
+        )
+        self.deadline_right_relax_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_ACTIVE_FRACTION",
+            0.90,
+        )
+        self.deadline_right_relax_min_time_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_TIME_SLACK",
+            0.25,
+        )
+        self.deadline_right_relax_max_time_slack = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_TIME_SLACK",
+            0.33,
+        )
+        self.deadline_right_relax_max_route_occupancy_distance = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_ROUTE_OCCUPANCY_DISTANCE",
+            0.03,
+        )
+        self.deadline_right_relax_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_INTERSECTION_ETA_RISK",
+            0.80,
+        )
+        self.deadline_right_relax_min_distance_delta = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MIN_DISTANCE_DELTA",
+            250.0,
+        )
+        self.deadline_right_relax_max_distance_delta = self._env_float(
+            "ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_MAX_DISTANCE_DELTA",
+            350.0,
+        )
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -725,6 +784,102 @@ class RiskVetoPolicy:
         scores.pop("reject_reason", None)
         return True
 
+    def _deadline_right_rescue_relax(
+        self,
+        obs_builder: Any | None,
+        handle: int,
+        observation: Any,
+        baseline_action: int,
+        candidate_action: int,
+        step: int | None,
+        scores: dict[str, Any],
+    ) -> bool:
+        if not self.deadline_right_relax_enabled:
+            return False
+        if str(scores.get("candidate_source", "")) != "rerank":
+            return False
+        if int(baseline_action) != 4 or int(candidate_action) != 3:
+            return False
+        if str(scores.get("reject_reason", "")) != "reward_risk_too_high":
+            return False
+        if step is not None and (
+            step < self.deadline_right_relax_min_step
+            or step > self.deadline_right_relax_max_step
+        ):
+            return False
+
+        active_fraction = self._observation_scalar(observation, 32)
+        on_switch = self._observation_scalar(observation, 7)
+        time_slack = self._observation_scalar(observation, 35)
+        route_distance = self._observation_scalar(observation, 36)
+        route_same_direction = self._observation_scalar(observation, 38)
+        route_intersection_eta_risk = self._observation_scalar(observation, 46)
+        route_intersection_other_tighter = self._observation_scalar(observation, 50)
+        obs_checks = {
+            "deadline_right_relax_obs_active_fraction": active_fraction,
+            "deadline_right_relax_obs_on_switch": on_switch,
+            "deadline_right_relax_obs_time_slack": time_slack,
+            "deadline_right_relax_obs_route_distance": route_distance,
+            "deadline_right_relax_obs_route_same_direction": route_same_direction,
+            "deadline_right_relax_obs_intersection_eta_risk": route_intersection_eta_risk,
+            "deadline_right_relax_obs_intersection_other_tighter": (
+                route_intersection_other_tighter
+            ),
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                scores[f"{key}_missing"] = 1.0
+                return False
+            scores[key] = float(value)
+        if (
+            active_fraction < self.deadline_right_relax_min_active_fraction
+            or active_fraction > self.deadline_right_relax_max_active_fraction
+            or on_switch < 0.5
+            or time_slack < self.deadline_right_relax_min_time_slack
+            or time_slack > self.deadline_right_relax_max_time_slack
+            or route_distance > self.deadline_right_relax_max_route_occupancy_distance
+            or route_same_direction < 0.5
+            or route_intersection_eta_risk
+            < self.deadline_right_relax_min_intersection_eta_risk
+            or route_intersection_other_tighter < 0.5
+        ):
+            return False
+
+        candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
+        risk_improvement = float(
+            scores.get("risk_head_baseline_minus_candidate", float("-inf"))
+        )
+        reward_risk = float(scores.get("reward_risk_head_candidate", float("inf")))
+        reward_improvement = float(
+            scores.get("reward_risk_head_baseline_minus_candidate", float("-inf"))
+        )
+        if (
+            candidate_risk > self.deadline_right_relax_max_candidate_risk
+            or risk_improvement < self.deadline_right_relax_min_risk_improvement
+            or reward_risk > self.deadline_right_relax_max_reward_risk
+            or reward_improvement < self.deadline_right_relax_min_reward_improvement
+        ):
+            return False
+
+        distance_delta = self._candidate_distance_delta(
+            obs_builder,
+            handle,
+            candidate_action,
+        )
+        if distance_delta is None:
+            return False
+        scores["deadline_right_relax_distance_delta"] = float(distance_delta)
+        if (
+            distance_delta < self.deadline_right_relax_min_distance_delta
+            or distance_delta > self.deadline_right_relax_max_distance_delta
+        ):
+            return False
+
+        scores["selector_source"] = "deadline_right_relax"
+        scores["deadline_right_relax_accepted"] = 1.0
+        scores.pop("reject_reason", None)
+        return True
+
     def _start_candidate_rescue_relax(
         self,
         observation: Any,
@@ -869,6 +1024,8 @@ class RiskVetoPolicy:
         candidate_action: int,
         scores: dict[str, Any],
     ) -> bool:
+        if scores.get("selector_source") == "deadline_right_relax":
+            return False
         action_limit = self.max_action_distance_delta.get(
             int(candidate_action),
             float("inf"),
@@ -1389,6 +1546,16 @@ class RiskVetoPolicy:
                     )
                 if not accepted:
                     accepted = self._start_candidate_rescue_relax(
+                        observations_by_handle.get(handle),
+                        baseline_action,
+                        candidate_action,
+                        step,
+                        scores,
+                    )
+                if not accepted:
+                    accepted = self._deadline_right_rescue_relax(
+                        obs_builder,
+                        int(handle),
                         observations_by_handle.get(handle),
                         baseline_action,
                         candidate_action,

@@ -8812,3 +8812,43 @@ Targeted start-rescue relax:
     not a broad policy improvement. It is safe enough to promote because it
     fixes an observed missed rescue and showed no measured regression in fresh
     or heldout checks.
+- Deadline-right rescue relax:
+  - Fresh current-Docker mining on `scene_1 7320..7359` found a hard failure
+    in `seed7331` (Success `0.5`, Reward `0.633199`, failed agents
+    `2,4,5`). Focused counterfactuals for failed agent `5` showed a clean
+    late escape class:
+    - `STOP_MOVING -> MOVE_RIGHT` on steps `284..300`: Success W/L/T
+      `17/0/0`, Reward W/L/T `11/2/4`.
+    - `STOP_MOVING -> MOVE_FORWARD` on steps `303..332`: Success W/L/T
+      `30/0/0`, Reward W/L/T `0/0/30`.
+  - Promoted only the safer `STOP_MOVING -> MOVE_RIGHT` part. Trace showed
+    the rerank candidate was present but rejected by `reward_risk_too_high`;
+    risk-head and reward-risk-head both strongly preferred the candidate
+    (`risk improvement ~= 0.33..0.44`, reward-risk improvement
+    `~= 0.33..0.35`), while the absolute reward-risk was just above the
+    global StopRight ceiling. The usual distance-delta veto would also block
+    it (`distance_delta=317`), so the promoted relax uses a narrow
+    selector-source-specific bypass instead of widening the global distance
+    limit.
+  - Docker profile:
+    `ECML_RISK_VETO_DEADLINE_RIGHT_RELAX_ENABLED=1`, min step `250`,
+    `candidate_risk <= 0.17`, risk improvement at least `0.32`,
+    `reward_risk <= 0.56`, reward-risk improvement at least `0.32`, active
+    fraction in `[0.75, 0.90]`, time-slack in `[0.25, 0.33]`, route occupancy
+    distance at most `0.03`, intersection ETA risk at least `0.80`, and
+    distance delta in `[250, 350]`.
+  - A/B against the previous Docker default:
+    - Single causal check `scene_1 seed7331`: Reward delta `+0.088019`,
+      Success delta `+0.166667`, Reward/Success W/L/T `1/0/0`; trace accepted
+      exactly one `deadline_right_relax`.
+    - Mining block `scene_1 7320..7359`: mean Reward delta `+0.002200`,
+      mean Success delta `+0.004167`, Reward W/L/T `1/0/39`, Success W/L/T
+      `1/0/39`; exactly one `deadline_right_relax` trigger.
+    - Fresh `scene_1 7360..7399`: neutral, Reward/Success W/L/T `0/0/40`;
+      the relax did not trigger.
+    - Cross-scene heldout `scene_1..5`, 10 episodes each from seed `6910`:
+      neutral, Reward/Success W/L/T `0/0/50`; the relax did not trigger.
+  - Interpretation: this is a stronger targeted Success fix than the previous
+    reward-only micro-relaxes, but still not a broad policy improvement. The
+    high-risk `STOP_MOVING -> MOVE_FORWARD` part remains unpromoted until it
+    can be separated by a learned or multi-seed gate.
