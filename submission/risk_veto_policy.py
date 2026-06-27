@@ -439,6 +439,14 @@ class RiskVetoPolicy:
         self.start_delay_guard_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_START_DELAY_GUARD_ENABLED", "0") or "0")
         )
+        self.start_delay_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_START_DELAY_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
         self.start_delay_guard_min_step = self._env_float(
             "ECML_RISK_VETO_START_DELAY_GUARD_MIN_STEP",
             0.0,
@@ -1922,6 +1930,13 @@ class RiskVetoPolicy:
             return False, scores
         if obs_builder is None or step is None:
             return False, scores
+        if self.start_delay_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.start_delay_guard_allowed_scenes:
+                return False, scores
         if step < self.start_delay_guard_min_step or step > self.start_delay_guard_max_step:
             return False, scores
         if action not in (1, 2, 3):

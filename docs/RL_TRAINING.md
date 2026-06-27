@@ -8976,3 +8976,30 @@ Targeted start-rescue relax:
   - Decision: promote the narrow profile to Docker. As with yield-stop, this
     is a targeted failure-class fix, not evidence that broad handcrafted
     detours are safe.
+- Scene-5 early start-delay guard:
+  - Fresh `scene_5 seed7418` analysis showed a pure scheduling failure:
+    current Docker Reward `0.511255`, Success `0.5`, failed agents `1`, `2`,
+    and `5`. Route scheduling resolves the ideal greedy conflict by delaying
+    one departure by about two steps.
+  - Reusing the default-off start-delay mechanism with a broad profile fixed
+    the causal seed, but was too wide on `scene_5 seed7400..7419`
+    (`86` triggers, Reward W/L/T `5/3/12`, Success W/L/T `3/1/16`).
+  - A narrower early-departure profile was selected: scene `scene_5` only,
+    max two holds, `step <= 15`, `slack >= 101`, `distance >= 200`,
+    lookahead `220`, ETA window `4`, and at least `25` slack advantage over
+    the conflicting train.
+  - A/B checks with current Docker env:
+    - Causal `scene_5 seed7418`: Reward delta `+0.290043`, Success delta
+      `+0.166667`, exactly two start-delay triggers.
+    - `scene_5 seed7400..7419`: mean Reward delta `+0.018579`, mean Success
+      delta `+0.008333`, Reward W/L/T `2/0/18`, Success W/L/T `1/0/19`;
+      six triggers.
+    - Cross-scene global activation was rejected: `scene_1..5 seed7400..7419`
+      had aggregate Success delta `-0.001667`, with two Success losses in
+      `scene_2`.
+    - Heldout `scene_5 seed7420..7429`: Reward delta `+0.054423`, Success
+      delta `+0.066667`, Reward/Success W/L/T `1/0/9`; two triggers.
+  - Decision: promote only as a scene-filtered Docker default via
+    `ECML_RISK_VETO_START_DELAY_GUARD_ALLOWED_SCENES=scene_5`. This keeps the
+    useful scene-5 scheduling fix while avoiding the observed cross-scene
+    regressions.
