@@ -8772,3 +8772,18 @@ Targeted start-rescue relax:
   - Interpretation: this is still a small, targeted safety/rescue gain, not a
     broad performance jump. It is worth promoting because it fixes a causal
     Success failure with no observed regressions on fresh/heldout checks.
+- Follow-up `scene_3`/`scene_5` failure probes:
+  - `scene_3` top failures from the same `7200..7239` slice did not expose a
+    promotable quick rescue. Reverting accepted `STOP_MOVING -> MOVE_*`
+    overrides was harmful overall: Reward W/L/T `0/2/3`, Success W/L/T
+    `0/1/4`. Rejected `MOVE_FORWARD -> STOP_MOVING` candidates were also
+    harmful: Reward W/L/T `0/2/2`, Success W/L/T `0/1/3`. Rejected
+    `MOVE_FORWARD -> MOVE_RIGHT` candidates were neutral (`0/0/3`), and
+    repeated `STOP_MOVING -> DO_NOTHING` candidates on `seed7219` were neutral
+    (`0/0/5`).
+  - `scene_5` showed a tempting `seed7227` pattern where `STOP_MOVING ->
+    MOVE_RIGHT` was rejected repeatedly before a later accepted right move.
+    Direct counterfactuals on the early rejected right moves were fully
+    neutral (`0/0/8`), and reverting the later accepted right move was also
+    neutral (`0/0/1`). Decision: no `scene_3` or `scene_5` guard promotion
+    from these probes.
