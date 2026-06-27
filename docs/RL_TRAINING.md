@@ -9243,3 +9243,35 @@ Targeted start-rescue relax:
   - Decision: promote as a narrow scene-filtered default. This is a learned
     policy target: early post-departure yielding can be valuable even when the
     immediate individual action is legal and distance-decreasing.
+- Scene-3 secondary early-yield guard:
+  - The same focused counterfactual pass contained a success-only label on
+    `scene_3 seed7419`: agent 2 at `t=6`, `MOVE_RIGHT -> STOP_MOVING`.
+    The current Docker policy failed agent 3 on this seed
+    (`Reward 0.833333`, `Success 0.833333`).
+  - A broad profile over `t=6..14` was rejected. It triggered later stops
+    (`agent 3 t=10`, `agent 2 t=13`) and reduced Reward to `0.666667`
+    without improving Success. This confirmed that the fix must be an exact
+    micro-pattern, not a general early-stop window.
+  - The existing early-yield implementation assumed the baseline action was
+    always `MOVE_FORWARD` and rejected `MOVE_RIGHT` cases when the forward
+    target distance was infinite. The guard now checks the chosen action's
+    target-distance delta, while keeping the old primary profile unchanged for
+    action `MOVE_FORWARD`.
+  - Added a secondary default-on Docker profile:
+    scene `scene_3`, action `MOVE_RIGHT`, `step 6`, one hold, departure lag
+    exactly `3`, distance `126..128`, slack `55.5..56.5`, active fraction
+    `0.30..0.36`, stop proximity `0.52..0.54`, route distance `>=0.99`, route
+    count `<=0.01`, prefix conflict count `<=0.01`, and chosen-action
+    distance delta `<=0`.
+  - A/B checks with current Docker env:
+    - Causal `scene_3 seed7419`: Reward unchanged at `0.833333`, Success
+      `0.833333 -> 1.000000`; exactly one secondary `early_yield_guard`
+      trigger at `t=6`.
+    - `scene_3 seed7400..7419`: Reward W/L/T `0/0/20`, Success W/L/T
+      `1/0/19`, mean Success delta `+0.008333`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as a low-risk full-success improvement. Strategically,
+    this reinforces the same RL target as the first early-yield guard: the
+    policy needs to learn when a short personal pause improves downstream team
+    completion even though the immediate legal move is distance-decreasing.

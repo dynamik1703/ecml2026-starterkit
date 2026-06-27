@@ -1017,6 +1017,92 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_EARLY_YIELD_GUARD_MAX_PREFIX_CONFLICT_COUNT",
             float("inf"),
         )
+        self.early_yield_guard_max_action_distance_delta = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD_MAX_ACTION_DISTANCE_DELTA",
+            0.0,
+        )
+        self.early_yield_guard2_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_EARLY_YIELD_GUARD2_ENABLED", "0") or "0")
+        )
+        self.early_yield_guard2_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_EARLY_YIELD_GUARD2_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.early_yield_guard2_actions = self._env_action_set(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_ACTIONS",
+        ) or {2}
+        self.early_yield_guard2_min_step = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_STEP",
+            0.0,
+        )
+        self.early_yield_guard2_max_step = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_STEP",
+            float("inf"),
+        )
+        self.early_yield_guard2_max_holds = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_HOLDS",
+            1.0,
+        )
+        self.early_yield_guard2_min_departure_lag = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_DEPARTURE_LAG",
+            float("-inf"),
+        )
+        self.early_yield_guard2_max_departure_lag = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_DEPARTURE_LAG",
+            float("inf"),
+        )
+        self.early_yield_guard2_min_distance = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_DISTANCE",
+            0.0,
+        )
+        self.early_yield_guard2_max_distance = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.early_yield_guard2_min_slack = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_SLACK",
+            float("-inf"),
+        )
+        self.early_yield_guard2_max_slack = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_SLACK",
+            float("inf"),
+        )
+        self.early_yield_guard2_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.early_yield_guard2_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.early_yield_guard2_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.early_yield_guard2_max_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_STOP_PROXIMITY",
+            float("inf"),
+        )
+        self.early_yield_guard2_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.early_yield_guard2_max_route_count = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_ROUTE_COUNT",
+            float("inf"),
+        )
+        self.early_yield_guard2_max_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_PREFIX_CONFLICT_COUNT",
+            float("inf"),
+        )
+        self.early_yield_guard2_max_action_distance_delta = self._env_float(
+            "ECML_RISK_VETO_EARLY_YIELD_GUARD2_MAX_ACTION_DISTANCE_DELTA",
+            0.0,
+        )
         self._early_yield_counts: dict[int, int] = {}
         self._early_yield_last_step: int | None = None
         self._early_yield_last_seed: int | None = None
@@ -3954,35 +4040,54 @@ class RiskVetoPolicy:
             )
         return adjusted
 
-    def _early_yield_guard_scores(
+    def _early_yield_guard_scores_for_profile(
         self,
         obs_builder: Any,
         handle: int,
         action: int,
         step: int | None,
         observation: Any | None = None,
+        *,
+        profile_name: str,
+        enabled: bool,
+        allowed_scenes: set[str],
+        actions: set[int],
+        min_step: float,
+        max_step: float,
+        max_holds: float,
+        min_departure_lag: float,
+        max_departure_lag: float,
+        min_distance: float,
+        max_distance: float,
+        min_slack: float,
+        max_slack: float,
+        min_active_fraction: float,
+        max_active_fraction: float,
+        min_stop_proximity: float,
+        max_stop_proximity: float,
+        min_route_distance: float,
+        max_route_count: float,
+        max_prefix_conflict_count: float,
+        max_action_distance_delta: float,
     ) -> tuple[bool, dict[str, Any]]:
         scores: dict[str, Any] = {}
-        if not self.early_yield_guard_enabled:
+        if not enabled:
             return False, scores
         if obs_builder is None or step is None or observation is None:
             return False, scores
-        if int(action) not in self.early_yield_guard_actions:
+        if int(action) not in actions:
             return False, scores
-        if (
-            step < self.early_yield_guard_min_step
-            or step > self.early_yield_guard_max_step
-        ):
+        if step < min_step or step > max_step:
             return False, scores
-        if self.early_yield_guard_allowed_scenes:
+        if allowed_scenes:
             try:
                 scene = runtime_context.get().scene
             except Exception:
                 scene = None
-            if scene not in self.early_yield_guard_allowed_scenes:
+            if scene not in allowed_scenes:
                 return False, scores
         holds = self._early_yield_counts.get(handle, 0)
-        if holds >= self.early_yield_guard_max_holds:
+        if holds >= max_holds:
             return False, scores
 
         try:
@@ -3996,12 +4101,14 @@ class RiskVetoPolicy:
             local_mask = obs_builder._build_local_action_mask(handle)
             coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
             departure_lag = float(step - int(agent.earliest_departure))
+            action_distance = float(obs_builder._target_distance(handle, int(action)))
             forward_distance = float(obs_builder._target_distance(handle, 2))
         except Exception:
             return False, scores
 
         if coordinated_mask[4] < 0.5:
             return False, scores
+        action_distance_delta = action_distance - distance
         forward_distance_delta = forward_distance - distance
         active_fraction = self._observation_scalar(observation, 32)
         stop_proximity = self._observation_scalar(observation, 33)
@@ -4021,10 +4128,14 @@ class RiskVetoPolicy:
             scores[key] = float(value)
         scores.update(
             {
+                "early_yield_guard_profile": profile_name,
                 "early_yield_guard_distance": float(distance),
                 "early_yield_guard_slack": float(slack),
                 "early_yield_guard_holds": int(holds),
                 "early_yield_guard_departure_lag": float(departure_lag),
+                "early_yield_guard_action_distance_delta": float(
+                    action_distance_delta
+                ),
                 "early_yield_guard_forward_distance_delta": float(
                     forward_distance_delta
                 ),
@@ -4034,25 +4145,117 @@ class RiskVetoPolicy:
         if (
             not np.isfinite(distance)
             or not np.isfinite(slack)
-            or not np.isfinite(forward_distance_delta)
-            or distance < self.early_yield_guard_min_distance
-            or distance > self.early_yield_guard_max_distance
-            or slack < self.early_yield_guard_min_slack
-            or slack > self.early_yield_guard_max_slack
-            or departure_lag < self.early_yield_guard_min_departure_lag
-            or departure_lag > self.early_yield_guard_max_departure_lag
-            or active_fraction < self.early_yield_guard_min_active_fraction
-            or active_fraction > self.early_yield_guard_max_active_fraction
-            or stop_proximity < self.early_yield_guard_min_stop_proximity
-            or stop_proximity > self.early_yield_guard_max_stop_proximity
-            or route_distance < self.early_yield_guard_min_route_distance
-            or route_count > self.early_yield_guard_max_route_count
+            or not np.isfinite(action_distance_delta)
+            or distance < min_distance
+            or distance > max_distance
+            or slack < min_slack
+            or slack > max_slack
+            or departure_lag < min_departure_lag
+            or departure_lag > max_departure_lag
+            or active_fraction < min_active_fraction
+            or active_fraction > max_active_fraction
+            or stop_proximity < min_stop_proximity
+            or stop_proximity > max_stop_proximity
+            or route_distance < min_route_distance
+            or route_count > max_route_count
             or prefix_conflict_count
-            > self.early_yield_guard_max_prefix_conflict_count
-            or forward_distance_delta > 0.0
+            > max_prefix_conflict_count
+            or action_distance_delta > max_action_distance_delta
         ):
             return False, scores
         return True, scores
+
+    def _early_yield_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        profiles = [
+            (
+                "primary",
+                self.early_yield_guard_enabled,
+                self.early_yield_guard_allowed_scenes,
+                self.early_yield_guard_actions,
+                self.early_yield_guard_min_step,
+                self.early_yield_guard_max_step,
+                self.early_yield_guard_max_holds,
+                self.early_yield_guard_min_departure_lag,
+                self.early_yield_guard_max_departure_lag,
+                self.early_yield_guard_min_distance,
+                self.early_yield_guard_max_distance,
+                self.early_yield_guard_min_slack,
+                self.early_yield_guard_max_slack,
+                self.early_yield_guard_min_active_fraction,
+                self.early_yield_guard_max_active_fraction,
+                self.early_yield_guard_min_stop_proximity,
+                self.early_yield_guard_max_stop_proximity,
+                self.early_yield_guard_min_route_distance,
+                self.early_yield_guard_max_route_count,
+                self.early_yield_guard_max_prefix_conflict_count,
+                self.early_yield_guard_max_action_distance_delta,
+            ),
+            (
+                "secondary",
+                self.early_yield_guard2_enabled,
+                self.early_yield_guard2_allowed_scenes,
+                self.early_yield_guard2_actions,
+                self.early_yield_guard2_min_step,
+                self.early_yield_guard2_max_step,
+                self.early_yield_guard2_max_holds,
+                self.early_yield_guard2_min_departure_lag,
+                self.early_yield_guard2_max_departure_lag,
+                self.early_yield_guard2_min_distance,
+                self.early_yield_guard2_max_distance,
+                self.early_yield_guard2_min_slack,
+                self.early_yield_guard2_max_slack,
+                self.early_yield_guard2_min_active_fraction,
+                self.early_yield_guard2_max_active_fraction,
+                self.early_yield_guard2_min_stop_proximity,
+                self.early_yield_guard2_max_stop_proximity,
+                self.early_yield_guard2_min_route_distance,
+                self.early_yield_guard2_max_route_count,
+                self.early_yield_guard2_max_prefix_conflict_count,
+                self.early_yield_guard2_max_action_distance_delta,
+            ),
+        ]
+        last_scores: dict[str, Any] = {}
+        for profile in profiles:
+            accepted, scores = self._early_yield_guard_scores_for_profile(
+                obs_builder,
+                handle,
+                action,
+                step,
+                observation,
+                profile_name=profile[0],
+                enabled=profile[1],
+                allowed_scenes=profile[2],
+                actions=profile[3],
+                min_step=profile[4],
+                max_step=profile[5],
+                max_holds=profile[6],
+                min_departure_lag=profile[7],
+                max_departure_lag=profile[8],
+                min_distance=profile[9],
+                max_distance=profile[10],
+                min_slack=profile[11],
+                max_slack=profile[12],
+                min_active_fraction=profile[13],
+                max_active_fraction=profile[14],
+                min_stop_proximity=profile[15],
+                max_stop_proximity=profile[16],
+                min_route_distance=profile[17],
+                max_route_count=profile[18],
+                max_prefix_conflict_count=profile[19],
+                max_action_distance_delta=profile[20],
+            )
+            if accepted:
+                return True, scores
+            if scores:
+                last_scores = scores
+        return False, last_scores
 
     def _apply_early_yield_guard(
         self,
@@ -4063,7 +4266,10 @@ class RiskVetoPolicy:
         seed: int | None,
         step: int | None,
     ) -> dict[int, RailEnvActions]:
-        if not self.early_yield_guard_enabled or obs_builder is None:
+        if (
+            not (self.early_yield_guard_enabled or self.early_yield_guard2_enabled)
+            or obs_builder is None
+        ):
             return output
         self._reset_early_yield_guard_state(seed, step)
         adjusted = dict(output)
