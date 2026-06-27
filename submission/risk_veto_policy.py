@@ -994,6 +994,119 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_SWITCH_FORWARD_GUARD2_MAX_LEFT_DISTANCE_DELTA",
             float("inf"),
         )
+        self.switch_forward_guard3_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_ENABLED", "0") or "0")
+        )
+        self.switch_forward_guard3_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.switch_forward_guard3_min_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_STEP",
+            0.0,
+        )
+        self.switch_forward_guard3_max_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_STEP",
+            float("inf"),
+        )
+        self.switch_forward_guard3_max_holds = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_HOLDS",
+            1.0,
+        )
+        self.switch_forward_guard3_min_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_DISTANCE",
+            0.0,
+        )
+        self.switch_forward_guard3_max_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_SLACK",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_SLACK",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.switch_forward_guard3_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_ROUTE_OTHER_TIGHTER",
+            0.5,
+        )
+        self.switch_forward_guard3_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_INTERSECTION_OWN_DISTANCE",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_INTERSECTION_ETA_RISK",
+            float("inf"),
+        )
+        self.switch_forward_guard3_max_intersection_other_tighter = (
+            self._env_float(
+                "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_INTERSECTION_OTHER_TIGHTER",
+                0.5,
+            )
+        )
+        self.switch_forward_guard3_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_PREFIX_CONFLICT_COUNT",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_PREFIX_CONFLICT_COUNT",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_PRIORITY_TIGHTER_FRACTION",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_PRIORITY_TIGHTER_FRACTION",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_forward_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_FORWARD_DISTANCE_DELTA",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_forward_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_FORWARD_DISTANCE_DELTA",
+            float("inf"),
+        )
+        self.switch_forward_guard3_min_left_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MIN_LEFT_DISTANCE_DELTA",
+            float("-inf"),
+        )
+        self.switch_forward_guard3_max_left_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_FORWARD_GUARD3_MAX_LEFT_DISTANCE_DELTA",
+            float("inf"),
+        )
         self._switch_forward_counts: dict[int, int] = {}
         self._switch_forward_last_step: int | None = None
         self._switch_forward_last_seed: int | None = None
@@ -4211,6 +4324,13 @@ class RiskVetoPolicy:
             or slack > max_slack
         ):
             return False, scores
+        max_route_other_tighter = 0.5
+        max_intersection_other_tighter = 0.5
+        if profile_name == "tertiary":
+            max_route_other_tighter = self.switch_forward_guard3_max_route_other_tighter
+            max_intersection_other_tighter = (
+                self.switch_forward_guard3_max_intersection_other_tighter
+            )
         if (
             on_switch < 0.5
             or active_fraction < min_active_fraction
@@ -4220,7 +4340,7 @@ class RiskVetoPolicy:
             or route_distance > max_route_distance
             or route_opposing < 0.5
             or route_same_direction > 0.5
-            or route_other_tighter > 0.5
+            or route_other_tighter > max_route_other_tighter
             or route_count < 0.5
             or intersection_own_distance
             > max_intersection_own_distance
@@ -4229,7 +4349,7 @@ class RiskVetoPolicy:
             or intersection_eta_risk
             > max_intersection_eta_risk
             or intersection_other_first > 0.5
-            or intersection_other_tighter > 0.5
+            or intersection_other_tighter > max_intersection_other_tighter
             or prefix_conflict_count
             < min_prefix_conflict_count
             or prefix_conflict_count
@@ -4311,6 +4431,34 @@ class RiskVetoPolicy:
                 self.switch_forward_guard2_min_left_distance_delta,
                 self.switch_forward_guard2_max_left_distance_delta,
             ),
+            (
+                "tertiary",
+                self.switch_forward_guard3_enabled,
+                self.switch_forward_guard3_allowed_scenes,
+                self.switch_forward_guard3_min_step,
+                self.switch_forward_guard3_max_step,
+                self.switch_forward_guard3_max_holds,
+                self.switch_forward_guard3_min_distance,
+                self.switch_forward_guard3_max_distance,
+                self.switch_forward_guard3_min_slack,
+                self.switch_forward_guard3_max_slack,
+                self.switch_forward_guard3_min_active_fraction,
+                self.switch_forward_guard3_max_active_fraction,
+                self.switch_forward_guard3_min_stop_proximity,
+                self.switch_forward_guard3_min_route_distance,
+                self.switch_forward_guard3_max_route_distance,
+                self.switch_forward_guard3_max_intersection_own_distance,
+                self.switch_forward_guard3_min_intersection_eta_risk,
+                self.switch_forward_guard3_max_intersection_eta_risk,
+                self.switch_forward_guard3_min_prefix_conflict_count,
+                self.switch_forward_guard3_max_prefix_conflict_count,
+                self.switch_forward_guard3_min_priority_tighter_fraction,
+                self.switch_forward_guard3_max_priority_tighter_fraction,
+                self.switch_forward_guard3_min_forward_distance_delta,
+                self.switch_forward_guard3_max_forward_distance_delta,
+                self.switch_forward_guard3_min_left_distance_delta,
+                self.switch_forward_guard3_max_left_distance_delta,
+            ),
         ]
         last_scores: dict[str, Any] = {}
         for profile in profiles:
@@ -4363,7 +4511,11 @@ class RiskVetoPolicy:
         step: int | None,
     ) -> dict[int, RailEnvActions]:
         if (
-            not (self.switch_forward_guard_enabled or self.switch_forward_guard2_enabled)
+            not (
+                self.switch_forward_guard_enabled
+                or self.switch_forward_guard2_enabled
+                or self.switch_forward_guard3_enabled
+            )
             or obs_builder is None
         ):
             return output

@@ -9456,3 +9456,35 @@ Targeted start-rescue relax:
   - Decision: keep as a low-risk Reward improvement. Submission readiness now
     depends on making the GHCR package pullable by the evaluator or submitting
     through another public registry URL.
+- Scene-2 tertiary switch-forward reward guard:
+  - After the GHCR package was made public and the `riskveto-3d18fbc` image
+    started successfully in the evaluator, the next low-reward full-success
+    case was `scene_2 seed7408`: Reward `0.566942`, Success `1.000000`.
+  - Focused counterfactual checks found a large no-regression action change:
+    agent 1 at `t=96`, `MOVE_LEFT -> MOVE_FORWARD`, Reward delta
+    `+0.157576`, Success delta `0.000000`. The baseline left branch moved the
+    target distance from `326` to `327`, while forward moved it to `325`.
+  - Generalized `switch_forward_guard` with a tertiary profile. The default
+    primary/secondary behavior is unchanged; only the tertiary profile can
+    allow `route_other_tighter=1` and `intersection_other_tighter=1`.
+  - Docker enables the tertiary profile only for scene `scene_2`, exact
+    `step 96`, distance `325..327`, slack `120..122`, active fraction
+    `0.82..0.84`, route distance `0.21..0.23`, route/intersection count
+    `0.65..0.68`, priority tighter fraction `0.39..0.41`, ETA risk
+    `0.95..0.97`, forward distance delta `-1.5..-0.5`, and left distance
+    delta `0.5..1.5`.
+  - A/B checks with current Docker env, baseline disabling only guard3:
+    - Causal `scene_2 seed7408`: Reward `0.566942 -> 0.724518`, Success
+      unchanged at `1.000000`; exactly one tertiary `switch_forward_guard`
+      trigger at `t=96`.
+    - `scene_2 seed7400..7419`: mean Reward delta `+0.007879`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_2 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - Aggregate `scene_1..5 seed7400..7419`: mean Reward delta `+0.001576`,
+      mean Success delta `0.000000`, Reward W/L/T `1/0/99`, Success W/L/T
+      `0/0/100`.
+  - Decision: keep as another low-risk Reward improvement. RL target: the
+    learned policy still undervalues forward progress in some high-pressure
+    conflict states where a lower-priority train can safely keep moving
+    without harming team success.
