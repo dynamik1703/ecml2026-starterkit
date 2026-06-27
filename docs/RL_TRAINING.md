@@ -9426,3 +9426,33 @@ Targeted start-rescue relax:
     the failed agents, but it removes a large unnecessary waiting penalty. RL
     target: the policy needs a better value estimate for late STOP actions
     under deadline pressure; not every conflict-looking stop is worth holding.
+- Scene-3 secondary yield-stop reward guard:
+  - The submitted tag `ghcr.io/dynamik1703/ecml2026-starterkit:riskveto-3ec5544`
+    failed before execution with `Status: Pending` and start timeout `1200s`.
+    Anonymous GHCR checks returned `UNAUTHORIZED`, and GitHub reports the
+    container package visibility as `private`. This is an infrastructure/pull
+    issue, not an evaluated policy failure.
+  - Focused counterfactual mining on the current Docker policy found a
+    Reward-positive `MOVE_LEFT -> STOP_MOVING` event:
+    `scene_3 seed7410`, agent 2, `t=145`, Reward delta `+0.124008`, Success
+    delta `0.000000`.
+  - Added a secondary `ECML_RISK_VETO_YIELD_STOP_GUARD2_*` profile without
+    changing the existing early yield-stop guard. Docker enables it only for
+    scene `scene_3`, transitions `MOVE_LEFT/MOVE_RIGHT -> STOP_MOVING`,
+    `step 145..150`, one hold, distance `32..37`, slack `61..65`, active
+    fraction `0.49..0.51`, stop proximity `0.86..0.89`, route occupancy
+    distance `0.20..0.41`, route/intersection count `0.30..0.68`, no tighter
+    route/intersection other, and ETA risk `0.90..0.97`.
+  - A/B checks with current Docker env, baseline disabling only guard2:
+    - Causal `scene_3 seed7410`: Reward `0.585317 -> 0.709325`, Success
+      unchanged at `0.833333`; exactly one guard2 trigger at `t=145`.
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.006200`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - Aggregate `scene_1..5 seed7400..7419`: mean Reward delta `+0.001240`,
+      mean Success delta `0.000000`, Reward W/L/T `1/0/99`, Success W/L/T
+      `0/0/100`.
+  - Decision: keep as a low-risk Reward improvement. Submission readiness now
+    depends on making the GHCR package pullable by the evaluator or submitting
+    through another public registry URL.

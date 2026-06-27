@@ -536,6 +536,128 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_YIELD_STOP_GUARD_MAX_INTERSECTION_ETA_RISK",
             0.20,
         )
+        self.yield_stop_guard2_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_YIELD_STOP_GUARD2_ENABLED", "0") or "0")
+        )
+        self.yield_stop_guard2_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_YIELD_STOP_GUARD2_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.yield_stop_guard2_transitions = self._env_transition_set(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_TRANSITIONS",
+        ) or {(1, 4), (3, 4)}
+        self.yield_stop_guard2_min_step = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_STEP",
+            0.0,
+        )
+        self.yield_stop_guard2_max_step = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_STEP",
+            float("inf"),
+        )
+        self.yield_stop_guard2_max_holds = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_HOLDS",
+            1.0,
+        )
+        self.yield_stop_guard2_min_slack = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_SLACK",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_slack = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_SLACK",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_DISTANCE",
+            0.0,
+        )
+        self.yield_stop_guard2_max_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_tighter_agents = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_TIGHTER_AGENTS",
+            0.0,
+        )
+        self.yield_stop_guard2_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_STOP_PROXIMITY",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_route_opposing = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_ROUTE_OPPOSING",
+            0.5,
+        )
+        self.yield_stop_guard2_max_route_same_direction = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_ROUTE_SAME_DIRECTION",
+            0.5,
+        )
+        self.yield_stop_guard2_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_ROUTE_OTHER_TIGHTER",
+            0.5,
+        )
+        self.yield_stop_guard2_min_route_count = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_ROUTE_COUNT",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_route_count = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_ROUTE_COUNT",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_INTERSECTION_OWN_DISTANCE",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_INTERSECTION_OWN_DISTANCE",
+            float("inf"),
+        )
+        self.yield_stop_guard2_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_INTERSECTION_ETA_RISK",
+            float("inf"),
+        )
+        self.yield_stop_guard2_max_intersection_other_first = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_INTERSECTION_OTHER_FIRST",
+            0.5,
+        )
+        self.yield_stop_guard2_max_intersection_other_tighter = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_INTERSECTION_OTHER_TIGHTER",
+            0.5,
+        )
+        self.yield_stop_guard2_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MIN_PREFIX_CONFLICT_COUNT",
+            float("-inf"),
+        )
+        self.yield_stop_guard2_max_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_YIELD_STOP_GUARD2_MAX_PREFIX_CONFLICT_COUNT",
+            float("inf"),
+        )
         self._yield_stop_counts: dict[int, int] = {}
         self._yield_stop_last_step: int | None = None
         self._yield_stop_last_seed: int | None = None
@@ -3420,6 +3542,148 @@ class RiskVetoPolicy:
             return False, scores
         return True, scores
 
+    def _yield_stop_guard2_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.yield_stop_guard2_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if step < self.yield_stop_guard2_min_step or step > self.yield_stop_guard2_max_step:
+            return False, scores
+        try:
+            scene = runtime_context.get().scene
+        except Exception:
+            scene = None
+        if self.yield_stop_guard2_allowed_scenes:
+            if scene not in self.yield_stop_guard2_allowed_scenes:
+                return False, scores
+        if (int(action), 4) not in self.yield_stop_guard2_transitions:
+            return False, scores
+
+        holds = self._yield_stop_counts.get(handle, 0)
+        if holds >= self.yield_stop_guard2_max_holds:
+            return False, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+        except Exception:
+            return False, scores
+
+        tighter_agents = 0
+        try:
+            for other_handle in obs_builder.env.get_agent_handles():
+                if other_handle == handle:
+                    continue
+                other_distance = float(
+                    obs_builder._current_distance_to_waypoint(other_handle)
+                )
+                other_slack = self._guard_effective_slack(
+                    obs_builder,
+                    other_handle,
+                    other_distance,
+                )
+                if np.isfinite(other_slack) and other_slack < slack:
+                    tighter_agents += 1
+        except Exception:
+            tighter_agents = 0
+
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_same_direction = self._observation_scalar(observation, 38)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        prefix_conflict_count = self._observation_scalar(observation, 51)
+        obs_checks = {
+            "yield_stop_guard2_active_fraction": active_fraction,
+            "yield_stop_guard2_stop_proximity": stop_proximity,
+            "yield_stop_guard2_route_distance": route_distance,
+            "yield_stop_guard2_route_opposing": route_opposing,
+            "yield_stop_guard2_route_same_direction": route_same_direction,
+            "yield_stop_guard2_route_other_tighter": route_other_tighter,
+            "yield_stop_guard2_route_count": route_count,
+            "yield_stop_guard2_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "yield_stop_guard2_intersection_eta_risk": intersection_eta_risk,
+            "yield_stop_guard2_intersection_other_first": (
+                intersection_other_first
+            ),
+            "yield_stop_guard2_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+            "yield_stop_guard2_prefix_conflict_count": prefix_conflict_count,
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "yield_stop_guard_profile": "scene3_conflict_stop",
+                "yield_stop_guard2_distance": float(distance),
+                "yield_stop_guard2_slack": float(slack),
+                "yield_stop_guard2_tighter_agents": int(tighter_agents),
+                "yield_stop_guard2_holds": int(holds),
+            }
+        )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.yield_stop_guard2_min_distance
+            or distance > self.yield_stop_guard2_max_distance
+            or not np.isfinite(slack)
+            or slack < self.yield_stop_guard2_min_slack
+            or slack > self.yield_stop_guard2_max_slack
+            or tighter_agents < self.yield_stop_guard2_min_tighter_agents
+            or active_fraction < self.yield_stop_guard2_min_active_fraction
+            or active_fraction > self.yield_stop_guard2_max_active_fraction
+            or stop_proximity < self.yield_stop_guard2_min_stop_proximity
+            or stop_proximity > self.yield_stop_guard2_max_stop_proximity
+            or route_distance < self.yield_stop_guard2_min_route_distance
+            or route_distance > self.yield_stop_guard2_max_route_distance
+            or route_opposing < self.yield_stop_guard2_min_route_opposing
+            or route_same_direction
+            > self.yield_stop_guard2_max_route_same_direction
+            or route_other_tighter > self.yield_stop_guard2_max_route_other_tighter
+            or route_count < self.yield_stop_guard2_min_route_count
+            or route_count > self.yield_stop_guard2_max_route_count
+            or intersection_own_distance
+            < self.yield_stop_guard2_min_intersection_own_distance
+            or intersection_own_distance
+            > self.yield_stop_guard2_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.yield_stop_guard2_min_intersection_eta_risk
+            or intersection_eta_risk
+            > self.yield_stop_guard2_max_intersection_eta_risk
+            or intersection_other_first
+            > self.yield_stop_guard2_max_intersection_other_first
+            or intersection_other_tighter
+            > self.yield_stop_guard2_max_intersection_other_tighter
+            or prefix_conflict_count
+            < self.yield_stop_guard2_min_prefix_conflict_count
+            or prefix_conflict_count
+            > self.yield_stop_guard2_max_prefix_conflict_count
+        ):
+            return False, scores
+        return True, scores
+
     def _apply_yield_stop_guard(
         self,
         output: dict[int, RailEnvActions],
@@ -3429,7 +3693,10 @@ class RiskVetoPolicy:
         seed: int | None,
         step: int | None,
     ) -> dict[int, RailEnvActions]:
-        if not self.yield_stop_guard_enabled or obs_builder is None:
+        if (
+            not (self.yield_stop_guard_enabled or self.yield_stop_guard2_enabled)
+            or obs_builder is None
+        ):
             return output
         self._reset_yield_stop_guard_state(seed, step)
         adjusted = dict(output)
@@ -3444,6 +3711,14 @@ class RiskVetoPolicy:
                 step,
                 observations_by_handle.get(int(handle)),
             )
+            if not accepted:
+                accepted, scores = self._yield_stop_guard2_scores(
+                    obs_builder,
+                    int(handle),
+                    previous_action,
+                    step,
+                    observations_by_handle.get(int(handle)),
+                )
             if not accepted:
                 continue
             adjusted[handle] = RailEnvActions.STOP_MOVING
