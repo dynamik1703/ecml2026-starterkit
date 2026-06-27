@@ -9275,3 +9275,45 @@ Targeted start-rescue relax:
     this reinforces the same RL target as the first early-yield guard: the
     policy needs to learn when a short personal pause improves downstream team
     completion even though the immediate legal move is distance-decreasing.
+- Scene-1 secondary switch-forward guard:
+  - After the secondary early-yield promotion, current Docker evaluation on
+    `scene_1..5 seed7400..7419` measured Reward `0.891698`, Success
+    `0.930000`, and `63/100` full-success episodes. `scene_1 seed7406`
+    remained the lowest Reward case (`0.551724`, Success `0.833333`) even
+    though earlier guards had already avoided the worst detour.
+  - Focused counterfactual mining on the failed agent found one strong
+    Reward-positive label and no Success-changing labels:
+    `scene_1 seed7406`, agent 1, `t=155`,
+    `MOVE_LEFT -> MOVE_FORWARD`, Reward delta `+0.262452`, Success delta
+    `0.000000`. The negative neighbors included `t=152 MOVE_RIGHT ->
+    MOVE_FORWARD` and late out-of-time forward changes, so the profile must be
+    tight.
+  - The event is an equal-distance switch tie: both `MOVE_LEFT` and
+    `MOVE_FORWARD` have target distance `36`, while the agent is on a switch at
+    distance `37`, slack `45`, active fraction `1.0`, stop proximity
+    `0.862963`, route occupancy distance `0.488889`, route intersection ETA
+    risk `0.555556`, route intersection count `0.333333`, and trajectory
+    tighter-fraction `0.20`. The local distance heuristic cannot distinguish
+    the two branches, but the forced rollout avoids a long later penalty.
+  - Generalized the existing `switch_forward_guard` to support a secondary
+    profile without changing the primary `scene_4 seed7401` profile. Docker now
+    enables a narrow `ECML_RISK_VETO_SWITCH_FORWARD_GUARD2_*` profile:
+    scene `scene_1`, `step 155`, one trigger, action `MOVE_LEFT`, distance
+    `36..38`, slack `44..46`, active fraction `0.99..1.01`, stop proximity
+    `>=0.86`, route distance `0.48..0.50`, intersection own-distance
+    `<=0.03`, ETA risk `0.55..0.57`, prefix/intersection count `0.30..0.35`,
+    priority tighter fraction `0.15..0.25`, and both forward/left distance
+    deltas in `[-1.5, -0.5]`.
+  - A/B checks with current Docker env:
+    - Causal `scene_1 seed7406`: Reward `0.551724 -> 0.814176`, Success
+      unchanged at `0.833333`; exactly one secondary `switch_forward_guard`
+      trigger at `t=155`.
+    - Primary regression smoke `scene_4 seed7401`: still full success with a
+      primary `switch_forward_guard` trigger at `t=279`.
+    - `scene_1 seed7400..7419`: mean Reward delta `+0.013123`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_1 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as a low-risk Reward improvement. This is a clear RL
+    learning target for branch-value estimation: equal immediate distances can
+    differ substantially in long-horizon team reward.
