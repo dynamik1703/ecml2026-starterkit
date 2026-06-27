@@ -589,6 +589,83 @@ class RiskVetoPolicy:
         self._detour_left_counts: dict[int, int] = {}
         self._detour_left_last_step: int | None = None
         self._detour_left_last_seed: int | None = None
+        self.switch_escape_guard_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_ENABLED", "0") or "0")
+        )
+        self.switch_escape_guard_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.switch_escape_guard_allowed_actions = self._env_action_set(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_ALLOWED_ACTIONS",
+        ) or {2}
+        self.switch_escape_guard_min_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_STEP",
+            145.0,
+        )
+        self.switch_escape_guard_max_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_STEP",
+            175.0,
+        )
+        self.switch_escape_guard_max_holds = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_HOLDS",
+            1.0,
+        )
+        self.switch_escape_guard_min_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_DISTANCE",
+            50.0,
+        )
+        self.switch_escape_guard_max_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_DISTANCE",
+            75.0,
+        )
+        self.switch_escape_guard_min_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_SLACK",
+            35.0,
+        )
+        self.switch_escape_guard_max_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_SLACK",
+            50.0,
+        )
+        self.switch_escape_guard_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_ACTIVE_FRACTION",
+            0.75,
+        )
+        self.switch_escape_guard_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_STOP_PROXIMITY",
+            0.70,
+        )
+        self.switch_escape_guard_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_ROUTE_DISTANCE",
+            0.30,
+        )
+        self.switch_escape_guard_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_INTERSECTION_ETA_RISK",
+            0.75,
+        )
+        self.switch_escape_guard_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_INTERSECTION_OWN_DISTANCE",
+            0.04,
+        )
+        self.switch_escape_guard_min_prefix_conflict_count = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_PREFIX_CONFLICT_COUNT",
+            0.25,
+        )
+        self.switch_escape_guard_min_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MIN_DISTANCE_DELTA",
+            -5.0,
+        )
+        self.switch_escape_guard_max_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_DISTANCE_DELTA",
+            0.0,
+        )
+        self._switch_escape_counts: dict[int, int] = {}
+        self._switch_escape_last_step: int | None = None
+        self._switch_escape_last_seed: int | None = None
 
     @staticmethod
     def _env_float(name: str, default: float) -> float:
@@ -625,6 +702,21 @@ class RiskVetoPolicy:
             except Exception:
                 continue
         return transitions
+
+    @staticmethod
+    def _env_action_set(name: str) -> set[int]:
+        raw_value = os.environ.get(name, "").strip()
+        if not raw_value:
+            return set()
+        actions: set[int] = set()
+        for item in raw_value.split(","):
+            if not item.strip():
+                continue
+            try:
+                actions.add(int(item))
+            except Exception:
+                continue
+        return actions
 
     @staticmethod
     def _action_id(action: Any) -> int:
@@ -1642,6 +1734,37 @@ class RiskVetoPolicy:
         with path.open("a") as handle_out:
             handle_out.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _trace_switch_escape_guard(
+        self,
+        *,
+        handle: int,
+        seed: int | None,
+        step: int | None,
+        previous_action: int,
+        candidate_action: int,
+        scores: dict[str, Any],
+    ) -> None:
+        if not self.trace_path:
+            return
+        context = runtime_context.get()
+        row = {
+            "seed": seed,
+            "scene": context.scene,
+            "env_time": step,
+            "agent_id": int(handle),
+            "baseline_action": int(previous_action),
+            "baseline_action_name": self._action_name(int(previous_action)),
+            "candidate_action": int(candidate_action),
+            "candidate_action_name": self._action_name(int(candidate_action)),
+            "accepted": True,
+            "candidate_source": "switch_escape_guard",
+            **scores,
+        }
+        path = Path(self.trace_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as handle_out:
+            handle_out.write(json.dumps(row, sort_keys=True) + "\n")
+
     def _reset_start_delay_guard_state(
         self,
         seed: int | None,
@@ -1689,6 +1812,22 @@ class RiskVetoPolicy:
             self._detour_left_counts = {}
         self._detour_left_last_seed = seed
         self._detour_left_last_step = step
+
+    def _reset_switch_escape_guard_state(
+        self,
+        seed: int | None,
+        step: int | None,
+    ) -> None:
+        if step is None:
+            return
+        if (
+            self._switch_escape_last_seed != seed
+            or self._switch_escape_last_step is None
+            or step < self._switch_escape_last_step
+        ):
+            self._switch_escape_counts = {}
+        self._switch_escape_last_seed = seed
+        self._switch_escape_last_step = step
 
     @staticmethod
     def _guard_speed(agent: Any) -> float:
@@ -2376,6 +2515,200 @@ class RiskVetoPolicy:
             )
         return adjusted
 
+    def _switch_escape_candidate_actions(
+        self,
+        obs_builder: Any,
+        handle: int,
+    ) -> list[tuple[int, float, tuple[int, int] | None]]:
+        candidates: list[tuple[int, float, tuple[int, int] | None]] = []
+        for action in sorted(self.switch_escape_guard_allowed_actions):
+            if action not in (1, 2, 3):
+                continue
+            try:
+                target_position, _target_direction = obs_builder._action_target(
+                    handle,
+                    action,
+                )
+            except Exception:
+                continue
+            if target_position is None:
+                continue
+            try:
+                if obs_builder._occupied_by_other(target_position, handle):
+                    continue
+            except Exception:
+                continue
+            distance_delta = self._candidate_distance_delta(
+                obs_builder,
+                handle,
+                action,
+            )
+            if distance_delta is None or not np.isfinite(distance_delta):
+                continue
+            if (
+                distance_delta < self.switch_escape_guard_min_distance_delta
+                or distance_delta > self.switch_escape_guard_max_distance_delta
+            ):
+                continue
+            candidates.append((int(action), float(distance_delta), target_position))
+        return sorted(candidates, key=lambda item: (item[1], item[0]))
+
+    def _switch_escape_guard_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[int | None, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.switch_escape_guard_enabled:
+            return None, scores
+        if obs_builder is None or step is None or observation is None:
+            return None, scores
+        if int(action) not in (0, 4):
+            return None, scores
+        if (
+            step < self.switch_escape_guard_min_step
+            or step > self.switch_escape_guard_max_step
+        ):
+            return None, scores
+        if self.switch_escape_guard_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.switch_escape_guard_allowed_scenes:
+                return None, scores
+        holds = self._switch_escape_counts.get(handle, 0)
+        if holds >= self.switch_escape_guard_max_holds:
+            return None, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING", "STOPPED"):
+                return None, scores
+            if agent.position is None:
+                return None, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+        except Exception:
+            return None, scores
+
+        if np.any(np.asarray(coordinated_mask[1:4], dtype=np.float32) >= 0.5):
+            return None, scores
+        if local_mask[4] < 0.5 and coordinated_mask[0] < 0.5:
+            return None, scores
+
+        on_switch = self._observation_scalar(observation, 7)
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        prefix_conflict_count = self._observation_scalar(observation, 51)
+        obs_checks = {
+            "switch_escape_guard_on_switch": on_switch,
+            "switch_escape_guard_active_fraction": active_fraction,
+            "switch_escape_guard_stop_proximity": stop_proximity,
+            "switch_escape_guard_route_distance": route_distance,
+            "switch_escape_guard_route_opposing": route_opposing,
+            "switch_escape_guard_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "switch_escape_guard_intersection_eta_risk": intersection_eta_risk,
+            "switch_escape_guard_prefix_conflict_count": prefix_conflict_count,
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return None, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "switch_escape_guard_distance": float(distance),
+                "switch_escape_guard_slack": float(slack),
+                "switch_escape_guard_holds": int(holds),
+            }
+        )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.switch_escape_guard_min_distance
+            or distance > self.switch_escape_guard_max_distance
+        ):
+            return None, scores
+        if (
+            not np.isfinite(slack)
+            or slack < self.switch_escape_guard_min_slack
+            or slack > self.switch_escape_guard_max_slack
+        ):
+            return None, scores
+        if (
+            on_switch < 0.5
+            or active_fraction < self.switch_escape_guard_min_active_fraction
+            or stop_proximity < self.switch_escape_guard_min_stop_proximity
+            or route_distance > self.switch_escape_guard_max_route_distance
+            or route_opposing < 0.5
+            or intersection_own_distance
+            > self.switch_escape_guard_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.switch_escape_guard_min_intersection_eta_risk
+            or prefix_conflict_count
+            < self.switch_escape_guard_min_prefix_conflict_count
+        ):
+            return None, scores
+
+        candidates = self._switch_escape_candidate_actions(obs_builder, handle)
+        if not candidates:
+            return None, scores
+        candidate_action, distance_delta, target_position = candidates[0]
+        scores["switch_escape_guard_candidate_distance_delta"] = float(distance_delta)
+        scores["switch_escape_guard_candidate_target"] = str(target_position)
+        return candidate_action, scores
+
+    def _apply_switch_escape_guard(
+        self,
+        output: dict[int, RailEnvActions],
+        handles: List[int],
+        obs_builder: Any,
+        observations_by_handle: dict[int, Any],
+        seed: int | None,
+        step: int | None,
+    ) -> dict[int, RailEnvActions]:
+        if not self.switch_escape_guard_enabled or obs_builder is None:
+            return output
+        self._reset_switch_escape_guard_state(seed, step)
+        adjusted = dict(output)
+        for handle in handles:
+            if handle not in adjusted:
+                continue
+            previous_action = self._action_id(adjusted[handle])
+            candidate_action, scores = self._switch_escape_guard_scores(
+                obs_builder,
+                int(handle),
+                previous_action,
+                step,
+                observations_by_handle.get(int(handle)),
+            )
+            if candidate_action is None:
+                continue
+            adjusted[handle] = RailEnvActions(candidate_action)
+            self._switch_escape_counts[int(handle)] = (
+                self._switch_escape_counts.get(int(handle), 0) + 1
+            )
+            self._trace_switch_escape_guard(
+                handle=int(handle),
+                seed=seed,
+                step=step,
+                previous_action=previous_action,
+                candidate_action=candidate_action,
+                scores=scores,
+            )
+        return adjusted
+
     def _candidate_action_lists(
         self,
         handles: List[int],
@@ -2605,7 +2938,15 @@ class RiskVetoPolicy:
             seed,
             step,
         )
-        return self._apply_detour_left_guard(
+        output = self._apply_detour_left_guard(
+            output,
+            handles,
+            obs_builder,
+            observations_by_handle,
+            seed,
+            step,
+        )
+        return self._apply_switch_escape_guard(
             output,
             handles,
             obs_builder,

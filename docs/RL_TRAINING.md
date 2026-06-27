@@ -9003,3 +9003,39 @@ Targeted start-rescue relax:
     `ECML_RISK_VETO_START_DELAY_GUARD_ALLOWED_SCENES=scene_5`. This keeps the
     useful scene-5 scheduling fix while avoiding the observed cross-scene
     regressions.
+- Scene-4 switch-escape guard:
+  - Current Docker still failed `scene_4 seed7417` with Reward `0.509306`,
+    Success `0.5`, and a final blocked component `[3, 4, 5]`.
+    `tools/analyze_blocked_clusters.py` showed a three-agent cycle around
+    `(61,34)`, `(61,35)`, and `(62,35)`: agent 5 stopped on the switch cell
+    `(61,35)`, blocking agents 3 and 4, while its own exits were then occupied
+    by those agents.
+  - A targeted trace showed the root event at `t=159`: agent 5 was on the
+    switch, the conservative local/coordination mask exposed only
+    `STOP_MOVING`, but the physical forward target `(61,34)` was unoccupied
+    and reduced target distance. Forcing `agent5 STOP_MOVING -> MOVE_FORWARD`
+    at `t=159` changed the final outcome by Reward `+0.157360` and Success
+    `+0.166667`.
+  - Added `tools/evaluate_forced_action_schedule.py` to evaluate exact
+    multi-step action schedules and grouped `schedule_id` sweeps. It confirmed
+    that simple earlier holds of agent 5 were neutral, while escaping from the
+    switch cell was the useful intervention.
+  - Added a default-off `ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_*` mechanism. The
+    Docker profile is deliberately narrow: scene `scene_4` only, one trigger,
+    `step 145..175`, `distance 50..75`, `slack 35..50`, no coordinated move
+    exposed by the mask, on-switch, active fraction at least `0.75`, stop
+    proximity at least `0.70`, opposing route occupancy, ETA risk at least
+    `0.75`, own intersection distance at most `0.04`, and only physical
+    FORWARD escapes with target-distance delta in `[-5, 0]`.
+  - A/B checks with current Docker env:
+    - Causal `scene_4 seed7417`: Reward delta `+0.157360`, Success delta
+      `+0.166667`.
+    - `scene_4 seed7400..7419`: mean Reward delta `+0.007868`, mean Success
+      delta `+0.008333`, Reward/Success W/L/T `1/0/19`.
+    - Heldout `scene_4 seed7420..7429`: neutral, Reward/Success W/L/T
+      `0/0/10`.
+    - Non-`scene_4` smoke (`scene_1`, `scene_2`, `scene_3`, `scene_5`
+      `seed7400..7404`): neutral, Reward/Success W/L/T `0/0/20`.
+  - Decision: promote as a scene-filtered Docker default. This fixes a concrete
+    over-conservative-mask failure class without broadening action masking
+    globally.
