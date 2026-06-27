@@ -9202,3 +9202,44 @@ Targeted start-rescue relax:
     learning target: the policy should treat "short forward route temporarily
     occupied" differently from "side branch is genuinely better"; the current
     action mask alone cannot distinguish those cases.
+- Scene-3 early-yield guard:
+  - Manual probes on `scene_3 seed7410`, `seed7412`, and `seed7418` showed
+    several visually plausible route errors, but most local route/stop fixes
+    were neutral or harmful. This reinforced that apparent distance jumps are
+    not enough; the fix must be outcome-causal.
+  - A focused counterfactual pass on current `scene_3` failure seeds
+    (`7401,7403,7404,7405,7410,7411,7412,7414,7415,7418,7419`) produced
+    `222` one-step labels: Reward W/L/T `1/173/48`, Success W/L/T
+    `9/17/196`, and `0` failed forced applications. The only Reward-positive
+    label was `scene_3 seed7412`, agent 1, `t=14`,
+    `MOVE_FORWARD -> STOP_MOVING`.
+  - The causal event is an early-yield after departure. Agent 1 has earliest
+    departure `13`; at `t=14` it is moving at `(54,72)`, distance `127`,
+    slack `59`, active fraction `0.333333`, stop proximity `0.52963`,
+    route distance `1.0`, no route/prefix conflicts, and `STOP_MOVING` is
+    allowed. A single stop gives other traffic enough priority that the seed
+    becomes full success.
+  - Forced schedule confirmation:
+    - `1:14:14:STOP_MOVING`: Reward delta `+0.065380`, Success delta
+      `+0.166667`, failed agents `1 -> 0`.
+    - `1:14:15:STOP_MOVING`: still Success-positive but lower Reward
+      (`+0.032690`).
+    - `1:13:13:STOP_MOVING` and `1:12:14:STOP_MOVING` improved Reward but did
+      not fix Success; `1:15:15:STOP_MOVING` was neutral.
+  - Added a default-off `ECML_RISK_VETO_EARLY_YIELD_GUARD_*` mechanism and
+    promoted a narrow Docker profile: scene `scene_3`, action `MOVE_FORWARD`,
+    `step 14`, one hold, departure lag exactly `1`, distance `120..130`,
+    slack `55..65`, active fraction `0.30..0.36`, stop proximity
+    `0.52..0.54`, route distance `>=0.99`, route count `<=0.01`, prefix
+    conflict count `<=0.01`, and non-increasing forward target distance.
+  - A/B checks with current Docker env:
+    - Causal `scene_3 seed7412`: Reward `0.666667 -> 0.732047`, Success
+      `0.833333 -> 1.000000`; exactly one `early_yield_guard` trigger at
+      `t=14`.
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.003269`, mean Success
+      delta `+0.008333`, Reward/Success W/L/T `1/0/19`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: promote as a narrow scene-filtered default. This is a learned
+    policy target: early post-departure yielding can be valuable even when the
+    immediate individual action is legal and distance-decreasing.
