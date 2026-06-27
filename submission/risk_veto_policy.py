@@ -176,6 +176,31 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_MAX_ETA_GAP",
             float("inf"),
         )
+        self.stop_left_same_edge_relax_enabled = bool(
+            int(
+                os.environ.get(
+                    "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_ENABLED",
+                    "0",
+                )
+                or "0"
+            )
+        )
+        self.stop_left_same_edge_relax_max_candidate_risk = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_MAX_CANDIDATE_RISK",
+            float("inf"),
+        )
+        self.stop_left_same_edge_relax_max_reward_risk = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_MAX_REWARD_RISK",
+            float("inf"),
+        )
+        self.stop_left_same_edge_relax_min_risk_improvement = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_MIN_RISK_IMPROVEMENT",
+            float("inf"),
+        )
+        self.stop_left_same_edge_relax_min_reward_improvement = self._env_float(
+            "ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_MIN_REWARD_IMPROVEMENT",
+            float("inf"),
+        )
         self.prefix_relax_enabled = bool(
             int(os.environ.get("ECML_RISK_VETO_PREFIX_RELAX_ENABLED", "0") or "0")
         )
@@ -1119,6 +1144,32 @@ class RiskVetoPolicy:
             scores["stop_left_same_edge_max_eta_gap"] = float(
                 self.stop_left_same_edge_max_eta_gap
             )
+            if self.stop_left_same_edge_relax_enabled:
+                candidate_risk = float(scores.get("risk_head_candidate", float("inf")))
+                risk_improvement = float(
+                    scores.get("risk_head_baseline_minus_candidate", float("-inf"))
+                )
+                reward_risk = float(
+                    scores.get("reward_risk_head_candidate", float("inf"))
+                )
+                reward_improvement = float(
+                    scores.get(
+                        "reward_risk_head_baseline_minus_candidate",
+                        float("-inf"),
+                    )
+                )
+                if (
+                    candidate_risk
+                    <= self.stop_left_same_edge_relax_max_candidate_risk
+                    and reward_risk
+                    <= self.stop_left_same_edge_relax_max_reward_risk
+                    and risk_improvement
+                    >= self.stop_left_same_edge_relax_min_risk_improvement
+                    and reward_improvement
+                    >= self.stop_left_same_edge_relax_min_reward_improvement
+                ):
+                    scores["stop_left_same_edge_relax_accepted"] = 1.0
+                    return False
             scores["reject_reason"] = "stop_left_same_edge_eta_gap_too_tight"
             return True
         if prefix_intersections <= 0.0 and deadline_penalty <= 0.0:

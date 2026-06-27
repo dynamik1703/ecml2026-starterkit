@@ -8787,3 +8787,28 @@ Targeted start-rescue relax:
     neutral (`0/0/8`), and reverting the later accepted right move was also
     neutral (`0/0/1`). Decision: no `scene_3` or `scene_5` guard promotion
     from these probes.
+- StopLeft same-edge relax promotion:
+  - A fresh current-Docker mining slice on `scene_1 7280..7319` exposed a
+    narrow missed rescue in `seed7312`: repeated rejected
+    `STOP_MOVING -> MOVE_LEFT` proposals were blocked by
+    `stop_left_same_edge_eta_gap_too_tight`.
+  - Direct counterfactual replay on the focus rows was reward-positive and
+    success-neutral: Reward W/L/T `8/0/0`, Success W/L/T `0/0/8`. The best
+    single intervention was `seed7312 step351 agent2`, improving Reward by
+    `+0.133120` without changing Success.
+  - Added default-off `ECML_RISK_VETO_STOP_LEFT_SAME_EDGE_RELAX_*` knobs and
+    promoted a very narrow Docker profile: enabled, `candidate_risk <= 0.08`,
+    `reward_risk <= 0.50`, risk-head improvement at least `0.19`, and
+    reward-risk-head improvement at least `0.32`.
+  - A/B against the previous Docker default:
+    - Mining block `scene_1 7280..7319`: mean Reward delta `+0.003328`,
+      Success delta `0`, Reward W/L/T `1/0/39`, Success W/L/T `0/0/40`. The
+      relax triggered once, on the validated `seed7312 step351` action.
+    - Fresh `scene_1 7320..7359`: neutral, Reward/Success W/L/T `0/0/40`;
+      the relax did not trigger.
+    - Heldout `scene_1,4`, 20 episodes each from seed `6910`: neutral,
+      Reward/Success W/L/T `0/0/40`; the relax did not trigger.
+  - Interpretation: this is another small, causal, narrowly gated reward gain,
+    not a broad policy improvement. It is safe enough to promote because it
+    fixes an observed missed rescue and showed no measured regression in fresh
+    or heldout checks.
