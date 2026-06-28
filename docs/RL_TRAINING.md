@@ -9592,3 +9592,31 @@ Targeted start-rescue relax:
     for a path to a winning Success jump. Next high-upside work should target
     multi-step rescue/sequence planning or RL fine-tuning on these failed-agent
     clusters, because one-step counterfactuals did not rescue Success.
+- Post-`2055932` failure triage:
+  - Current local 100-episode block after the stopped-left guard:
+    Reward mean `0.904647`, Success mean `0.933333`.
+  - The challenge documentation lists normalized return as the primary metric
+    and submission score as the sum of normalized scenario rewards. Therefore
+    a completion-only intervention is not automatically a better submission if
+    it lowers normalized reward.
+  - `scene_4 seed7417` remains the hardest local deadlock: agents 3 and 5 stop
+    nose-to-tail around `(70, 34)/(69, 34)`, final Reward `0.666667`, Success
+    `0.666667`. A representative 202-schedule sweep of forced forward/stop/
+    do-nothing windows for agents 3 and 5 was aborted after many neutral
+    variants; all checked variants kept failed agents at `2 -> 2`. Treat this
+    as not locally rescuable by simple hold/forward windows.
+  - `scene_4 seed7402` has a genuine completion tradeoff: broad one-step
+    counterfactuals around failed agents found `8` Success-positive STOP
+    actions, but every one lowered normalized reward. Best tradeoff observed:
+    agent 4 at `t=256`, `MOVE_FORWARD -> STOP_MOVING`, Reward delta
+    `-0.063776`, Success delta `+0.166667`, failed agents `2 -> 1`.
+    Decision: do not enable as the default reward-optimized submission. Keep
+    this as a possible separate completion-first variant only if leaderboard
+    ranking or tie-breaks favor Success strongly enough.
+  - `scene_1 seed7417` broad counterfactuals on the two failed moving agents
+    found no positives: Reward W/L/T `0/33/1`, Success W/L/T `0/0/34`. This
+    is also not a one-step rescue candidate.
+  - Strategic implication: the obvious remaining high-impact failures are not
+    solved by local action masking. The next high-upside path is a multi-step
+    route/sequence planner or RL/BC fine-tune trained on full failed-agent
+    prefixes, not more hand-written single-step guards.
