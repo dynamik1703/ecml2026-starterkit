@@ -487,6 +487,34 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_START_DELAY_GUARD_MIN_PRIORITY_CONFLICTS",
             1.0,
         )
+        self.start_delay_guard_scene2_min_step = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MIN_STEP",
+            float("-inf"),
+        )
+        self.start_delay_guard_scene2_max_step = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MAX_STEP",
+            float("inf"),
+        )
+        self.start_delay_guard_scene2_min_slack = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MIN_SLACK",
+            float("-inf"),
+        )
+        self.start_delay_guard_scene2_max_slack = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MAX_SLACK",
+            float("inf"),
+        )
+        self.start_delay_guard_scene2_min_distance = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MIN_DISTANCE",
+            float("-inf"),
+        )
+        self.start_delay_guard_scene2_max_distance = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.start_delay_guard_scene2_min_priority_conflicts = self._env_float(
+            "ECML_RISK_VETO_START_DELAY_GUARD_SCENE2_MIN_PRIORITY_CONFLICTS",
+            0.0,
+        )
         self._start_delay_counts: dict[int, int] = {}
         self._start_delay_last_step: int | None = None
         self._start_delay_last_seed: int | None = None
@@ -3887,11 +3915,11 @@ class RiskVetoPolicy:
             return False, scores
         if obs_builder is None or step is None:
             return False, scores
+        try:
+            scene = runtime_context.get().scene
+        except Exception:
+            scene = None
         if self.start_delay_guard_allowed_scenes:
-            try:
-                scene = runtime_context.get().scene
-            except Exception:
-                scene = None
             if scene not in self.start_delay_guard_allowed_scenes:
                 return False, scores
         if step < self.start_delay_guard_min_step or step > self.start_delay_guard_max_step:
@@ -3988,6 +4016,17 @@ class RiskVetoPolicy:
             int(self.start_delay_guard_lookahead),
         )
         scores.update(conflict_scores)
+        if scene == "scene_2":
+            if (
+                step < self.start_delay_guard_scene2_min_step
+                or step > self.start_delay_guard_scene2_max_step
+                or distance < self.start_delay_guard_scene2_min_distance
+                or distance > self.start_delay_guard_scene2_max_distance
+                or slack < self.start_delay_guard_scene2_min_slack
+                or slack > self.start_delay_guard_scene2_max_slack
+                or conflicts < self.start_delay_guard_scene2_min_priority_conflicts
+            ):
+                return False, scores
         return conflicts >= self.start_delay_guard_min_priority_conflicts, scores
 
     def _apply_start_delay_guard(

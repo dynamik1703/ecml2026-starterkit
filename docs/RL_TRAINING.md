@@ -9647,3 +9647,31 @@ Targeted start-rescue relax:
     narrow heuristic patch, not the strategic path to a winning solution; the
     bigger remaining upside remains sequential planning or RL/BC fine-tuning
     on failed-agent prefixes.
+- Scene-2 start-delay reward guard:
+  - `scene_2 seed7408` was a successful but slow episode: Reward `0.724518`,
+    Success `1.000000`. Focused STOP counterfactuals showed a repeated
+    early-delay opportunity, but a broad `scene_2` activation of the existing
+    `START_DELAY_GUARD` was unsafe: Reward W/L/T `1/2/17`, Success W/L/T
+    `0/2/18`, mean Reward delta `-0.000555`.
+  - The useful trigger was separable from the bad triggers. Good case:
+    agent 1 at `t=11/12`, distance `371`, slack `161/160`, route-priority
+    conflicts `2`. Bad scene-2 triggers had only one priority conflict or a
+    different distance/slack band.
+  - Added scene-2-specific optional bounds inside the existing start-delay
+    guard, preserving the original scene-5 behavior. Docker now allows
+    `scene_2` but requires exact `t=11..12`, distance `370..372`, slack
+    `160..162`, and at least `2` route-priority conflicts.
+  - Causal replay with Docker env reproduced the improvement:
+    `scene_2 seed7408` Reward `0.724518 -> 0.931129`, Success unchanged at
+    `1.000000`; trace shows exactly two `start_delay_guard` triggers at
+    `t=11/12`.
+  - A/B checks against the previous scene-5-only start-delay config:
+    - `scene_2 seed7400..7419`: mean Reward delta `+0.010331`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_2 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - `scene_5 seed7400..7419`: neutral, Reward/Success W/L/T `0/0/20`.
+  - Decision: keep. This is a better use of existing conflict-aware logic
+    than adding another one-off action override, but it is still a narrow
+    profile. Strategic learning target: teach the value/policy head to learn
+    early-yield timing from route-priority conflicts.
