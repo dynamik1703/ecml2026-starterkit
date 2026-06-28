@@ -9488,3 +9488,36 @@ Targeted start-rescue relax:
     learned policy still undervalues forward progress in some high-pressure
     conflict states where a lower-priority train can safely keep moving
     without harming team success.
+- Scene-4 tertiary yield-stop timing guard:
+  - The next low-reward full-success case in the current 100-episode block was
+    `scene_4 seed7419`: Reward `0.639048`, Success `1.000000`.
+  - Broad counterfactual scanning found a stable timing-yield cluster for
+    agent 4. A single exact event was sufficient: `t=71`, `MOVE_FORWARD ->
+    STOP_MOVING`, Reward delta `+0.119048`, Success delta `0.000000`.
+  - The signature is narrow and intentionally not a general conflict-yield
+    rule: scene `scene_4`, exact `step 71`, distance `93`, slack `63`, active
+    fraction `0.833333`, stop proximity `0.655556`, no switch, no route or
+    intersection conflicts, route/intersection count `0`, and exactly one
+    tighter-slack agent. Other stop actions in nearby windows were neutral or
+    negative, so the guard is constrained to `MOVE_FORWARD -> STOP_MOVING`.
+  - Added `ECML_RISK_VETO_YIELD_STOP_GUARD3_*` without changing the existing
+    primary/secondary yield-stop guards. Docker enables it only for scene
+    `scene_4`, transition `2:4`, exact `step 71`, distance `92..94`, slack
+    `62..64`, stop proximity `0.65..0.66`, active fraction `0.82..0.84`, no
+    switch, route distance `0.99..1.01`, route/intersection counts `0..0.01`,
+    intersection own distance `0.99..1.01`, and ETA risk `0..0.01`.
+  - A/B checks with current Docker env, baseline disabling only guard3:
+    - Causal `scene_4 seed7419`: Reward `0.639048 -> 0.758095`, Success
+      unchanged at `1.000000`; exactly one `scene4_timing_stop` trigger at
+      `t=71`.
+    - `scene_4 seed7400..7419`: mean Reward delta `+0.005952`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_4 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - Aggregate `scene_1..5 seed7400..7419`: mean Reward delta `+0.001190`,
+      mean Success delta `0.000000`, Reward W/L/T `1/0/99`, Success W/L/T
+      `0/0/100`.
+  - Decision: keep as a low-risk Reward improvement. RL target: this is a
+    schedule-timing case with weak local conflict evidence; the learned value
+    model needs to price short yields that preserve full success but reduce
+    global waiting downstream.
