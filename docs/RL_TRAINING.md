@@ -9521,3 +9521,35 @@ Targeted start-rescue relax:
     schedule-timing case with weak local conflict evidence; the learned value
     model needs to price short yields that preserve full success but reduce
     global waiting downstream.
+- Scene-3 secondary right-forward reward guard:
+  - The next low-reward full-success case after the scene-4 timing guard was
+    `scene_3 seed7412`: Reward `0.732047`, Success `1.000000`.
+  - Broad counterfactual scanning found only two reward-positive candidates in
+    136 checked interventions and 14 success-negative alternatives, so this is
+    not a broad right-forward rule. The stable useful event was agent 4 at
+    `t=87`, `MOVE_RIGHT -> MOVE_FORWARD`, Reward delta `+0.101286`, Success
+    delta `0.000000`.
+  - Added `ECML_RISK_VETO_RIGHT_FORWARD_GUARD2_*` as a separate secondary
+    profile. Docker enables it only for scene `scene_3`, exact `step 87`, one
+    hold, distance `69..71`, slack `48..50`, active fraction `0.66..0.68`,
+    stop proximity `0.73..0.75`, route distance `0.61..0.63`,
+    route/prefix conflict counts `0.65..0.68`, own intersection distance
+    `<=0.03`, ETA risk `0.42..0.43`, priority tighter fraction `0.59..0.61`,
+    and both forward/right distance deltas `-1.5..-0.5`.
+  - A/B checks with current Docker env, baseline disabling only guard2:
+    - Causal `scene_3 seed7412`: Reward `0.732047 -> 0.833333`, Success
+      unchanged at `1.000000`; exactly one `right_forward_scene3` trigger at
+      `t=87`.
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.005064`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - Aggregate `scene_1..5 seed7400..7419`: mean Reward delta `+0.001013`,
+      mean Success delta `0.000000`, Reward W/L/T `1/0/99`, Success W/L/T
+      `0/0/100`. Trace check found exactly one new `right_forward_scene3`
+      trigger, on `scene_3 seed7412`.
+  - Decision: keep as a small low-risk Reward improvement. RL target: the
+    learned branch policy still makes locally equivalent switch choices that
+    have different downstream waiting costs; the observation has enough
+    conflict/priority signal for an improved value head or BC/RL fine-tune to
+    learn this without hand-coded exact timing.
