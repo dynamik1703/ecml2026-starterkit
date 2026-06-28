@@ -1609,6 +1609,133 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_RIGHT_FORWARD_GUARD2_MAX_DISTANCE_DELTA",
             float("inf"),
         )
+        self.right_forward_guard3_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_ENABLED", "0") or "0")
+        )
+        self.right_forward_guard3_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.right_forward_guard3_min_step = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_STEP",
+            0.0,
+        )
+        self.right_forward_guard3_max_step = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_STEP",
+            float("inf"),
+        )
+        self.right_forward_guard3_max_holds = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_HOLDS",
+            1.0,
+        )
+        self.right_forward_guard3_min_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_DISTANCE",
+            0.0,
+        )
+        self.right_forward_guard3_max_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_slack = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_SLACK",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_slack = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_SLACK",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_STOP_PROXIMITY",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_time_slack = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_TIME_SLACK",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_time_slack = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_TIME_SLACK",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.right_forward_guard3_max_route_count = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_ROUTE_COUNT",
+            float("inf"),
+        )
+        self.right_forward_guard3_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_ROUTE_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_INTERSECTION_OWN_DISTANCE",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_INTERSECTION_OWN_DISTANCE",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_INTERSECTION_ETA_RISK",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_intersection_other_first = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_INTERSECTION_OTHER_FIRST",
+            float("-inf"),
+        )
+        self.right_forward_guard3_min_intersection_other_tighter = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_INTERSECTION_OTHER_TIGHTER",
+            float("-inf"),
+        )
+        self.right_forward_guard3_min_intersection_count = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_INTERSECTION_COUNT",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_intersection_count = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_INTERSECTION_COUNT",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_PRIORITY_TIGHTER_FRACTION",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_priority_tighter_fraction = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_PRIORITY_TIGHTER_FRACTION",
+            float("inf"),
+        )
+        self.right_forward_guard3_min_distance_delta = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MIN_DISTANCE_DELTA",
+            float("-inf"),
+        )
+        self.right_forward_guard3_max_distance_delta = self._env_float(
+            "ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_MAX_DISTANCE_DELTA",
+            float("inf"),
+        )
         self._right_forward_counts: dict[int, int] = {}
         self._right_forward_last_step: int | None = None
         self._right_forward_last_seed: int | None = None
@@ -5410,6 +5537,176 @@ class RiskVetoPolicy:
             return False, scores
         return True, scores
 
+    def _right_forward_guard3_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.right_forward_guard3_enabled:
+            return False, scores
+        if obs_builder is None or step is None or observation is None:
+            return False, scores
+        if int(action) != 3:
+            return False, scores
+        if (
+            step < self.right_forward_guard3_min_step
+            or step > self.right_forward_guard3_max_step
+        ):
+            return False, scores
+        try:
+            scene = runtime_context.get().scene
+        except Exception:
+            scene = None
+        if self.right_forward_guard3_allowed_scenes and (
+            scene not in self.right_forward_guard3_allowed_scenes
+        ):
+            return False, scores
+        holds = self._right_forward_counts.get(handle, 0)
+        if holds >= self.right_forward_guard3_max_holds:
+            return False, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "MOVING"):
+                return False, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+            target_position, target_direction = obs_builder._action_target(handle, 2)
+        except Exception:
+            return False, scores
+        if (
+            target_position is None
+            or target_direction is None
+            or local_mask[2] < 0.5
+            or coordinated_mask[2] < 0.5
+        ):
+            return False, scores
+        try:
+            if obs_builder._occupied_by_other(target_position, handle):
+                return False, scores
+        except Exception:
+            return False, scores
+
+        forward_distance_delta = self._candidate_distance_delta(obs_builder, handle, 2)
+        right_distance_delta = self._candidate_distance_delta(obs_builder, handle, 3)
+        if (
+            forward_distance_delta is None
+            or right_distance_delta is None
+            or not np.isfinite(forward_distance_delta)
+            or not np.isfinite(right_distance_delta)
+        ):
+            return False, scores
+
+        on_switch = self._observation_scalar(observation, 7)
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        time_slack = self._observation_scalar(observation, 35)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_same_direction = self._observation_scalar(observation, 38)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        intersection_count = self._observation_scalar(observation, 51)
+        priority_tighter_fraction = self._observation_scalar(observation, 53)
+        obs_checks = {
+            "right_forward_guard3_on_switch": on_switch,
+            "right_forward_guard3_active_fraction": active_fraction,
+            "right_forward_guard3_stop_proximity": stop_proximity,
+            "right_forward_guard3_time_slack": time_slack,
+            "right_forward_guard3_route_distance": route_distance,
+            "right_forward_guard3_route_opposing": route_opposing,
+            "right_forward_guard3_route_same_direction": route_same_direction,
+            "right_forward_guard3_route_other_tighter": route_other_tighter,
+            "right_forward_guard3_route_count": route_count,
+            "right_forward_guard3_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "right_forward_guard3_intersection_eta_risk": intersection_eta_risk,
+            "right_forward_guard3_intersection_other_first": intersection_other_first,
+            "right_forward_guard3_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+            "right_forward_guard3_intersection_count": intersection_count,
+            "right_forward_guard3_priority_tighter_fraction": (
+                priority_tighter_fraction
+            ),
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return False, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "switch_forward_guard_profile": "right_forward_scene3_reward2",
+                "right_forward_guard3_distance": float(distance),
+                "right_forward_guard3_slack": float(slack),
+                "right_forward_guard3_holds": int(holds),
+                "right_forward_guard3_forward_distance_delta": float(
+                    forward_distance_delta
+                ),
+                "right_forward_guard3_right_distance_delta": float(
+                    right_distance_delta
+                ),
+                "right_forward_guard3_forward_target": str(target_position),
+            }
+        )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.right_forward_guard3_min_distance
+            or distance > self.right_forward_guard3_max_distance
+            or not np.isfinite(slack)
+            or slack < self.right_forward_guard3_min_slack
+            or slack > self.right_forward_guard3_max_slack
+            or on_switch < 0.5
+            or active_fraction < self.right_forward_guard3_min_active_fraction
+            or active_fraction > self.right_forward_guard3_max_active_fraction
+            or stop_proximity < self.right_forward_guard3_min_stop_proximity
+            or stop_proximity > self.right_forward_guard3_max_stop_proximity
+            or time_slack < self.right_forward_guard3_min_time_slack
+            or time_slack > self.right_forward_guard3_max_time_slack
+            or route_distance < self.right_forward_guard3_min_route_distance
+            or route_distance > self.right_forward_guard3_max_route_distance
+            or route_opposing > 0.5
+            or route_same_direction > 0.5
+            or route_other_tighter > self.right_forward_guard3_max_route_other_tighter
+            or route_count > self.right_forward_guard3_max_route_count
+            or intersection_own_distance
+            < self.right_forward_guard3_min_intersection_own_distance
+            or intersection_own_distance
+            > self.right_forward_guard3_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.right_forward_guard3_min_intersection_eta_risk
+            or intersection_eta_risk
+            > self.right_forward_guard3_max_intersection_eta_risk
+            or intersection_other_first
+            < self.right_forward_guard3_min_intersection_other_first
+            or intersection_other_tighter
+            < self.right_forward_guard3_min_intersection_other_tighter
+            or intersection_count < self.right_forward_guard3_min_intersection_count
+            or intersection_count > self.right_forward_guard3_max_intersection_count
+            or priority_tighter_fraction
+            < self.right_forward_guard3_min_priority_tighter_fraction
+            or priority_tighter_fraction
+            > self.right_forward_guard3_max_priority_tighter_fraction
+            or forward_distance_delta < self.right_forward_guard3_min_distance_delta
+            or forward_distance_delta > self.right_forward_guard3_max_distance_delta
+            or right_distance_delta < self.right_forward_guard3_min_distance_delta
+            or right_distance_delta > self.right_forward_guard3_max_distance_delta
+        ):
+            return False, scores
+        return True, scores
+
     def _apply_right_forward_guard(
         self,
         output: dict[int, RailEnvActions],
@@ -5420,7 +5717,11 @@ class RiskVetoPolicy:
         step: int | None,
     ) -> dict[int, RailEnvActions]:
         if (
-            not (self.right_forward_guard_enabled or self.right_forward_guard2_enabled)
+            not (
+                self.right_forward_guard_enabled
+                or self.right_forward_guard2_enabled
+                or self.right_forward_guard3_enabled
+            )
             or obs_builder is None
         ):
             return output
@@ -5627,6 +5928,14 @@ class RiskVetoPolicy:
                 step,
                 observations_by_handle.get(int(handle)),
             )
+            if not accepted:
+                accepted, scores = self._right_forward_guard3_scores(
+                    obs_builder,
+                    int(handle),
+                    previous_action,
+                    step,
+                    observations_by_handle.get(int(handle)),
+                )
             if not accepted:
                 continue
             adjusted[handle] = RailEnvActions.MOVE_FORWARD

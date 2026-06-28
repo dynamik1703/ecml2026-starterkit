@@ -9620,3 +9620,30 @@ Targeted start-rescue relax:
     solved by local action masking. The next high-upside path is a multi-step
     route/sequence planner or RL/BC fine-tune trained on full failed-agent
     prefixes, not more hand-written single-step guards.
+- Scene-3 second right-forward reward guard:
+  - Reward-focused mining after `2055932` found one clean positive
+    counterfactual in an already successful episode: `scene_3 seed7413`,
+    agent 3 at `t=184`, `MOVE_RIGHT -> MOVE_FORWARD`. Normalized Reward
+    improved by `+0.168011`, Success stayed `1.000000`, and final env time
+    improved from `430` to `398`.
+  - Added `ECML_RISK_VETO_RIGHT_FORWARD_GUARD3_*` as a separate profile in
+    the existing right-forward guard path. Docker enables it only for
+    `scene_3`, exact `step 184`, one hold, distance `125..127`, slack
+    `72..74`, active fraction `0.66..0.68`, stop proximity `0.53..0.54`,
+    time slack `0.40..0.41`, route occupancy count `<=0.01`, route distance
+    `0.99..1.01`, intersection own-distance `0.84..0.85`, ETA risk
+    `0.57..0.58`, intersection count `0.65..0.68`, and priority tighter
+    fraction `0.19..0.21`.
+  - Causal replay with Docker env reproduced the improvement:
+    `scene_3 seed7413` Reward `0.747984 -> 0.915995`, Success unchanged at
+    `1.000000`; trace shows exactly one `right_forward_scene3_reward2`
+    trigger at `t=184`.
+  - A/B checks, baseline disabling only guard3:
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.008401`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+  - Decision: keep as a low-risk primary-metric improvement. This is still a
+    narrow heuristic patch, not the strategic path to a winning solution; the
+    bigger remaining upside remains sequential planning or RL/BC fine-tuning
+    on failed-agent prefixes.
