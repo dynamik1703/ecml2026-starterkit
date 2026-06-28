@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List
 
 from flatland.envs.rail_env_action import RailEnvActions
 
 from submission import runtime_context
+from submission.my_policy import ActorCritic
 from submission.rerank_policy import RerankPolicy
-from submission.risk_veto_policy import RiskVetoPolicy
 from submission.sequence_success_policy import DEFAULT_CANDIDATE_CHECKPOINT_PATHS
 
 
@@ -30,8 +31,25 @@ class FastCompetitionPolicy:
             or os.environ.get("ECML_RISK_VETO_CANDIDATE_CHECKPOINT", "").strip()
             or DEFAULT_CANDIDATE_CHECKPOINT_PATHS[-1]
         )
+        self.start_time = time.monotonic()
         self.fast_policy = RerankPolicy(checkpoint_path=fast_checkpoint)
-        self.risk_policy: RiskVetoPolicy | None = None
+        self.direct_policy = ActorCritic(checkpoint_path=fast_checkpoint)
+        self.direct_policy.eval()
+        self.risk_policy = None
+        self.use_direct_on_large_envs = self._env_bool(
+            "ECML_FAST_USE_DIRECT_ON_LARGE_ENVS",
+            False,
+        )
+        self.direct_after_seconds = self._env_float(
+            "ECML_FAST_DIRECT_AFTER_SECONDS",
+            600.0,
+        )
+        self.large_min_agents = self._env_int("ECML_FAST_LARGE_MIN_AGENTS", 7)
+        self.large_min_grid_size = self._env_int("ECML_FAST_LARGE_MIN_GRID_SIZE", 200)
+        self.large_min_episode_steps = self._env_int(
+            "ECML_FAST_LARGE_MIN_EPISODE_STEPS",
+            900,
+        )
         self.use_risk_on_local_scenes = self._env_bool(
             "ECML_FAST_USE_RISK_ON_LOCAL_SCENES",
             False,
@@ -56,6 +74,13 @@ class FastCompetitionPolicy:
         except Exception:
             return default
 
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, str(default)))
+        except Exception:
+            return default
+
     def _risk_enabled_for_context(self) -> bool:
         if not self.use_risk_on_local_scenes:
             return False
@@ -75,8 +100,33 @@ class FastCompetitionPolicy:
             return False
         return True
 
-    def _risk(self) -> RiskVetoPolicy:
+    def _direct_enabled_for_context(self) -> bool:
+        if not self.use_direct_on_large_envs:
+            return False
+        env = runtime_context.get().env
+        if env is None:
+            return False
+        try:
+            if int(env.get_num_agents()) >= self.large_min_agents:
+                return True
+            if max(int(env.height), int(env.width)) >= self.large_min_grid_size:
+                return True
+            max_episode_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+            if max_episode_steps >= self.large_min_episode_steps:
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _emergency_direct_enabled(self) -> bool:
+        if not (self.direct_after_seconds > 0.0):
+            return False
+        return (time.monotonic() - self.start_time) >= self.direct_after_seconds
+
+    def _risk(self):
         if self.risk_policy is None:
+            from submission.risk_veto_policy import RiskVetoPolicy
+
             self.risk_policy = RiskVetoPolicy()
         return self.risk_policy
 
@@ -91,6 +141,8 @@ class FastCompetitionPolicy:
         observations: List[Any],
         **kwargs,
     ) -> Dict[int, RailEnvActions]:
+        if self._emergency_direct_enabled() or self._direct_enabled_for_context():
+            return self.direct_policy.act_many(handles, observations, **kwargs)
         if self._risk_enabled_for_context():
             return self._risk().act_many(handles, observations, **kwargs)
         return self.fast_policy.act_many(handles, observations, **kwargs)
