@@ -9553,3 +9553,42 @@ Targeted start-rescue relax:
     have different downstream waiting costs; the observation has enough
     conflict/priority signal for an improved value head or BC/RL fine-tune to
     learn this without hand-coded exact timing.
+- Scene-3 stopped-left reward guard:
+  - After the right-forward guard, current 100-episode metrics on
+    `scene_1..5 seed7400..7419` were Reward mean `0.903050`, Success mean
+    `0.933333`. The lowest remaining cases are mostly incomplete episodes,
+    so focused counterfactual mining moved back to failed agents rather than
+    more full-success delay cases.
+  - Focused one-step counterfactuals over all current `scene_3` failure seeds
+    in `7400..7419` found no Success-positive actions:
+    `141` rows, Reward W/L/T `6/91/44`, Success W/L/T `0/0/141`. This is a
+    strong signal that the remaining Scene-3 failures are sequential/planning
+    problems, not one-step action-mask fixes.
+  - The only positive cluster was `scene_3 seed7418`, agent 4, stopped at
+    `(114, 106)`: `STOP_MOVING -> MOVE_LEFT` at `t=111..116` improved Reward
+    by `+0.159642` but kept Success at `0.833333`. A single exact `t=111`
+    action is enough for the full improvement.
+  - Added `ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_*` as a separate secondary
+    profile, leaving the original scene-4 switch escape behavior unchanged.
+    Docker enables it only for scene `scene_3`, exact `step 111`, one hold,
+    distance `46..48`, slack `32..34`, active fraction `0.99..1.01`, stop
+    proximity `0.82..0.83`, time slack `0.30..0.31`, route distance
+    `0.17..0.18`, route/intersection count `0.65..0.68`, route/intersection
+    other-tighter `<=0.1`, ETA risk `0.86..0.87`, and left detour signature
+    distance delta `146..148` with corridor length `28`.
+  - A/B checks with current Docker env, baseline disabling only guard2:
+    - Causal `scene_3 seed7418`: Reward `0.673691 -> 0.833333`, Success
+      unchanged at `0.833333`; exactly one `stopped_left_scene3` trigger at
+      `t=111`.
+    - `scene_3 seed7400..7419`: mean Reward delta `+0.007982`, mean Success
+      delta `0.000000`, Reward W/L/T `1/0/19`, Success W/L/T `0/0/20`.
+    - Heldout `scene_3 seed7420..7439`: neutral, Reward/Success W/L/T
+      `0/0/20`.
+    - Aggregate `scene_1..5 seed7400..7419`: mean Reward delta `+0.001596`,
+      mean Success delta `0.000000`, Reward W/L/T `1/0/99`, Success W/L/T
+      `0/0/100`. Trace check found exactly one new `stopped_left_scene3`
+      trigger, on `scene_3 seed7418`.
+  - Decision: keep as a narrow Reward-only improvement, but do not mistake it
+    for a path to a winning Success jump. Next high-upside work should target
+    multi-step rescue/sequence planning or RL fine-tuning on these failed-agent
+    clusters, because one-step counterfactuals did not rescue Success.

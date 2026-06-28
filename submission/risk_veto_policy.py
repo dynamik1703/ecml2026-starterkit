@@ -911,6 +911,121 @@ class RiskVetoPolicy:
             "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD_MAX_DISTANCE_DELTA",
             0.0,
         )
+        self.switch_escape_guard2_enabled = bool(
+            int(os.environ.get("ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_ENABLED", "0") or "0")
+        )
+        self.switch_escape_guard2_allowed_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_ALLOWED_SCENES",
+                "",
+            ).split(",")
+            if scene.strip()
+        }
+        self.switch_escape_guard2_min_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_STEP",
+            0.0,
+        )
+        self.switch_escape_guard2_max_step = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_STEP",
+            float("inf"),
+        )
+        self.switch_escape_guard2_max_holds = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_HOLDS",
+            1.0,
+        )
+        self.switch_escape_guard2_min_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_DISTANCE",
+            0.0,
+        )
+        self.switch_escape_guard2_max_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_DISTANCE",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_SLACK",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_SLACK",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_active_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_ACTIVE_FRACTION",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_active_fraction = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_ACTIVE_FRACTION",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_STOP_PROXIMITY",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_stop_proximity = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_STOP_PROXIMITY",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_time_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_TIME_SLACK",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_time_slack = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_TIME_SLACK",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_route_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_ROUTE_DISTANCE",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_route_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_ROUTE_DISTANCE",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_route_count = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_ROUTE_COUNT",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_route_count = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_ROUTE_COUNT",
+            float("inf"),
+        )
+        self.switch_escape_guard2_max_route_other_tighter = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_ROUTE_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.switch_escape_guard2_max_intersection_own_distance = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_INTERSECTION_OWN_DISTANCE",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_INTERSECTION_ETA_RISK",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_intersection_eta_risk = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_INTERSECTION_ETA_RISK",
+            float("inf"),
+        )
+        self.switch_escape_guard2_max_intersection_other_tighter = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_INTERSECTION_OTHER_TIGHTER",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_left_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_LEFT_DISTANCE_DELTA",
+            float("-inf"),
+        )
+        self.switch_escape_guard2_max_left_distance_delta = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_LEFT_DISTANCE_DELTA",
+            float("inf"),
+        )
+        self.switch_escape_guard2_min_left_corridor_len = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MIN_LEFT_CORRIDOR_LEN",
+            0.0,
+        )
+        self.switch_escape_guard2_max_left_corridor_len = self._env_float(
+            "ECML_RISK_VETO_SWITCH_ESCAPE_GUARD2_MAX_LEFT_CORRIDOR_LEN",
+            float("inf"),
+        )
         self._switch_escape_counts: dict[int, int] = {}
         self._switch_escape_last_step: int | None = None
         self._switch_escape_last_seed: int | None = None
@@ -6362,6 +6477,163 @@ class RiskVetoPolicy:
         scores["switch_escape_guard_candidate_target"] = str(target_position)
         return candidate_action, scores
 
+    def _switch_escape_guard2_scores(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action: int,
+        step: int | None,
+        observation: Any | None = None,
+    ) -> tuple[int | None, dict[str, Any]]:
+        scores: dict[str, Any] = {}
+        if not self.switch_escape_guard2_enabled:
+            return None, scores
+        if obs_builder is None or step is None or observation is None:
+            return None, scores
+        if int(action) != 4:
+            return None, scores
+        if (
+            step < self.switch_escape_guard2_min_step
+            or step > self.switch_escape_guard2_max_step
+        ):
+            return None, scores
+        if self.switch_escape_guard2_allowed_scenes:
+            try:
+                scene = runtime_context.get().scene
+            except Exception:
+                scene = None
+            if scene not in self.switch_escape_guard2_allowed_scenes:
+                return None, scores
+        holds = self._switch_escape_counts.get(handle, 0)
+        if holds >= self.switch_escape_guard2_max_holds:
+            return None, scores
+
+        try:
+            agent = obs_builder.env.agents[handle]
+            if not obs_builder._state_matches(agent.state, "STOPPED"):
+                return None, scores
+            if agent.position is None:
+                return None, scores
+            distance = float(obs_builder._current_distance_to_waypoint(handle))
+            slack = self._guard_effective_slack(obs_builder, handle, distance)
+            local_mask = obs_builder._build_local_action_mask(handle)
+            coordinated_mask = obs_builder._coordination_masks.get(handle, local_mask)
+            target_position, _target_direction = obs_builder._action_target(handle, 1)
+        except Exception:
+            return None, scores
+        if (
+            target_position is None
+            or local_mask[1] < 0.5
+            or coordinated_mask[1] < 0.5
+        ):
+            return None, scores
+        try:
+            if obs_builder._occupied_by_other(target_position, handle):
+                return None, scores
+        except Exception:
+            return None, scores
+        left_distance_delta = self._candidate_distance_delta(obs_builder, handle, 1)
+        if left_distance_delta is None or not np.isfinite(left_distance_delta):
+            return None, scores
+        try:
+            left_corridor_len = len(obs_builder._corridor_edges_for_action(handle, 1))
+        except Exception:
+            left_corridor_len = 0
+
+        on_switch = self._observation_scalar(observation, 7)
+        active_fraction = self._observation_scalar(observation, 32)
+        stop_proximity = self._observation_scalar(observation, 33)
+        time_slack = self._observation_scalar(observation, 35)
+        route_distance = self._observation_scalar(observation, 36)
+        route_opposing = self._observation_scalar(observation, 37)
+        route_other_tighter = self._observation_scalar(observation, 40)
+        route_count = self._observation_scalar(observation, 43)
+        intersection_own_distance = self._observation_scalar(observation, 44)
+        intersection_eta_risk = self._observation_scalar(observation, 46)
+        intersection_other_first = self._observation_scalar(observation, 47)
+        intersection_other_tighter = self._observation_scalar(observation, 50)
+        intersection_count = self._observation_scalar(observation, 51)
+        obs_checks = {
+            "switch_escape_guard2_on_switch": on_switch,
+            "switch_escape_guard2_active_fraction": active_fraction,
+            "switch_escape_guard2_stop_proximity": stop_proximity,
+            "switch_escape_guard2_time_slack": time_slack,
+            "switch_escape_guard2_route_distance": route_distance,
+            "switch_escape_guard2_route_opposing": route_opposing,
+            "switch_escape_guard2_route_other_tighter": route_other_tighter,
+            "switch_escape_guard2_route_count": route_count,
+            "switch_escape_guard2_intersection_own_distance": (
+                intersection_own_distance
+            ),
+            "switch_escape_guard2_intersection_eta_risk": intersection_eta_risk,
+            "switch_escape_guard2_intersection_other_first": (
+                intersection_other_first
+            ),
+            "switch_escape_guard2_intersection_other_tighter": (
+                intersection_other_tighter
+            ),
+            "switch_escape_guard2_intersection_count": intersection_count,
+        }
+        for key, value in obs_checks.items():
+            if value is None:
+                return None, scores
+            scores[key] = float(value)
+        scores.update(
+            {
+                "switch_escape_guard_profile": "stopped_left_scene3",
+                "switch_escape_guard2_distance": float(distance),
+                "switch_escape_guard2_slack": float(slack),
+                "switch_escape_guard2_holds": int(holds),
+                "switch_escape_guard2_left_distance_delta": float(
+                    left_distance_delta
+                ),
+                "switch_escape_guard2_left_corridor_len": float(left_corridor_len),
+                "switch_escape_guard2_left_target": str(target_position),
+            }
+        )
+
+        if (
+            not np.isfinite(distance)
+            or distance < self.switch_escape_guard2_min_distance
+            or distance > self.switch_escape_guard2_max_distance
+            or not np.isfinite(slack)
+            or slack < self.switch_escape_guard2_min_slack
+            or slack > self.switch_escape_guard2_max_slack
+            or on_switch < 0.5
+            or active_fraction < self.switch_escape_guard2_min_active_fraction
+            or active_fraction > self.switch_escape_guard2_max_active_fraction
+            or stop_proximity < self.switch_escape_guard2_min_stop_proximity
+            or stop_proximity > self.switch_escape_guard2_max_stop_proximity
+            or time_slack < self.switch_escape_guard2_min_time_slack
+            or time_slack > self.switch_escape_guard2_max_time_slack
+            or route_distance < self.switch_escape_guard2_min_route_distance
+            or route_distance > self.switch_escape_guard2_max_route_distance
+            or route_opposing < 0.5
+            or route_other_tighter
+            > self.switch_escape_guard2_max_route_other_tighter
+            or route_count < self.switch_escape_guard2_min_route_count
+            or route_count > self.switch_escape_guard2_max_route_count
+            or intersection_own_distance
+            > self.switch_escape_guard2_max_intersection_own_distance
+            or intersection_eta_risk
+            < self.switch_escape_guard2_min_intersection_eta_risk
+            or intersection_eta_risk
+            > self.switch_escape_guard2_max_intersection_eta_risk
+            or intersection_other_first > 0.5
+            or intersection_other_tighter
+            > self.switch_escape_guard2_max_intersection_other_tighter
+            or intersection_count < self.switch_escape_guard2_min_route_count
+            or intersection_count > self.switch_escape_guard2_max_route_count
+            or left_distance_delta
+            < self.switch_escape_guard2_min_left_distance_delta
+            or left_distance_delta
+            > self.switch_escape_guard2_max_left_distance_delta
+            or left_corridor_len < self.switch_escape_guard2_min_left_corridor_len
+            or left_corridor_len > self.switch_escape_guard2_max_left_corridor_len
+        ):
+            return None, scores
+        return 1, scores
+
     def _apply_switch_escape_guard(
         self,
         output: dict[int, RailEnvActions],
@@ -6371,7 +6643,10 @@ class RiskVetoPolicy:
         seed: int | None,
         step: int | None,
     ) -> dict[int, RailEnvActions]:
-        if not self.switch_escape_guard_enabled or obs_builder is None:
+        if (
+            not (self.switch_escape_guard_enabled or self.switch_escape_guard2_enabled)
+            or obs_builder is None
+        ):
             return output
         self._reset_switch_escape_guard_state(seed, step)
         adjusted = dict(output)
@@ -6386,6 +6661,14 @@ class RiskVetoPolicy:
                 step,
                 observations_by_handle.get(int(handle)),
             )
+            if candidate_action is None:
+                candidate_action, scores = self._switch_escape_guard2_scores(
+                    obs_builder,
+                    int(handle),
+                    previous_action,
+                    step,
+                    observations_by_handle.get(int(handle)),
+                )
             if candidate_action is None:
                 continue
             adjusted[handle] = RailEnvActions(candidate_action)
