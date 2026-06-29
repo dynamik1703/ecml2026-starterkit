@@ -50,11 +50,11 @@ class DLAFirstHybridPolicy:
         )
         self.dynamic_min_free_cell_max_steps = self._env_int(
             "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_MAX_STEPS",
-            550,
+            850,
         )
         self.dynamic_min_free_cell_value = self._env_int(
             "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_VALUE",
-            2,
+            3,
         )
         self.wait_streaks: Dict[int, int] = {}
         self.late_rl_rescue_enabled = self._env_bool(
