@@ -39,7 +39,12 @@ class DLAFirstHybridPolicy:
         self.last_env_id = None
         self.last_step = None
         self.dla_min_free_cell = None
+        self.dla_k_shortest_path_cutoff = None
         self.base_min_free_cell = self._env_int("ECML_DLA_FIRST_MIN_FREE_CELL", 1)
+        self.base_k_shortest_path_cutoff = self._env_int(
+            "ECML_DLA_FIRST_K_SHORTEST_PATH_CUTOFF",
+            500,
+        )
         self.dynamic_min_free_cell = self._env_bool(
             "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL",
             False,
@@ -55,6 +60,18 @@ class DLAFirstHybridPolicy:
         self.dynamic_min_free_cell_value = self._env_int(
             "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_VALUE",
             3,
+        )
+        self.dynamic_k_shortest_path_cutoff = self._env_bool(
+            "ECML_DLA_FIRST_DYNAMIC_K_SHORTEST_PATH_CUTOFF",
+            False,
+        )
+        self.dynamic_k_shortest_path_cutoff_min_steps = self._env_int(
+            "ECML_DLA_FIRST_DYNAMIC_K_SHORTEST_PATH_CUTOFF_MIN_STEPS",
+            850,
+        )
+        self.dynamic_k_shortest_path_cutoff_value = self._env_int(
+            "ECML_DLA_FIRST_DYNAMIC_K_SHORTEST_PATH_CUTOFF_VALUE",
+            100,
         )
         self.wait_streaks: Dict[int, int] = {}
         self.late_rl_rescue_enabled = self._env_bool(
@@ -142,6 +159,7 @@ class DLAFirstHybridPolicy:
         ):
             self.dla_policy = None
             self.dla_min_free_cell = None
+            self.dla_k_shortest_path_cutoff = None
             self.dla_failed_steps = 0
             self.wait_streaks = {}
             self.last_env_id = env_id
@@ -163,9 +181,28 @@ class DLAFirstHybridPolicy:
             return self.dynamic_min_free_cell_value
         return self.base_min_free_cell
 
+    def _k_shortest_path_cutoff_for_env(self, env: Any | None) -> int:
+        if not self.dynamic_k_shortest_path_cutoff or env is None:
+            return self.base_k_shortest_path_cutoff
+        try:
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        except Exception:
+            return self.base_k_shortest_path_cutoff
+        if (
+            max_steps >= self.dynamic_k_shortest_path_cutoff_min_steps
+            and self.dynamic_k_shortest_path_cutoff_value > 0
+        ):
+            return self.dynamic_k_shortest_path_cutoff_value
+        return self.base_k_shortest_path_cutoff
+
     def _dla(self, env: Any | None = None):
         min_free_cell = self._min_free_cell_for_env(env)
-        if self.dla_policy is None or self.dla_min_free_cell != min_free_cell:
+        k_shortest_path_cutoff = self._k_shortest_path_cutoff_for_env(env)
+        if (
+            self.dla_policy is None
+            or self.dla_min_free_cell != min_free_cell
+            or self.dla_k_shortest_path_cutoff != k_shortest_path_cutoff
+        ):
             from submission.dla_vendor.deadlock_avoidance_policy import (
                 DeadLockAvoidancePolicy,
             )
@@ -194,14 +231,12 @@ class DLAFirstHybridPolicy:
                     if self._env_int("ECML_DLA_FIRST_DROP_NEXT_THRESHOLD", -1) >= 0
                     else None
                 ),
-                k_shortest_path_cutoff=self._env_int(
-                    "ECML_DLA_FIRST_K_SHORTEST_PATH_CUTOFF",
-                    500,
-                ),
+                k_shortest_path_cutoff=k_shortest_path_cutoff,
                 seed=self._env_int("ECML_DLA_FIRST_SEED", 17),
                 verbose=False,
             )
             self.dla_min_free_cell = min_free_cell
+            self.dla_k_shortest_path_cutoff = k_shortest_path_cutoff
             if always_first and k_alternatives <= 0:
                 self.dla_policy.use_k_alternatives_at_first_intermediate_and_then_always_first_strategy = 0
         return self.dla_policy
