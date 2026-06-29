@@ -48,13 +48,25 @@ class AdaptiveCompletionPolicy:
             "ECML_ADAPTIVE_CLUSTER_HIGH_AGENT_MID_COL_MAX_ROW",
             85.0,
         )
+        self.cluster_low_agent_early_deadline_col_min = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_EARLY_DEADLINE_COL_MIN",
+            80.0,
+        )
+        self.cluster_low_agent_early_deadline_col_max = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_EARLY_DEADLINE_COL_MAX",
+            82.0,
+        )
+        self.cluster_low_agent_early_deadline_max_mean = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_EARLY_DEADLINE_MAX_MEAN",
+            320.0,
+        )
         self.cluster_max_unique_waypoints = self._env_int(
             "ECML_ADAPTIVE_CLUSTER_MAX_UNIQUE_WAYPOINTS",
             42,
         )
         self.cluster_min_mean_row = self._env_float(
             "ECML_ADAPTIVE_CLUSTER_MIN_MEAN_ROW",
-            83.0,
+            83.5,
         )
         self.cluster_min_mean_col = self._env_float(
             "ECML_ADAPTIVE_CLUSTER_MIN_MEAN_COL",
@@ -144,6 +156,23 @@ class AdaptiveCompletionPolicy:
             and mean_row < self.cluster_high_agent_mid_col_max_row
         ):
             return False
+        if (
+            num_agents < self.cluster_high_agent_threshold
+            and self.cluster_low_agent_early_deadline_col_min
+            <= mean_col
+            <= self.cluster_low_agent_early_deadline_col_max
+            and self.cluster_low_agent_early_deadline_max_mean > 0.0
+        ):
+            latest_arrivals = [
+                float(agent.latest_arrival)
+                for agent in getattr(env, "agents", [])
+                if getattr(agent, "latest_arrival", None) is not None
+            ]
+            if latest_arrivals and (
+                sum(latest_arrivals) / len(latest_arrivals)
+                < self.cluster_low_agent_early_deadline_max_mean
+            ):
+                return False
         return (
             mean_row >= self.cluster_min_mean_row
             and mean_col >= self.cluster_min_mean_col
