@@ -7,7 +7,7 @@ COPY submission/ submission/
 COPY tools/ tools/
 
 ENV POLICY=submission.timed_rerank_policy.MyPolicy
-ENV OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder
+ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV ECML_TIMED_RERANK_DIRECT_AFTER_SECONDS=900
