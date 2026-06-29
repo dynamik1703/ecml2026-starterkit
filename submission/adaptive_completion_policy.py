@@ -32,6 +32,22 @@ class AdaptiveCompletionPolicy:
             "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_MAX_STEPS",
             500,
         )
+        self.cluster_low_agent_min_steps = self._env_int(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_MIN_STEPS",
+            390,
+        )
+        self.cluster_high_agent_mid_col_min = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_HIGH_AGENT_MID_COL_MIN",
+            80.0,
+        )
+        self.cluster_high_agent_mid_col_max = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_HIGH_AGENT_MID_COL_MAX",
+            86.0,
+        )
+        self.cluster_high_agent_mid_col_max_row = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_HIGH_AGENT_MID_COL_MAX_ROW",
+            85.0,
+        )
         self.cluster_max_unique_waypoints = self._env_int(
             "ECML_ADAPTIVE_CLUSTER_MAX_UNIQUE_WAYPOINTS",
             42,
@@ -92,6 +108,11 @@ class AdaptiveCompletionPolicy:
                 and max_steps > self.cluster_low_agent_max_steps
             ):
                 return False
+            if (
+                self.cluster_low_agent_min_steps > 0
+                and max_steps < self.cluster_low_agent_min_steps
+            ):
+                return False
 
         initial_positions = [
             agent.initial_position
@@ -115,6 +136,14 @@ class AdaptiveCompletionPolicy:
         mean_col = sum(position[1] for position in initial_positions) / len(
             initial_positions
         )
+        if (
+            num_agents >= self.cluster_high_agent_threshold
+            and self.cluster_high_agent_mid_col_min
+            <= mean_col
+            <= self.cluster_high_agent_mid_col_max
+            and mean_row < self.cluster_high_agent_mid_col_max_row
+        ):
+            return False
         return (
             mean_row >= self.cluster_min_mean_row
             and mean_col >= self.cluster_min_mean_col
