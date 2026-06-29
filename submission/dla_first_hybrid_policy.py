@@ -38,6 +38,24 @@ class DLAFirstHybridPolicy:
         self.max_seconds = self._env_float("ECML_DLA_FIRST_MAX_SECONDS", 1700.0)
         self.last_env_id = None
         self.last_step = None
+        self.dla_min_free_cell = None
+        self.base_min_free_cell = self._env_int("ECML_DLA_FIRST_MIN_FREE_CELL", 1)
+        self.dynamic_min_free_cell = self._env_bool(
+            "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL",
+            False,
+        )
+        self.dynamic_min_free_cell_min_agents = self._env_int(
+            "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_MIN_AGENTS",
+            50,
+        )
+        self.dynamic_min_free_cell_max_steps = self._env_int(
+            "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_MAX_STEPS",
+            550,
+        )
+        self.dynamic_min_free_cell_value = self._env_int(
+            "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_VALUE",
+            2,
+        )
         self.wait_streaks: Dict[int, int] = {}
         self.late_rl_rescue_enabled = self._env_bool(
             "ECML_DLA_FIRST_LATE_RL_RESCUE",
@@ -123,13 +141,31 @@ class DLAFirstHybridPolicy:
             self.last_step is not None and step < self.last_step
         ):
             self.dla_policy = None
+            self.dla_min_free_cell = None
             self.dla_failed_steps = 0
             self.wait_streaks = {}
             self.last_env_id = env_id
         self.last_step = step
 
-    def _dla(self):
-        if self.dla_policy is None:
+    def _min_free_cell_for_env(self, env: Any | None) -> int:
+        if not self.dynamic_min_free_cell or env is None:
+            return self.base_min_free_cell
+        try:
+            num_agents = int(env.get_num_agents())
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        except Exception:
+            return self.base_min_free_cell
+        if (
+            num_agents >= self.dynamic_min_free_cell_min_agents
+            and max_steps > 0
+            and max_steps <= self.dynamic_min_free_cell_max_steps
+        ):
+            return self.dynamic_min_free_cell_value
+        return self.base_min_free_cell
+
+    def _dla(self, env: Any | None = None):
+        min_free_cell = self._min_free_cell_for_env(env)
+        if self.dla_policy is None or self.dla_min_free_cell != min_free_cell:
             from submission.dla_vendor.deadlock_avoidance_policy import (
                 DeadLockAvoidancePolicy,
             )
@@ -138,7 +174,7 @@ class DLAFirstHybridPolicy:
             k_alternatives = self._env_int("ECML_DLA_FIRST_K_ALTERNATIVES", 0)
             strategy = 1 if always_first and k_alternatives <= 0 else k_alternatives
             self.dla_policy = DeadLockAvoidancePolicy(
-                min_free_cell=self._env_int("ECML_DLA_FIRST_MIN_FREE_CELL", 1),
+                min_free_cell=min_free_cell,
                 show_debug_plot=False,
                 count_num_opp_agents_towards_min_free_cell=self._env_bool(
                     "ECML_DLA_FIRST_COUNT_OPP_AGENTS",
@@ -165,6 +201,7 @@ class DLAFirstHybridPolicy:
                 seed=self._env_int("ECML_DLA_FIRST_SEED", 17),
                 verbose=False,
             )
+            self.dla_min_free_cell = min_free_cell
             if always_first and k_alternatives <= 0:
                 self.dla_policy.use_k_alternatives_at_first_intermediate_and_then_always_first_strategy = 0
         return self.dla_policy
@@ -180,7 +217,7 @@ class DLAFirstHybridPolicy:
             return None
         try:
             env_observations = [env for _ in range(max(handles, default=-1) + 1)]
-            actions = self._dla().act_many(handles, env_observations)
+            actions = self._dla(env).act_many(handles, env_observations)
             self.dla_failed_steps = 0
             return {
                 handle: RailEnvActions(self._action_id(action))

@@ -27,6 +27,10 @@ class HighComplexityDLAPolicy:
         self.mid_agents = self._env_int("ECML_HIGH_COMPLEXITY_DLA_MID_AGENTS", 50)
         self.mid_steps = self._env_int("ECML_HIGH_COMPLEXITY_DLA_MID_STEPS", 850)
         self.min_area = self._env_int("ECML_HIGH_COMPLEXITY_DLA_MIN_AREA", 0)
+        self.unknown_scene_dla = self._env_bool(
+            "ECML_HIGH_COMPLEXITY_DLA_UNKNOWN_SCENE",
+            True,
+        )
         self.last_env_id = None
         self.use_dla_for_env = False
 
@@ -37,9 +41,18 @@ class HighComplexityDLAPolicy:
         except Exception:
             return default
 
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
     def _high_complexity_needs_dla(self, env: Any | None) -> bool:
         if env is None:
             return False
+        if self.unknown_scene_dla and runtime_context.get().scene is None:
+            return True
         try:
             num_agents = int(env.get_num_agents())
             max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
