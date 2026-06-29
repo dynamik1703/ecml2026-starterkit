@@ -60,6 +60,46 @@ class AdaptiveCompletionPolicy:
             "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_EARLY_DEADLINE_MAX_MEAN",
             320.0,
         )
+        self.cluster_low_agent_completion_dla = self._env_bool(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_DLA",
+            True,
+        )
+        self.cluster_low_agent_completion_min_steps = self._env_int(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_MIN_STEPS",
+            430,
+        )
+        self.cluster_low_agent_completion_max_steps = self._env_int(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_MAX_STEPS",
+            570,
+        )
+        self.cluster_low_agent_completion_mid_min_row = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_MID_MIN_ROW",
+            80.5,
+        )
+        self.cluster_low_agent_completion_mid_col_min = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_MID_COL_MIN",
+            80.0,
+        )
+        self.cluster_low_agent_completion_mid_col_max = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_MID_COL_MAX",
+            86.0,
+        )
+        self.cluster_low_agent_completion_side_min_row = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_SIDE_MIN_ROW",
+            80.0,
+        )
+        self.cluster_low_agent_completion_side_col_min = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_SIDE_COL_MIN",
+            70.0,
+        )
+        self.cluster_low_agent_completion_side_col_max = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_SIDE_COL_MAX",
+            79.0,
+        )
+        self.cluster_low_agent_completion_side_min_latest = self._env_float(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_COMPLETION_SIDE_MIN_LATEST",
+            315.0,
+        )
         self.cluster_max_unique_waypoints = self._env_int(
             "ECML_ADAPTIVE_CLUSTER_MAX_UNIQUE_WAYPOINTS",
             42,
@@ -156,6 +196,17 @@ class AdaptiveCompletionPolicy:
             and mean_row < self.cluster_high_agent_mid_col_max_row
         ):
             return False
+        latest_arrivals = [
+            float(agent.latest_arrival)
+            for agent in getattr(env, "agents", [])
+            if getattr(agent, "latest_arrival", None) is not None
+        ]
+        mean_latest_arrival = (
+            sum(latest_arrivals) / len(latest_arrivals)
+            if latest_arrivals
+            else 0.0
+        )
+
         if (
             num_agents < self.cluster_high_agent_threshold
             and self.cluster_low_agent_early_deadline_col_min
@@ -163,16 +214,33 @@ class AdaptiveCompletionPolicy:
             <= self.cluster_low_agent_early_deadline_col_max
             and self.cluster_low_agent_early_deadline_max_mean > 0.0
         ):
-            latest_arrivals = [
-                float(agent.latest_arrival)
-                for agent in getattr(env, "agents", [])
-                if getattr(agent, "latest_arrival", None) is not None
-            ]
             if latest_arrivals and (
-                sum(latest_arrivals) / len(latest_arrivals)
-                < self.cluster_low_agent_early_deadline_max_mean
+                mean_latest_arrival < self.cluster_low_agent_early_deadline_max_mean
             ):
                 return False
+        if (
+            num_agents < self.cluster_high_agent_threshold
+            and self.cluster_low_agent_completion_dla
+            and self.cluster_low_agent_completion_min_steps
+            <= max_steps
+            <= self.cluster_low_agent_completion_max_steps
+        ):
+            if (
+                mean_row >= self.cluster_low_agent_completion_mid_min_row
+                and self.cluster_low_agent_completion_mid_col_min
+                <= mean_col
+                <= self.cluster_low_agent_completion_mid_col_max
+            ):
+                return True
+            if (
+                mean_row >= self.cluster_low_agent_completion_side_min_row
+                and self.cluster_low_agent_completion_side_col_min
+                <= mean_col
+                <= self.cluster_low_agent_completion_side_col_max
+                and mean_latest_arrival
+                >= self.cluster_low_agent_completion_side_min_latest
+            ):
+                return True
         return (
             mean_row >= self.cluster_min_mean_row
             and mean_col >= self.cluster_min_mean_col
