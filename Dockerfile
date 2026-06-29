@@ -6,9 +6,17 @@ FROM ghcr.io/flatland-association/flatland-baselines:${TAG}
 COPY submission/ submission/
 COPY tools/ tools/
 
-ENV POLICY=submission.dla_supervised_policy.MyPolicy
-ENV OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder
+ENV POLICY=submission.dla_first_hybrid_policy.MyPolicy
+ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV ECML_DLA_FIRST_CHECKPOINT=submission/models/ecml_rescue_bc_v4b_s7300.pt
+ENV ECML_DLA_FIRST_MAX_FAILURES=2
+ENV ECML_DLA_FIRST_MAX_SECONDS=1700
+ENV ECML_DLA_FIRST_MIN_FREE_CELL=1
+ENV ECML_DLA_FIRST_K_ALTERNATIVES=0
+ENV ECML_DLA_FIRST_K_SHORTEST_PATH_CUTOFF=500
+ENV ECML_DLA_FIRST_SEED=17
 ENV ECML_FAST_POLICY_CHECKPOINT=submission/models/ecml_rescue_bc_v4b_s7300.pt
 ENV ECML_FAST_USE_DIRECT_ON_LARGE_ENVS=0
 ENV ECML_FAST_DIRECT_AFTER_SECONDS=600
