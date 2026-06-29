@@ -6,8 +6,8 @@ FROM ghcr.io/flatland-association/flatland-baselines:${TAG}
 COPY submission/ submission/
 COPY tools/ tools/
 
-ENV POLICY=submission.dla_first_hybrid_policy.MyPolicy
-ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
+ENV POLICY=submission.rerank_policy.MyPolicy
+ENV OBS_BUILDER=submission.my_observation_builder.MyActionConflictObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV ECML_DLA_FIRST_CHECKPOINT=submission/models/ecml_rescue_bc_v4b_s7300.pt
