@@ -38,6 +38,7 @@ class DLAFirstHybridPolicy:
         self.max_seconds = self._env_float("ECML_DLA_FIRST_MAX_SECONDS", 1700.0)
         self.last_env_id = None
         self.last_step = None
+        self.wait_streaks: Dict[int, int] = {}
         self.late_rl_rescue_enabled = self._env_bool(
             "ECML_DLA_FIRST_LATE_RL_RESCUE",
             False,
@@ -45,6 +46,26 @@ class DLAFirstHybridPolicy:
         self.late_rl_rescue_progress = self._env_float(
             "ECML_DLA_FIRST_LATE_RL_RESCUE_PROGRESS",
             0.75,
+        )
+        self.late_rl_rescue_min_agents = self._env_int(
+            "ECML_DLA_FIRST_LATE_RL_RESCUE_MIN_AGENTS",
+            20,
+        )
+        self.late_rl_rescue_min_wait = self._env_int(
+            "ECML_DLA_FIRST_LATE_RL_RESCUE_MIN_WAIT",
+            6,
+        )
+        self.late_rl_rescue_max_overrides = self._env_int(
+            "ECML_DLA_FIRST_LATE_RL_RESCUE_MAX_OVERRIDES",
+            2,
+        )
+        self.late_rl_rescue_min_confidence = self._env_float(
+            "ECML_DLA_FIRST_LATE_RL_RESCUE_MIN_CONFIDENCE",
+            0.35,
+        )
+        self.late_rl_rescue_max_done_fraction = self._env_float(
+            "ECML_DLA_FIRST_LATE_RL_RESCUE_MAX_DONE_FRACTION",
+            0.5,
         )
         self.mini_locks_enabled = self._env_bool(
             "ECML_DLA_FIRST_MINI_LOCKS",
@@ -103,6 +124,7 @@ class DLAFirstHybridPolicy:
         ):
             self.dla_policy = None
             self.dla_failed_steps = 0
+            self.wait_streaks = {}
             self.last_env_id = env_id
         self.last_step = step
 
@@ -202,6 +224,117 @@ class DLAFirstHybridPolicy:
             logits = policy.masked_logits(features, mask)
         return [int(action) for action in logits.argmax(dim=-1).cpu().numpy()]
 
+    def _rl_action_ids_and_confidence(
+        self,
+        observations: List[Any],
+    ) -> list[tuple[int, float]]:
+        import torch
+
+        policy = self._ensure_rl_policy()
+        features, mask = self._split_features_and_mask(observations)
+        with torch.no_grad():
+            logits = policy.masked_logits(features, mask)
+            probabilities = torch.softmax(logits, dim=-1)
+            confidence, actions = probabilities.max(dim=-1)
+        return [
+            (int(action), float(probability))
+            for action, probability in zip(
+                actions.cpu().numpy(),
+                confidence.cpu().numpy(),
+            )
+        ]
+
+    @staticmethod
+    def _is_wait_action(action_id: int) -> bool:
+        return action_id in {0, 4}
+
+    def _update_wait_streaks(
+        self,
+        env: Any,
+        handles: List[int],
+        actions: Dict[int, RailEnvActions],
+    ) -> None:
+        active_handles = set(handles)
+        self.wait_streaks = {
+            handle: streak
+            for handle, streak in self.wait_streaks.items()
+            if handle in active_handles
+        }
+        for handle in handles:
+            agent = env.agents[handle]
+            action_id = self._action_id(actions.get(handle, RailEnvActions.DO_NOTHING))
+            if agent.position is not None and self._is_wait_action(action_id):
+                self.wait_streaks[handle] = self.wait_streaks.get(handle, 0) + 1
+            else:
+                self.wait_streaks[handle] = 0
+
+    def _late_rl_rescue_should_run(self, env: Any) -> bool:
+        if not self.late_rl_rescue_enabled:
+            return False
+        try:
+            if int(env.get_num_agents()) < self.late_rl_rescue_min_agents:
+                return False
+        except Exception:
+            return False
+        max_steps = max(1, int(getattr(env, "_max_episode_steps", 1) or 1))
+        step = int(getattr(env, "_elapsed_steps", 0) or 0)
+        if step / max_steps < self.late_rl_rescue_progress:
+            return False
+        if self.late_rl_rescue_max_done_fraction < 1.0:
+            num_agents = max(1, int(env.get_num_agents()))
+            done = sum(int(self._is_done_agent(agent)) for agent in env.agents)
+            if done / num_agents > self.late_rl_rescue_max_done_fraction:
+                return False
+        return True
+
+    def _initial_reservations(
+        self,
+        env: Any,
+        handles: List[int],
+        actions: Dict[int, RailEnvActions],
+    ) -> tuple[set[Any], set[tuple[Any, Any]]]:
+        reserved_targets = {
+            agent.position
+            for agent in env.agents
+            if agent.position is not None and not self._is_done_agent(agent)
+        }
+        reserved_edges: set[tuple[Any, Any]] = set()
+        for handle in handles:
+            action_id = self._action_id(actions.get(handle, RailEnvActions.DO_NOTHING))
+            if action_id not in {1, 2, 3}:
+                continue
+            source, target, _ = self._mini_lock_action_target(env, handle, action_id)
+            if source is None or target is None or target == source:
+                continue
+            reserved_targets.add(target)
+            reserved_edges.add((source, target))
+        return reserved_targets, reserved_edges
+
+    def _is_safe_rl_rescue_action(
+        self,
+        env: Any,
+        handle: int,
+        action_id: int,
+        reserved_targets: set[Any],
+        reserved_edges: set[tuple[Any, Any]],
+    ) -> tuple[bool, Any | None, Any | None]:
+        if action_id not in {1, 2, 3}:
+            return False, None, None
+        agent = env.agents[handle]
+        if agent.position is None:
+            return False, None, None
+        source, target, _ = self._mini_lock_action_target(env, handle, action_id)
+        if source is None or target is None or target == source:
+            return False, None, None
+
+        reserved_without_self = set(reserved_targets)
+        reserved_without_self.discard(source)
+        if target in reserved_without_self:
+            return False, None, None
+        if (target, source) in reserved_edges:
+            return False, None, None
+        return True, source, target
+
     def _late_rl_rescue_actions(
         self,
         env: Any,
@@ -209,18 +342,46 @@ class DLAFirstHybridPolicy:
         observations: List[Any],
         dla_actions: Dict[int, RailEnvActions],
     ) -> Dict[int, RailEnvActions]:
-        if not self.late_rl_rescue_enabled:
-            return dla_actions
-        max_steps = max(1, int(getattr(env, "_max_episode_steps", 1) or 1))
-        step = int(getattr(env, "_elapsed_steps", 0) or 0)
-        if step / max_steps < self.late_rl_rescue_progress:
+        self._update_wait_streaks(env, handles, dla_actions)
+        if not self._late_rl_rescue_should_run(env):
             return dla_actions
 
         rescued = dict(dla_actions)
-        for handle, rl_id in zip(handles, self._rl_action_ids(observations)):
+        reserved_targets, reserved_edges = self._initial_reservations(
+            env,
+            handles,
+            rescued,
+        )
+        rl_decisions = self._rl_action_ids_and_confidence(observations)
+        candidates = []
+        for handle, (rl_id, confidence) in zip(handles, rl_decisions):
             dla_id = self._action_id(dla_actions.get(handle, RailEnvActions.DO_NOTHING))
-            if dla_id in {0, 4} and rl_id in {1, 2, 3}:
-                rescued[handle] = RailEnvActions(rl_id)
+            if not self._is_wait_action(dla_id):
+                continue
+            if self.wait_streaks.get(handle, 0) < self.late_rl_rescue_min_wait:
+                continue
+            if confidence < self.late_rl_rescue_min_confidence:
+                continue
+            candidates.append((confidence, handle, rl_id))
+
+        overrides = 0
+        for _, handle, rl_id in sorted(candidates, reverse=True):
+            if overrides >= self.late_rl_rescue_max_overrides:
+                break
+            is_safe, source, target = self._is_safe_rl_rescue_action(
+                env,
+                handle,
+                rl_id,
+                reserved_targets,
+                reserved_edges,
+            )
+            if not is_safe or source is None or target is None:
+                continue
+            rescued[handle] = RailEnvActions(rl_id)
+            reserved_targets.add(target)
+            reserved_edges.add((source, target))
+            self.wait_streaks[handle] = 0
+            overrides += 1
         return rescued
 
     @staticmethod
