@@ -46,6 +46,26 @@ class DLAFirstHybridPolicy:
             "ECML_DLA_FIRST_LATE_RL_RESCUE_PROGRESS",
             0.75,
         )
+        self.mini_locks_enabled = self._env_bool(
+            "ECML_DLA_FIRST_MINI_LOCKS",
+            False,
+        )
+        self.mini_lock_lookahead = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_LOOKAHEAD",
+            5,
+        )
+        self.mini_lock_min_agents = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_AGENTS",
+            20,
+        )
+        self.mini_lock_min_progress = self._env_float(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_PROGRESS",
+            0.0,
+        )
+        self.mini_lock_max_done_fraction = self._env_float(
+            "ECML_DLA_FIRST_MINI_LOCK_MAX_DONE_FRACTION",
+            1.0,
+        )
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -203,6 +223,189 @@ class DLAFirstHybridPolicy:
                 rescued[handle] = RailEnvActions(rl_id)
         return rescued
 
+    @staticmethod
+    def _agent_position_and_direction(agent: Any) -> tuple[Any | None, Any | None]:
+        position = agent.position
+        direction = agent.direction
+        if position is None:
+            position = getattr(agent, "initial_position", None)
+            direction = getattr(agent, "initial_direction", None)
+        return position, direction
+
+    @staticmethod
+    def _is_active_agent(agent: Any) -> bool:
+        return agent.position is not None
+
+    def _wait_action_for_agent(self, agent: Any) -> RailEnvActions:
+        if self._is_active_agent(agent):
+            return RailEnvActions.STOP_MOVING
+        return RailEnvActions.DO_NOTHING
+
+    @staticmethod
+    def _is_done_agent(agent: Any) -> bool:
+        state = getattr(agent, "state", None)
+        state_name = getattr(state, "name", str(state))
+        return state_name in {"DONE", "DONE_REMOVED"} or state == 6
+
+    def _mini_locks_should_run(self, env: Any) -> bool:
+        try:
+            num_agents = int(env.get_num_agents())
+        except Exception:
+            return False
+        if num_agents < self.mini_lock_min_agents:
+            return False
+
+        max_steps = max(1, int(getattr(env, "_max_episode_steps", 1) or 1))
+        step = int(getattr(env, "_elapsed_steps", 0) or 0)
+        if step / max_steps < self.mini_lock_min_progress:
+            return False
+
+        if self.mini_lock_max_done_fraction < 1.0:
+            done = sum(int(self._is_done_agent(agent)) for agent in env.agents)
+            if done / max(1, num_agents) > self.mini_lock_max_done_fraction:
+                return False
+        return True
+
+    def _mini_lock_priority(self, env: Any, handle: int) -> tuple[float, float, int]:
+        agent = env.agents[handle]
+        step = int(getattr(env, "_elapsed_steps", 0) or 0)
+        latest_arrival = getattr(agent, "latest_arrival", None)
+        if latest_arrival is None:
+            slack = 1e9
+        else:
+            slack = float(latest_arrival - step)
+        path_len = 1e9
+        dla_policy = self.dla_policy
+        set_paths = getattr(dla_policy, "_set_paths", {}) if dla_policy is not None else {}
+        path = set_paths.get(handle)
+        if path is not None:
+            path_len = float(len(path))
+        return (slack, path_len, handle)
+
+    def _mini_lock_action_target(
+        self,
+        env: Any,
+        handle: int,
+        action_id: int,
+    ) -> tuple[Any | None, Any | None, Any | None]:
+        agent = env.agents[handle]
+        source, direction = self._agent_position_and_direction(agent)
+        if source is None or direction is None:
+            return None, None, None
+        if action_id in {0, 4}:
+            return source, source, direction
+        if agent.position is None:
+            return None, source, direction
+
+        try:
+            result = env.rail._check_action_on_agent(
+                RailEnvActions(action_id),
+                (source, direction),
+            )
+            if len(result) >= 3:
+                valid = bool(result[0]) and bool(result[2])
+                new_position, new_direction = result[1]
+                if valid:
+                    return source, new_position, new_direction
+        except Exception:
+            pass
+
+        try:
+            result = env.rail.check_action_on_agent(
+                RailEnvActions(action_id),
+                (source, direction),
+            )
+            if len(result) >= 3:
+                valid = bool(result[0]) and bool(result[2])
+                new_position, new_direction = result[1]
+                if valid:
+                    return source, new_position, new_direction
+        except Exception:
+            pass
+
+        return None, None, None
+
+    def _mini_lock_corridor_edges(
+        self,
+        env: Any,
+        source: Any | None,
+        target: Any | None,
+        direction: Any | None,
+    ) -> list[tuple[Any, Any]]:
+        if source is None or target is None or direction is None or target == source:
+            return []
+
+        edges = [(source, target)]
+        previous = target
+        current_direction = direction
+        for _ in range(max(0, self.mini_lock_lookahead - 1)):
+            try:
+                transitions = env.rail.get_transitions((previous, current_direction))
+            except Exception:
+                break
+            outgoing = [
+                new_direction
+                for new_direction, value in enumerate(transitions)
+                if value
+            ]
+            if len(outgoing) != 1:
+                break
+            next_direction = outgoing[0]
+            try:
+                from flatland.core.grid.grid4_utils import get_new_position
+
+                current = get_new_position(previous, next_direction)
+            except Exception:
+                break
+            edges.append((previous, current))
+            previous = current
+            current_direction = next_direction
+        return edges
+
+    def _apply_mini_sipp_locks(
+        self,
+        env: Any,
+        handles: List[int],
+        actions: Dict[int, RailEnvActions],
+    ) -> Dict[int, RailEnvActions]:
+        if not self.mini_locks_enabled:
+            return actions
+        if not self._mini_locks_should_run(env):
+            return actions
+
+        adjusted = dict(actions)
+        reserved_edges: set[tuple[Any, Any]] = set()
+        reserved_corridor_edges: set[tuple[Any, Any]] = set()
+
+        for handle in sorted(handles, key=lambda h: self._mini_lock_priority(env, h)):
+            agent = env.agents[handle]
+            action_id = self._action_id(adjusted.get(handle, RailEnvActions.DO_NOTHING))
+            source, target, direction = self._mini_lock_action_target(
+                env,
+                handle,
+                action_id,
+            )
+
+            if action_id in {1, 2, 3} and source is not None and target is not None:
+                edge = (source, target)
+                corridor_edges = self._mini_lock_corridor_edges(
+                    env,
+                    source,
+                    target,
+                    direction,
+                )
+                reverse_conflict = (target, source) in reserved_edges or any(
+                    (edge_target, edge_source) in reserved_corridor_edges
+                    for edge_source, edge_target in corridor_edges
+                )
+                if reverse_conflict:
+                    adjusted[handle] = self._wait_action_for_agent(agent)
+                else:
+                    reserved_edges.add(edge)
+                    reserved_corridor_edges.update(corridor_edges)
+
+        return adjusted
+
     def act(self, observation: Any, **kwargs) -> RailEnvActions:
         return RailEnvActions(self._ensure_rl_policy().act(observation, **kwargs))
 
@@ -220,6 +423,7 @@ class DLAFirstHybridPolicy:
             self._reset_for_env(env)
             actions = self._dla_actions(handles, env)
             if actions:
+                actions = self._apply_mini_sipp_locks(env, handles, actions)
                 return self._late_rl_rescue_actions(
                     env,
                     handles,
