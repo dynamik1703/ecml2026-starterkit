@@ -6,11 +6,13 @@ FROM ghcr.io/flatland-association/flatland-baselines:${TAG}
 COPY submission/ submission/
 COPY tools/ tools/
 
-ENV POLICY=submission.timed_rerank_policy.MyPolicy
+ENV POLICY=submission.adaptive_completion_policy.MyPolicy
 ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV ECML_TIMED_RERANK_DIRECT_AFTER_SECONDS=900
+ENV ECML_ADAPTIVE_CLUSTER_DLA=1
+ENV ECML_ADAPTIVE_CLUSTER_MIN_AGENTS=35
 ENV ECML_DLA_FIRST_CHECKPOINT=submission/models/ecml_rescue_bc_v4b_s7300.pt
 ENV ECML_DLA_FIRST_MAX_FAILURES=2
 ENV ECML_DLA_FIRST_MAX_SECONDS=1700

@@ -24,10 +24,12 @@ See [STEP-BY-STEP_GUIDE](STEP-BY-STEP_GUIDE.md) contributed by <a href="https://
 * All resources under `submission/` are added to the Docker image (add checkpoints here and load from your policy).
 
 This fork currently sets the Docker submission entrypoint to
-`submission.timed_rerank_policy.MyPolicy` with the lightweight
-`submission.my_observation_builder.MyObservationBuilder`. The learned PPO
-checkpoint is stored under `submission/checkpoint.pt`; `tools/` is copied into
-the Docker image because several policy variants share local evaluation helpers.
+`submission.adaptive_completion_policy.MyPolicy` with the lightweight
+`submission.my_observation_builder.MyObservationBuilder`. The default behavior
+is the learned PPO/rerank policy from `submission/checkpoint.pt`; a targeted
+completion fallback uses deadlock avoidance only on dense station-cluster cases
+where local rollouts show a large completion drop. `tools/` is copied into the
+Docker image because several policy variants share local evaluation helpers.
 
 ### Train your model using reinforcement learning
 
