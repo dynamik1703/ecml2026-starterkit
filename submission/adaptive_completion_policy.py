@@ -30,7 +30,7 @@ class AdaptiveCompletionPolicy:
         )
         self.cluster_min_mean_row = self._env_float(
             "ECML_ADAPTIVE_CLUSTER_MIN_MEAN_ROW",
-            74.0,
+            83.0,
         )
         self.cluster_min_mean_col = self._env_float(
             "ECML_ADAPTIVE_CLUSTER_MIN_MEAN_COL",
