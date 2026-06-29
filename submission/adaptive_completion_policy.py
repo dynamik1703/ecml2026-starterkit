@@ -24,6 +24,14 @@ class AdaptiveCompletionPolicy:
             "ECML_ADAPTIVE_CLUSTER_MIN_AGENTS",
             35,
         )
+        self.cluster_high_agent_threshold = self._env_int(
+            "ECML_ADAPTIVE_CLUSTER_HIGH_AGENT_THRESHOLD",
+            50,
+        )
+        self.cluster_low_agent_max_steps = self._env_int(
+            "ECML_ADAPTIVE_CLUSTER_LOW_AGENT_MAX_STEPS",
+            500,
+        )
         self.cluster_max_unique_waypoints = self._env_int(
             "ECML_ADAPTIVE_CLUSTER_MAX_UNIQUE_WAYPOINTS",
             42,
@@ -72,10 +80,18 @@ class AdaptiveCompletionPolicy:
         if not self.enable_cluster_fallback or env is None:
             return False
         try:
-            if int(env.get_num_agents()) < self.cluster_min_agents:
+            num_agents = int(env.get_num_agents())
+            if num_agents < self.cluster_min_agents:
                 return False
         except Exception:
             return False
+        if num_agents < self.cluster_high_agent_threshold:
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+            if (
+                self.cluster_low_agent_max_steps > 0
+                and max_steps > self.cluster_low_agent_max_steps
+            ):
+                return False
 
         initial_positions = [
             agent.initial_position
