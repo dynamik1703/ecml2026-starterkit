@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from flatland.core.grid.grid4_utils import get_new_position
 from flatland.envs.rail_env_action import RailEnvActions
 
 from submission import runtime_context
@@ -55,6 +56,10 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             ).split(",")
             if scene.strip()
         }
+        self.mapf_disabled_scene_override_min_agents = self._env_int(
+            "ECML_MAPF_SIPP_DISABLED_SCENE_OVERRIDE_MIN_AGENTS",
+            95,
+        )
         self.mapf_min_agents = self._env_int("ECML_MAPF_SIPP_MIN_AGENTS", 35)
         self.mapf_min_steps = self._env_int("ECML_MAPF_SIPP_MIN_STEPS", 500)
         self.mapf_horizon = self._env_int("ECML_MAPF_SIPP_HORIZON", 24)
@@ -101,6 +106,34 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             "ECML_MAPF_SIPP_OCCUPIED_TARGET_PENALTY",
             0.75,
         )
+        self.mapf_alternative_moves = self._env_bool(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MOVES",
+            False,
+        )
+        self.mapf_preemptive_alternatives = self._env_bool(
+            "ECML_MAPF_SIPP_PREEMPTIVE_ALTERNATIVES",
+            False,
+        )
+        self.mapf_alternative_min_wait = self._env_int(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MIN_WAIT",
+            2,
+        )
+        self.mapf_alternative_min_conflicts = self._env_int(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MIN_CONFLICTS",
+            1,
+        )
+        self.mapf_alternative_max_distance_delta = self._env_float(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MAX_DISTANCE_DELTA",
+            3.0,
+        )
+        self.mapf_alternative_min_rl_advantage = self._env_float(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MIN_RL_ADVANTAGE",
+            -0.20,
+        )
+        self.mapf_alternative_max_per_step = self._env_int(
+            "ECML_MAPF_SIPP_ALTERNATIVE_MAX_PER_STEP",
+            3,
+        )
         self.global_locks_enabled = self._env_bool(
             "ECML_MAPF_GLOBAL_LOCKS",
             False,
@@ -142,14 +175,18 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
     def _mapf_should_run(self, env: Any) -> bool:
         if not self.mapf_enabled:
             return False
-        scene = runtime_context.get().scene
-        if scene in self.mapf_disabled_scenes:
-            return False
         try:
             num_agents = int(env.get_num_agents())
             max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
         except Exception:
             return False
+        scene = runtime_context.get().scene
+        if scene in self.mapf_disabled_scenes:
+            if (
+                self.mapf_disabled_scene_override_min_agents <= 0
+                or num_agents < self.mapf_disabled_scene_override_min_agents
+            ):
+                return False
         if num_agents < self.mapf_min_agents:
             return False
         if max_steps < self.mapf_min_steps:
@@ -212,6 +249,269 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             ):
                 return action_id
         return None
+
+    @staticmethod
+    def _distance_at(distance_map: Any, position: Any, direction: Any) -> float:
+        try:
+            distance = float(distance_map[position[0], position[1], direction])
+            return distance if math.isfinite(distance) else float("inf")
+        except Exception:
+            return float("inf")
+
+    def _best_progress_direction(
+        self,
+        env: Any,
+        distance_map: Any,
+        position: Any,
+        direction: Any,
+    ) -> int | None:
+        try:
+            transitions = env.rail.get_transitions((position, direction))
+        except Exception:
+            return None
+
+        best_direction = None
+        best_distance = float("inf")
+        for next_direction, is_open in enumerate(transitions):
+            if not is_open:
+                continue
+            try:
+                next_position = get_new_position(position, next_direction)
+            except Exception:
+                continue
+            distance = self._distance_at(distance_map, next_position, next_direction)
+            if distance < best_distance:
+                best_distance = distance
+                best_direction = next_direction
+        if best_direction is not None:
+            return best_direction
+        for next_direction, is_open in enumerate(transitions):
+            if is_open:
+                return int(next_direction)
+        return None
+
+    def _greedy_nodes_from_action(
+        self,
+        env: Any,
+        handle: int,
+        action_id: int,
+    ) -> list[PathNode]:
+        source, target, direction = self._mini_lock_action_target(
+            env,
+            handle,
+            action_id,
+        )
+        if source is None or target is None or direction is None:
+            return []
+
+        nodes = [
+            PathNode(position=source, direction=direction),
+            PathNode(position=target, direction=direction),
+        ]
+        obs_builder = runtime_context.get().obs_builder
+        if obs_builder is None:
+            return nodes
+        try:
+            distance_map = obs_builder._get_distance_map(handle)
+        except Exception:
+            return nodes
+
+        current_position = target
+        current_direction = direction
+        seen = {(current_position, current_direction)}
+        for _ in range(max(0, self.mapf_horizon - 1)):
+            next_direction = self._best_progress_direction(
+                env,
+                distance_map,
+                current_position,
+                current_direction,
+            )
+            if next_direction is None:
+                break
+            try:
+                next_position = get_new_position(current_position, next_direction)
+            except Exception:
+                break
+            state = (next_position, next_direction)
+            if state in seen:
+                break
+            seen.add(state)
+            nodes.append(PathNode(position=next_position, direction=next_direction))
+            current_position = next_position
+            current_direction = next_direction
+        return nodes[: self.mapf_horizon + 1]
+
+    def _action_distance_delta(
+        self,
+        handle: int,
+        source: Any,
+        target: Any,
+        direction: Any,
+    ) -> float:
+        obs_builder = runtime_context.get().obs_builder
+        if obs_builder is None:
+            return float("inf")
+        try:
+            distance_map = obs_builder._get_distance_map(handle)
+        except Exception:
+            return float("inf")
+        current_distance = self._distance_at(
+            distance_map,
+            source,
+            getattr(runtime_context.get().env.agents[handle], "direction", direction)
+            if runtime_context.get().env is not None
+            else direction,
+        )
+        next_distance = self._distance_at(distance_map, target, direction)
+        if not math.isfinite(next_distance):
+            return float("inf")
+        if not math.isfinite(current_distance):
+            return 0.0
+        return next_distance - current_distance
+
+    def _alternative_candidate(
+        self,
+        env: Any,
+        candidate: MAPFCandidate,
+        action_id: int,
+        timing_scores: dict[int, dict[str, float]],
+        reserved_cells: dict[int, set[Any]],
+        reserved_edges: dict[int, set[tuple[Any, Any]]],
+    ) -> MAPFCandidate | None:
+        if action_id == candidate.action_id or action_id not in {1, 2, 3}:
+            return None
+        if not self._action_is_allowed_by_mask(candidate.handle, action_id, None):
+            return None
+
+        source, target, direction = self._mini_lock_action_target(
+            env,
+            candidate.handle,
+            action_id,
+        )
+        if source is None or target is None or direction is None or source == target:
+            return None
+        if target != source and self._cell_reserved(reserved_cells, 0, target):
+            return None
+        if not self._can_reserve_move(
+            reserved_cells,
+            reserved_edges,
+            1,
+            source,
+            target,
+        ):
+            return None
+
+        distance_delta = self._action_distance_delta(
+            candidate.handle,
+            source,
+            target,
+            direction,
+        )
+        if distance_delta > self.mapf_alternative_max_distance_delta:
+            return None
+
+        rl_go_advantage = self._go_advantage(
+            env,
+            candidate.handle,
+            action_id,
+            timing_scores,
+        )
+        if rl_go_advantage < self.mapf_alternative_min_rl_advantage:
+            return None
+
+        nodes = self._greedy_nodes_from_action(env, candidate.handle, action_id)
+        if len(nodes) < 2:
+            return None
+
+        return MAPFCandidate(
+            handle=candidate.handle,
+            dla_action_id=candidate.dla_action_id,
+            action_id=action_id,
+            wait_action=candidate.wait_action,
+            source=source,
+            target=target,
+            direction=direction,
+            nodes=nodes,
+            slack=candidate.slack,
+            path_len=max(0.0, candidate.path_len + distance_delta),
+            wait_streak=candidate.wait_streak,
+            rl_go_advantage=rl_go_advantage,
+            occupied_target=False,
+            conflict_degree=candidate.conflict_degree,
+        )
+
+    def _should_try_alternative(self, candidate: MAPFCandidate) -> bool:
+        if not self.mapf_alternative_moves:
+            return False
+        if candidate.occupied_target:
+            return True
+        if (
+            self.mapf_alternative_min_conflicts > 0
+            and candidate.conflict_degree >= self.mapf_alternative_min_conflicts
+        ):
+            return True
+        return candidate.wait_streak >= self.mapf_alternative_min_wait
+
+    def _try_alternative_action(
+        self,
+        env: Any,
+        candidate: MAPFCandidate,
+        candidates: list[MAPFCandidate],
+        timing_scores: dict[int, dict[str, float]],
+        reserved_cells: dict[int, set[Any]],
+        reserved_edges: dict[int, set[tuple[Any, Any]]],
+        preemptive: bool = False,
+    ) -> RailEnvActions | None:
+        if not self._should_try_alternative(candidate):
+            return None
+
+        baseline_conflicts = self._future_conflict_count(candidate, candidates)
+        if preemptive and baseline_conflicts <= 0:
+            return None
+
+        alternatives = []
+        for action_id in (1, 2, 3):
+            alternative = self._alternative_candidate(
+                env,
+                candidate,
+                action_id,
+                timing_scores,
+                reserved_cells,
+                reserved_edges,
+            )
+            if alternative is None:
+                continue
+            distance_delta = self._action_distance_delta(
+                alternative.handle,
+                alternative.source,
+                alternative.target,
+                alternative.direction,
+            )
+            future_conflicts = self._future_conflict_count(alternative, candidates)
+            if preemptive and future_conflicts >= baseline_conflicts:
+                continue
+            alternatives.append(
+                (
+                    future_conflicts,
+                    distance_delta,
+                    -alternative.rl_go_advantage,
+                    alternative.action_id,
+                    alternative,
+                )
+            )
+        if not alternatives:
+            return None
+
+        _, _, _, _, alternative = min(alternatives)
+        return self._plan_candidate(
+            env,
+            alternative,
+            candidates,
+            reserved_cells,
+            reserved_edges,
+            timing_scores,
+            allow_alternative=False,
+        )
 
     def _current_occupancy(self, env: Any) -> dict[Any, int]:
         occupancy = {}
@@ -562,6 +862,27 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
                 return True
         return False
 
+    def _future_conflict_count(
+        self,
+        candidate: MAPFCandidate,
+        candidates: list[MAPFCandidate],
+    ) -> int:
+        edges = self._candidate_edges(candidate, self.global_lock_create_horizon)
+        if not edges:
+            return 0
+
+        edge_set = set(edges)
+        count = 0
+        for other in candidates:
+            if other.handle == candidate.handle:
+                continue
+            other_edges = self._candidate_edges(other, self.global_lock_create_horizon)
+            if any(self._reverse_edge(edge) in edge_set for edge in other_edges):
+                count += 1
+            elif any(edge in other_edges for edge in edge_set):
+                count += 1
+        return count
+
     def _make_global_lock(
         self,
         env: Any,
@@ -676,11 +997,43 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
 
     def _plan_candidate(
         self,
+        env: Any,
         candidate: MAPFCandidate,
+        candidates: list[MAPFCandidate],
         reserved_cells: dict[int, set[Any]],
         reserved_edges: dict[int, set[tuple[Any, Any]]],
+        timing_scores: dict[int, dict[str, float]],
+        allow_alternative: bool = True,
     ) -> RailEnvActions:
+        if (
+            allow_alternative
+            and self.mapf_preemptive_alternatives
+            and not candidate.occupied_target
+        ):
+            alternative = self._try_alternative_action(
+                env,
+                candidate,
+                candidates,
+                timing_scores,
+                reserved_cells,
+                reserved_edges,
+                preemptive=True,
+            )
+            if alternative is not None:
+                return alternative
+
         if candidate.occupied_target:
+            if allow_alternative:
+                alternative = self._try_alternative_action(
+                    env,
+                    candidate,
+                    candidates,
+                    timing_scores,
+                    reserved_cells,
+                    reserved_edges,
+                )
+                if alternative is not None:
+                    return alternative
             self._reserve_wait(reserved_cells, 1, candidate.source)
             return candidate.wait_action
 
@@ -719,12 +1072,34 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
 
             if inserted_waits >= self.mapf_max_inserted_wait:
                 if first_action is None:
+                    if allow_alternative:
+                        alternative = self._try_alternative_action(
+                            env,
+                            candidate,
+                            candidates,
+                            timing_scores,
+                            reserved_cells,
+                            reserved_edges,
+                        )
+                        if alternative is not None:
+                            return alternative
                     self._reserve_wait(reserved_cells, 1, candidate.source)
                     return candidate.wait_action
                 break
 
             if self._cell_reserved(reserved_cells, time_index, current):
                 if first_action is None:
+                    if allow_alternative:
+                        alternative = self._try_alternative_action(
+                            env,
+                            candidate,
+                            candidates,
+                            timing_scores,
+                            reserved_cells,
+                            reserved_edges,
+                        )
+                        if alternative is not None:
+                            return alternative
                     return candidate.wait_action
                 break
             self._reserve_wait(reserved_cells, time_index, current)
@@ -780,9 +1155,12 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
                 planned_action = candidate.wait_action
             else:
                 planned_action = self._plan_candidate(
+                    env,
                     candidate,
+                    candidates,
                     reserved_cells,
                     reserved_edges,
+                    timing_scores,
                 )
             if (
                 self._action_id(planned_action) in {0, 4}
