@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import math
 from typing import Any, Dict, List
 
 from flatland.envs.rail_env_action import RailEnvActions
@@ -101,6 +102,42 @@ class DLAFirstHybridPolicy:
         self.late_rl_rescue_max_done_fraction = self._env_float(
             "ECML_DLA_FIRST_LATE_RL_RESCUE_MAX_DONE_FRACTION",
             0.5,
+        )
+        self.completion_release_enabled = self._env_bool(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE",
+            False,
+        )
+        self.completion_release_min_agents = self._env_int(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MIN_AGENTS",
+            70,
+        )
+        self.completion_release_min_steps = self._env_int(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MIN_STEPS",
+            1000,
+        )
+        self.completion_release_min_progress = self._env_float(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MIN_PROGRESS",
+            0.60,
+        )
+        self.completion_release_min_wait = self._env_int(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MIN_WAIT",
+            4,
+        )
+        self.completion_release_max_slack = self._env_float(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MAX_SLACK",
+            80.0,
+        )
+        self.completion_release_min_distance_gain = self._env_float(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MIN_DISTANCE_GAIN",
+            0.5,
+        )
+        self.completion_release_max_overrides = self._env_int(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MAX_OVERRIDES",
+            3,
+        )
+        self.completion_release_max_done_fraction = self._env_float(
+            "ECML_DLA_FIRST_COMPLETION_RELEASE_MAX_DONE_FRACTION",
+            0.85,
         )
         self.mini_locks_enabled = self._env_bool(
             "ECML_DLA_FIRST_MINI_LOCKS",
@@ -427,6 +464,27 @@ class DLAFirstHybridPolicy:
                 return False
         return True
 
+    def _completion_release_should_run(self, env: Any) -> bool:
+        if not self.completion_release_enabled:
+            return False
+        try:
+            num_agents = int(env.get_num_agents())
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        except Exception:
+            return False
+        if num_agents < self.completion_release_min_agents:
+            return False
+        if max_steps < self.completion_release_min_steps:
+            return False
+        step = int(getattr(env, "_elapsed_steps", 0) or 0)
+        if max_steps > 0 and step / max_steps < self.completion_release_min_progress:
+            return False
+        if self.completion_release_max_done_fraction < 1.0:
+            done = sum(int(self._is_done_agent(agent)) for agent in env.agents)
+            if done / max(1, num_agents) > self.completion_release_max_done_fraction:
+                return False
+        return True
+
     def _initial_reservations(
         self,
         env: Any,
@@ -475,6 +533,147 @@ class DLAFirstHybridPolicy:
             return False, None, None
         return True, source, target
 
+    def _mask_allows_action(
+        self,
+        handle: int,
+        action_id: int,
+        observation: Any | None,
+    ) -> bool:
+        mask = runtime_context.get().masks.get(handle)
+        if mask is None and observation is not None:
+            try:
+                values = list(observation)
+                mask = values[-ACTION_MASK_SIZE:]
+            except Exception:
+                mask = None
+        try:
+            return bool(mask is not None and float(mask[action_id]) >= 0.5)
+        except Exception:
+            return False
+
+    def _distance_for_action(
+        self,
+        obs_builder: Any,
+        handle: int,
+        action_id: int,
+        fallback_distance: float,
+    ) -> float:
+        try:
+            target, target_direction = obs_builder._action_target(handle, action_id)
+            if target is None or target_direction is None:
+                return float("inf")
+            distance_map = obs_builder._get_distance_map(handle)
+            distance = float(distance_map[target[0], target[1], target_direction])
+            return distance if math.isfinite(distance) else float("inf")
+        except Exception:
+            return fallback_distance
+
+    def _completion_release_actions(
+        self,
+        env: Any,
+        handles: List[int],
+        observations: List[Any],
+        actions: Dict[int, RailEnvActions],
+    ) -> Dict[int, RailEnvActions]:
+        if not self._completion_release_should_run(env):
+            return actions
+        obs_builder = runtime_context.get().obs_builder
+        if obs_builder is None:
+            return actions
+
+        reserved_targets, reserved_edges = self._initial_reservations(
+            env,
+            handles,
+            actions,
+        )
+        observation_by_handle = {
+            handle: observation
+            for handle, observation in zip(handles, observations)
+        }
+        candidates = []
+        for handle in handles:
+            agent = env.agents[handle]
+            action_id = self._action_id(actions.get(handle, RailEnvActions.DO_NOTHING))
+            if not self._is_wait_action(action_id):
+                continue
+            if agent.position is None:
+                continue
+            if self.wait_streaks.get(handle, 0) < self.completion_release_min_wait:
+                continue
+
+            try:
+                distance = float(obs_builder._current_distance_to_waypoint(handle))
+                slack = float(obs_builder._deadline_slack(handle, distance))
+            except Exception:
+                continue
+            if not math.isfinite(distance) or not math.isfinite(slack):
+                continue
+            if slack > self.completion_release_max_slack:
+                continue
+
+            best_action = None
+            best_gain = 0.0
+            for candidate_action in (1, 2, 3):
+                if not self._mask_allows_action(
+                    handle,
+                    candidate_action,
+                    observation_by_handle.get(handle),
+                ):
+                    continue
+                next_distance = self._distance_for_action(
+                    obs_builder,
+                    handle,
+                    candidate_action,
+                    distance,
+                )
+                gain = distance - next_distance
+                if gain >= self.completion_release_min_distance_gain and gain > best_gain:
+                    is_safe, _, _ = self._is_safe_rl_rescue_action(
+                        env,
+                        handle,
+                        candidate_action,
+                        reserved_targets,
+                        reserved_edges,
+                    )
+                    if is_safe:
+                        best_action = candidate_action
+                        best_gain = gain
+
+            if best_action is not None:
+                candidates.append(
+                    (
+                        slack,
+                        -self.wait_streaks.get(handle, 0),
+                        -best_gain,
+                        handle,
+                        best_action,
+                    )
+                )
+
+        if not candidates:
+            return actions
+
+        released = dict(actions)
+        overrides = 0
+        for _, _, _, handle, action_id in sorted(candidates):
+            if overrides >= self.completion_release_max_overrides:
+                break
+            is_safe, source, target = self._is_safe_rl_rescue_action(
+                env,
+                handle,
+                action_id,
+                reserved_targets,
+                reserved_edges,
+            )
+            if not is_safe or source is None or target is None:
+                continue
+            released[handle] = RailEnvActions(action_id)
+            reserved_targets.add(target)
+            reserved_edges.add((source, target))
+            self.wait_streaks[handle] = 0
+            overrides += 1
+        return released
+
     def _late_rl_rescue_actions(
         self,
         env: Any,
@@ -483,6 +682,12 @@ class DLAFirstHybridPolicy:
         dla_actions: Dict[int, RailEnvActions],
     ) -> Dict[int, RailEnvActions]:
         self._update_wait_streaks(env, handles, dla_actions)
+        dla_actions = self._completion_release_actions(
+            env,
+            handles,
+            observations,
+            dla_actions,
+        )
         if not self._late_rl_rescue_should_run(env):
             return dla_actions
 
