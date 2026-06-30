@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -46,6 +47,14 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
     def __init__(self, checkpoint_path: str | None = None):
         super().__init__(checkpoint_path=checkpoint_path)
         self.mapf_enabled = self._env_bool("ECML_MAPF_SIPP_ENABLED", True)
+        self.mapf_disabled_scenes = {
+            scene.strip()
+            for scene in os.environ.get(
+                "ECML_MAPF_SIPP_DISABLED_SCENES",
+                "scene_5",
+            ).split(",")
+            if scene.strip()
+        }
         self.mapf_min_agents = self._env_int("ECML_MAPF_SIPP_MIN_AGENTS", 35)
         self.mapf_min_steps = self._env_int("ECML_MAPF_SIPP_MIN_STEPS", 500)
         self.mapf_horizon = self._env_int("ECML_MAPF_SIPP_HORIZON", 24)
@@ -132,6 +141,9 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
 
     def _mapf_should_run(self, env: Any) -> bool:
         if not self.mapf_enabled:
+            return False
+        scene = runtime_context.get().scene
+        if scene in self.mapf_disabled_scenes:
             return False
         try:
             num_agents = int(env.get_num_agents())
