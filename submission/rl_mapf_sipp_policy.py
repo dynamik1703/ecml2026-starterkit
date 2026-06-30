@@ -92,7 +92,43 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             "ECML_MAPF_SIPP_OCCUPIED_TARGET_PENALTY",
             0.75,
         )
+        self.global_locks_enabled = self._env_bool(
+            "ECML_MAPF_GLOBAL_LOCKS",
+            False,
+        )
+        self.global_lock_min_edges = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_MIN_EDGES",
+            4,
+        )
+        self.global_lock_horizon = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_HORIZON",
+            12,
+        )
+        self.global_lock_create_horizon = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_CREATE_HORIZON",
+            8,
+        )
+        self.global_lock_max_age = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_MAX_AGE",
+            30,
+        )
+        self.global_lock_max_conflict_wait = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_MAX_CONFLICT_WAIT",
+            5,
+        )
+        self.global_lock_stale_age = self._env_int(
+            "ECML_MAPF_GLOBAL_LOCK_STALE_AGE",
+            8,
+        )
+        self.global_lock_release_on_better_slack = self._env_bool(
+            "ECML_MAPF_GLOBAL_LOCK_RELEASE_ON_BETTER_SLACK",
+            True,
+        )
         self.mapf_trace = self._env_bool("ECML_MAPF_SIPP_TRACE", False)
+        self._global_locks: dict[int, dict[str, Any]] = {}
+        self._global_lock_block_counts: dict[tuple[int, int], int] = {}
+        self._global_lock_env_id: int | None = None
+        self._global_lock_step: int | None = None
 
     def _mapf_should_run(self, env: Any) -> bool:
         if not self.mapf_enabled:
@@ -308,6 +344,31 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
     def _reverse_edge(edge: tuple[Any, Any]) -> tuple[Any, Any]:
         return (edge[1], edge[0])
 
+    def _candidate_edges(
+        self,
+        candidate: MAPFCandidate,
+        max_edges: int | None = None,
+    ) -> tuple[tuple[Any, Any], ...]:
+        limit = max_edges if max_edges is not None else self.global_lock_horizon
+        edges = []
+        for source, target in zip(candidate.nodes, candidate.nodes[1:]):
+            if source.position is None or target.position is None:
+                continue
+            if source.position == target.position:
+                continue
+            edges.append(self._edge(source.position, target.position))
+            if limit > 0 and len(edges) >= limit:
+                break
+        return tuple(edges)
+
+    @staticmethod
+    def _edge_cells(edges: tuple[tuple[Any, Any], ...]) -> set[Any]:
+        cells = set()
+        for source, target in edges:
+            cells.add(source)
+            cells.add(target)
+        return cells
+
     def _annotate_conflict_degree(
         self,
         candidates: list[MAPFCandidate],
@@ -359,6 +420,176 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             if agent.position is not None and not self._is_done_agent(agent):
                 reserved_cells[0].add(agent.position)
         return reserved_cells, reserved_edges
+
+    def _sync_global_locks(self, env: Any) -> None:
+        if not self.global_locks_enabled:
+            self._global_locks = {}
+            self._global_lock_block_counts = {}
+            return
+
+        step = int(getattr(env, "_elapsed_steps", 0) or 0)
+        env_id = id(env)
+        if (
+            self._global_lock_env_id != env_id
+            or self._global_lock_step is None
+            or step < self._global_lock_step
+        ):
+            self._global_locks = {}
+            self._global_lock_block_counts = {}
+            self._global_lock_env_id = env_id
+        self._global_lock_step = step
+
+        active_locks = {}
+        active_owners = set()
+        for owner, lock in self._global_locks.items():
+            if owner >= len(env.agents):
+                continue
+            agent = env.agents[owner]
+            if self._is_done_agent(agent):
+                continue
+            if agent.position is None:
+                continue
+            if step - int(lock["step"]) > self.global_lock_max_age:
+                continue
+            if agent.position not in lock["cells"]:
+                continue
+            active_locks[owner] = lock
+            active_owners.add(owner)
+
+        self._global_locks = active_locks
+        self._global_lock_block_counts = {
+            key: count
+            for key, count in self._global_lock_block_counts.items()
+            if key[0] in active_owners
+        }
+
+    def _candidate_conflicts_lock(
+        self,
+        candidate: MAPFCandidate,
+        lock: dict[str, Any],
+    ) -> bool:
+        edges = self._candidate_edges(candidate)
+        if not edges:
+            return False
+        lock_edges = lock["edges"]
+        if any(self._reverse_edge(edge) in lock_edges for edge in edges):
+            return True
+        return False
+
+    def _lock_age(self, env: Any, lock: dict[str, Any]) -> int:
+        return int(getattr(env, "_elapsed_steps", 0) or 0) - int(lock["step"])
+
+    def _should_yield_to_global_lock(
+        self,
+        env: Any,
+        candidate: MAPFCandidate,
+        lock: dict[str, Any],
+    ) -> bool:
+        owner = int(lock["owner"])
+        if owner == candidate.handle:
+            return False
+
+        age = self._lock_age(env, lock)
+        if age >= self.global_lock_stale_age:
+            return False
+
+        if self.global_lock_release_on_better_slack:
+            lock_priority = lock.get("priority")
+            if lock_priority is not None:
+                candidate_priority = self._priority_key(candidate)
+                if candidate_priority < lock_priority and candidate.slack + 1e-6 < lock.get(
+                    "slack",
+                    1.0e9,
+                ):
+                    return False
+
+        key = (owner, candidate.handle)
+        wait_count = self._global_lock_block_counts.get(key, 0)
+        if wait_count >= self.global_lock_max_conflict_wait:
+            return False
+        self._global_lock_block_counts[key] = wait_count + 1
+        return True
+
+    def _global_lock_waits(
+        self,
+        env: Any,
+        candidates: list[MAPFCandidate],
+    ) -> set[int]:
+        if not self.global_locks_enabled or not self._global_locks:
+            return set()
+
+        hard_waits = set()
+        for candidate in sorted(candidates, key=self._priority_key):
+            for lock in list(self._global_locks.values()):
+                if not self._candidate_conflicts_lock(candidate, lock):
+                    continue
+                if self._should_yield_to_global_lock(env, candidate, lock):
+                    hard_waits.add(candidate.handle)
+                    break
+        return hard_waits
+
+    def _candidate_has_opposing_future_conflict(
+        self,
+        candidate: MAPFCandidate,
+        candidates: list[MAPFCandidate],
+    ) -> bool:
+        edges = self._candidate_edges(candidate, self.global_lock_create_horizon)
+        if len(edges) < self.global_lock_min_edges:
+            return False
+        edge_set = set(edges)
+        for other in candidates:
+            if other.handle == candidate.handle:
+                continue
+            other_edges = self._candidate_edges(other, self.global_lock_create_horizon)
+            if any(self._reverse_edge(edge) in edge_set for edge in other_edges):
+                return True
+        for lock in self._global_locks.values():
+            if lock["owner"] == candidate.handle:
+                continue
+            if any(self._reverse_edge(edge) in lock["edges"] for edge in edges):
+                return True
+        return False
+
+    def _make_global_lock(
+        self,
+        env: Any,
+        candidate: MAPFCandidate,
+    ) -> dict[str, Any] | None:
+        edges = self._candidate_edges(candidate, self.global_lock_horizon)
+        if len(edges) < self.global_lock_min_edges:
+            return None
+        return {
+            "owner": candidate.handle,
+            "step": int(getattr(env, "_elapsed_steps", 0) or 0),
+            "edges": frozenset(edges),
+            "cells": self._edge_cells(edges),
+            "priority": self._priority_key(candidate),
+            "slack": candidate.slack,
+        }
+
+    def _update_global_locks(
+        self,
+        env: Any,
+        candidates: list[MAPFCandidate],
+        planned: Dict[int, RailEnvActions],
+        hard_waits: set[int],
+    ) -> None:
+        if not self.global_locks_enabled:
+            return
+
+        for candidate in sorted(candidates, key=self._priority_key):
+            if candidate.handle in hard_waits:
+                continue
+            planned_action_id = self._action_id(
+                planned.get(candidate.handle, RailEnvActions.DO_NOTHING)
+            )
+            if planned_action_id not in {1, 2, 3}:
+                continue
+            if not self._candidate_has_opposing_future_conflict(candidate, candidates):
+                continue
+            lock = self._make_global_lock(env, candidate)
+            if lock is not None:
+                self._global_locks[candidate.handle] = lock
 
     def _first_step_wait_limit(self, env: Any) -> int:
         wait_limit = self.mapf_max_waits_first_step
@@ -502,6 +733,7 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
         if not self._mapf_should_run(env):
             return actions
 
+        self._sync_global_locks(env)
         timing_scores = self._rl_scores(handles, observations)
         observation_by_handle = {
             handle: observation
@@ -525,28 +757,35 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             return actions
 
         self._annotate_conflict_degree(candidates)
+        hard_waits = self._global_lock_waits(env, candidates)
         reserved_cells, reserved_edges = self._reserve_initial_state(env)
         planned = dict(actions)
         waits_added = 0
         first_step_wait_limit = self._first_step_wait_limit(env)
         for candidate in sorted(candidates, key=self._priority_key):
-            planned_action = self._plan_candidate(
-                candidate,
-                reserved_cells,
-                reserved_edges,
-            )
+            if candidate.handle in hard_waits:
+                self._reserve_wait(reserved_cells, 1, candidate.source)
+                planned_action = candidate.wait_action
+            else:
+                planned_action = self._plan_candidate(
+                    candidate,
+                    reserved_cells,
+                    reserved_edges,
+                )
             if (
                 self._action_id(planned_action) in {0, 4}
                 and candidate.dla_action_id in {1, 2, 3}
             ):
                 waits_added += 1
                 if (
-                    first_step_wait_limit > 0
+                    candidate.handle not in hard_waits
+                    and first_step_wait_limit > 0
                     and waits_added > first_step_wait_limit
                 ):
                     planned_action = RailEnvActions(candidate.dla_action_id)
             planned[candidate.handle] = planned_action
 
+        self._update_global_locks(env, candidates, planned, hard_waits)
         return planned
 
     def act_many(
