@@ -122,6 +122,22 @@ class DLAFirstHybridPolicy:
             "ECML_DLA_FIRST_MINI_LOCK_MAX_DONE_FRACTION",
             1.0,
         )
+        self.mini_lock_reserve_targets = self._env_bool(
+            "ECML_DLA_FIRST_MINI_LOCK_RESERVE_TARGETS",
+            False,
+        )
+        self.rl_timing_ranker_enabled = self._env_bool(
+            "ECML_DLA_FIRST_RL_TIMING_RANKER",
+            False,
+        )
+        self.rl_timing_min_agents = self._env_int(
+            "ECML_DLA_FIRST_RL_TIMING_MIN_AGENTS",
+            20,
+        )
+        self.rl_timing_slack_bucket = self._env_float(
+            "ECML_DLA_FIRST_RL_TIMING_SLACK_BUCKET",
+            25.0,
+        )
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -315,6 +331,34 @@ class DLAFirstHybridPolicy:
                 confidence.cpu().numpy(),
             )
         ]
+
+    def _rl_timing_scores(
+        self,
+        handles: List[int],
+        observations: List[Any],
+    ) -> dict[int, dict[str, float]]:
+        import torch
+
+        if not handles:
+            return {}
+        policy = self._ensure_rl_policy()
+        features, mask = self._split_features_and_mask(observations)
+        with torch.no_grad():
+            logits = policy.masked_logits(features, mask)
+            probabilities = torch.softmax(logits, dim=-1)
+            values = policy.action_value_scores(features, mask)
+
+        scores: dict[int, dict[str, float]] = {}
+        for row, handle in enumerate(handles):
+            row_scores = {}
+            for action_id in range(ACTION_MASK_SIZE):
+                probability = float(probabilities[row, action_id].cpu().item())
+                action_value = float(values[row, action_id].cpu().item())
+                row_scores[f"prob_{action_id}"] = probability
+                row_scores[f"value_{action_id}"] = action_value
+                row_scores[f"score_{action_id}"] = probability + 0.05 * action_value
+            scores[handle] = row_scores
+        return scores
 
     @staticmethod
     def _is_wait_action(action_id: int) -> bool:
@@ -515,6 +559,34 @@ class DLAFirstHybridPolicy:
             path_len = float(len(path))
         return (slack, path_len, handle)
 
+    def _mini_lock_rank_key(
+        self,
+        env: Any,
+        handle: int,
+        action_id: int,
+        timing_scores: dict[int, dict[str, float]],
+    ) -> tuple[float, float, float, int]:
+        slack, path_len, _ = self._mini_lock_priority(env, handle)
+        if (
+            not self.rl_timing_ranker_enabled
+            or action_id not in {1, 2, 3}
+            or handle not in timing_scores
+        ):
+            return (slack, path_len, 0.0, handle)
+
+        agent = env.agents[handle]
+        wait_id = self._action_id(self._wait_action_for_agent(agent))
+        scores = timing_scores[handle]
+        move_score = scores.get(f"score_{action_id}", 0.0)
+        wait_score = scores.get(f"score_{wait_id}", 0.0)
+        go_advantage = move_score - wait_score
+        slack_bucket = (
+            slack
+            if self.rl_timing_slack_bucket <= 0.0
+            else slack // self.rl_timing_slack_bucket
+        )
+        return (slack_bucket, -go_advantage, path_len, handle)
+
     def _mini_lock_action_target(
         self,
         env: Any,
@@ -600,6 +672,7 @@ class DLAFirstHybridPolicy:
         env: Any,
         handles: List[int],
         actions: Dict[int, RailEnvActions],
+        observations: List[Any] | None = None,
     ) -> Dict[int, RailEnvActions]:
         if not self.mini_locks_enabled:
             return actions
@@ -609,8 +682,26 @@ class DLAFirstHybridPolicy:
         adjusted = dict(actions)
         reserved_edges: set[tuple[Any, Any]] = set()
         reserved_corridor_edges: set[tuple[Any, Any]] = set()
+        reserved_targets: set[Any] = set()
+        timing_scores: dict[int, dict[str, float]] = {}
+        if (
+            self.rl_timing_ranker_enabled
+            and observations is not None
+            and len(observations) == len(handles)
+        ):
+            try:
+                if int(env.get_num_agents()) >= self.rl_timing_min_agents:
+                    timing_scores = self._rl_timing_scores(handles, observations)
+            except Exception:
+                timing_scores = {}
 
-        for handle in sorted(handles, key=lambda h: self._mini_lock_priority(env, h)):
+        def rank_key(handle: int) -> tuple[float, float, float, int]:
+            action_id = self._action_id(
+                adjusted.get(handle, RailEnvActions.DO_NOTHING)
+            )
+            return self._mini_lock_rank_key(env, handle, action_id, timing_scores)
+
+        for handle in sorted(handles, key=rank_key):
             agent = env.agents[handle]
             action_id = self._action_id(adjusted.get(handle, RailEnvActions.DO_NOTHING))
             source, target, direction = self._mini_lock_action_target(
@@ -631,9 +722,14 @@ class DLAFirstHybridPolicy:
                     (edge_target, edge_source) in reserved_corridor_edges
                     for edge_source, edge_target in corridor_edges
                 )
-                if reverse_conflict:
+                target_conflict = (
+                    self.mini_lock_reserve_targets and target in reserved_targets
+                )
+                if reverse_conflict or target_conflict:
                     adjusted[handle] = self._wait_action_for_agent(agent)
                 else:
+                    if self.mini_lock_reserve_targets:
+                        reserved_targets.add(target)
                     reserved_edges.add(edge)
                     reserved_corridor_edges.update(corridor_edges)
 
@@ -656,7 +752,12 @@ class DLAFirstHybridPolicy:
             self._reset_for_env(env)
             actions = self._dla_actions(handles, env)
             if actions:
-                actions = self._apply_mini_sipp_locks(env, handles, actions)
+                actions = self._apply_mini_sipp_locks(
+                    env,
+                    handles,
+                    actions,
+                    observations,
+                )
                 return self._late_rl_rescue_actions(
                     env,
                     handles,
