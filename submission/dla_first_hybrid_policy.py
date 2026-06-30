@@ -112,11 +112,35 @@ class DLAFirstHybridPolicy:
         )
         self.mini_lock_min_agents = self._env_int(
             "ECML_DLA_FIRST_MINI_LOCK_MIN_AGENTS",
-            20,
+            70,
         )
         self.mini_lock_min_progress = self._env_float(
             "ECML_DLA_FIRST_MINI_LOCK_MIN_PROGRESS",
             0.0,
+        )
+        self.mini_lock_min_steps = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_STEPS",
+            1000,
+        )
+        self.mini_lock_min_mean_col = self._env_float(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_MEAN_COL",
+            90.0,
+        )
+        self.mini_lock_max_mean_col = self._env_float(
+            "ECML_DLA_FIRST_MINI_LOCK_MAX_MEAN_COL",
+            1.0e9,
+        )
+        self.mini_lock_min_unique_positions = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_UNIQUE_POSITIONS",
+            0,
+        )
+        self.mini_lock_min_corridor_edges = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_MIN_CORRIDOR_EDGES",
+            4,
+        )
+        self.mini_lock_max_waits_per_step = self._env_int(
+            "ECML_DLA_FIRST_MINI_LOCK_MAX_WAITS_PER_STEP",
+            1,
         )
         self.mini_lock_max_done_fraction = self._env_float(
             "ECML_DLA_FIRST_MINI_LOCK_MAX_DONE_FRACTION",
@@ -132,7 +156,7 @@ class DLAFirstHybridPolicy:
         )
         self.rl_timing_min_agents = self._env_int(
             "ECML_DLA_FIRST_RL_TIMING_MIN_AGENTS",
-            20,
+            70,
         )
         self.rl_timing_slack_bucket = self._env_float(
             "ECML_DLA_FIRST_RL_TIMING_SLACK_BUCKET",
@@ -524,6 +548,31 @@ class DLAFirstHybridPolicy:
         state_name = getattr(state, "name", str(state))
         return state_name in {"DONE", "DONE_REMOVED"} or state == 6
 
+    @staticmethod
+    def _position_tuple(position: Any) -> tuple[int, int] | None:
+        try:
+            row = int(position[0])
+            col = int(position[1])
+        except Exception:
+            return None
+        return row, col
+
+    def _topology_stats(self, env: Any) -> tuple[int, float] | None:
+        points: list[tuple[int, int]] = []
+        try:
+            agents = list(env.agents)
+        except Exception:
+            return None
+        for agent in agents:
+            for attr in ("initial_position", "target"):
+                point = self._position_tuple(getattr(agent, attr, None))
+                if point is not None:
+                    points.append(point)
+        if not points:
+            return None
+        mean_col = sum(point[1] for point in points) / len(points)
+        return len(set(points)), mean_col
+
     def _mini_locks_should_run(self, env: Any) -> bool:
         try:
             num_agents = int(env.get_num_agents())
@@ -533,6 +582,18 @@ class DLAFirstHybridPolicy:
             return False
 
         max_steps = max(1, int(getattr(env, "_max_episode_steps", 1) or 1))
+        if max_steps < self.mini_lock_min_steps:
+            return False
+
+        stats = self._topology_stats(env)
+        if stats is None:
+            return False
+        unique_positions, mean_col = stats
+        if unique_positions < self.mini_lock_min_unique_positions:
+            return False
+        if not (self.mini_lock_min_mean_col <= mean_col <= self.mini_lock_max_mean_col):
+            return False
+
         step = int(getattr(env, "_elapsed_steps", 0) or 0)
         if step / max_steps < self.mini_lock_min_progress:
             return False
@@ -683,6 +744,7 @@ class DLAFirstHybridPolicy:
         reserved_edges: set[tuple[Any, Any]] = set()
         reserved_corridor_edges: set[tuple[Any, Any]] = set()
         reserved_targets: set[Any] = set()
+        waits_added = 0
         timing_scores: dict[int, dict[str, float]] = {}
         if (
             self.rl_timing_ranker_enabled
@@ -718,6 +780,8 @@ class DLAFirstHybridPolicy:
                     target,
                     direction,
                 )
+                if len(corridor_edges) < self.mini_lock_min_corridor_edges:
+                    continue
                 reverse_conflict = (target, source) in reserved_edges or any(
                     (edge_target, edge_source) in reserved_corridor_edges
                     for edge_source, edge_target in corridor_edges
@@ -726,7 +790,13 @@ class DLAFirstHybridPolicy:
                     self.mini_lock_reserve_targets and target in reserved_targets
                 )
                 if reverse_conflict or target_conflict:
+                    if (
+                        self.mini_lock_max_waits_per_step > 0
+                        and waits_added >= self.mini_lock_max_waits_per_step
+                    ):
+                        continue
                     adjusted[handle] = self._wait_action_for_agent(agent)
+                    waits_added += 1
                 else:
                     if self.mini_lock_reserve_targets:
                         reserved_targets.add(target)
