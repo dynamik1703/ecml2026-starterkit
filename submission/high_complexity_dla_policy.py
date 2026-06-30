@@ -31,6 +31,30 @@ class HighComplexityDLAPolicy:
             "ECML_HIGH_COMPLEXITY_DLA_UNKNOWN_SCENE",
             True,
         )
+        self.long_rl_rescue = self._env_bool(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE",
+            False,
+        )
+        self.long_rl_rescue_min_agents = self._env_int(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE_MIN_AGENTS",
+            50,
+        )
+        self.long_rl_rescue_min_steps = self._env_int(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE_MIN_STEPS",
+            850,
+        )
+        self.long_rl_rescue_min_mean_col = self._env_float(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE_MIN_MEAN_COL",
+            90.0,
+        )
+        self.long_rl_rescue_max_mean_col = self._env_float(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE_MAX_MEAN_COL",
+            1.0e9,
+        )
+        self.long_rl_rescue_min_unique_positions = self._env_int(
+            "ECML_HIGH_COMPLEXITY_LONG_RL_RESCUE_MIN_UNIQUE_POSITIONS",
+            0,
+        )
         self.last_env_id = None
         self.use_dla_for_env = False
 
@@ -47,6 +71,61 @@ class HighComplexityDLAPolicy:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, str(default)))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _position_tuple(position: Any) -> tuple[int, int] | None:
+        try:
+            row = int(position[0])
+            col = int(position[1])
+        except Exception:
+            return None
+        return row, col
+
+    def _topology_stats(self, env: Any) -> tuple[int, float] | None:
+        points: list[tuple[int, int]] = []
+        try:
+            agents = list(env.agents)
+        except Exception:
+            return None
+        for agent in agents:
+            for attr in ("initial_position", "target"):
+                point = self._position_tuple(getattr(agent, attr, None))
+                if point is not None:
+                    points.append(point)
+        if not points:
+            return None
+        mean_col = sum(point[1] for point in points) / len(points)
+        return len(set(points)), mean_col
+
+    def _long_rl_rescue_applies(self, env: Any | None) -> bool:
+        if not self.long_rl_rescue or env is None:
+            return False
+        try:
+            num_agents = int(env.get_num_agents())
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        except Exception:
+            return False
+        if num_agents < self.long_rl_rescue_min_agents:
+            return False
+        if max_steps < self.long_rl_rescue_min_steps:
+            return False
+        stats = self._topology_stats(env)
+        if stats is None:
+            return False
+        unique_positions, mean_col = stats
+        return (
+            unique_positions >= self.long_rl_rescue_min_unique_positions
+            and self.long_rl_rescue_min_mean_col
+            <= mean_col
+            <= self.long_rl_rescue_max_mean_col
+        )
 
     def _high_complexity_needs_dla(self, env: Any | None) -> bool:
         if env is None:
@@ -81,7 +160,9 @@ class HighComplexityDLAPolicy:
         if env_id == self.last_env_id:
             return
         self.last_env_id = env_id
-        self.use_dla_for_env = self._high_complexity_needs_dla(env)
+        self.use_dla_for_env = self._high_complexity_needs_dla(
+            env
+        ) and not self._long_rl_rescue_applies(env)
 
     def act(self, observation: Any, **kwargs) -> RailEnvActions:
         self._refresh_env_choice()
