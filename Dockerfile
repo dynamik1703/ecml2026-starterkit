@@ -6,10 +6,12 @@ FROM ghcr.io/flatland-association/flatland-baselines:${TAG}
 COPY submission/ submission/
 COPY tools/ tools/
 
-ENV POLICY=submission.rl_mapf_sipp_policy.MyPolicy
+ENV POLICY=submission.scene_aware_competition_policy.MyPolicy
 ENV OBS_BUILDER=submission.my_observation_builder.MyObservationBuilder
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV ECML_SCENE_AWARE_ADAPTIVE_SCENES=scene_1,scene_2,scene_5
+ENV ECML_SCENE_AWARE_ADAPTIVE_MIN_AGENTS=70
 ENV ECML_MAPF_SIPP_ENABLED=1
 ENV ECML_MAPF_SIPP_DISABLED_SCENES=scene_5
 ENV ECML_MAPF_SIPP_DISABLED_SCENE_OVERRIDE_MIN_AGENTS=95
