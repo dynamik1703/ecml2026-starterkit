@@ -168,6 +168,10 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             True,
         )
         self.mapf_trace = self._env_bool("ECML_MAPF_SIPP_TRACE", False)
+        self.dispatch_primary_weight = self._env_float(
+            "ECML_DISPATCH_RANKER_PRIMARY_WEIGHT",
+            0.0,
+        )
         self.dispatch_ranker = DispatchRanker()
         self._dispatch_priority_scores: dict[int, float] = {}
         self._last_mapf_candidates: list[MAPFCandidate] = []
@@ -717,13 +721,15 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             if self.mapf_slack_bucket <= 0.0
             else candidate.slack // self.mapf_slack_bucket
         )
+        dispatch_score = self._dispatch_priority_scores.get(candidate.handle, 0.0)
         score = (
             self.mapf_rl_weight * candidate.rl_go_advantage
             + self.mapf_wait_weight * float(candidate.wait_streak)
             + self.mapf_conflict_weight * float(candidate.conflict_degree)
             - self.mapf_occupied_target_penalty * float(candidate.occupied_target)
-            + self._dispatch_priority_scores.get(candidate.handle, 0.0)
+            + dispatch_score
         )
+        slack_key = slack_key - self.dispatch_primary_weight * dispatch_score
         path_len = candidate.path_len if math.isfinite(candidate.path_len) else 1.0e9
         return (slack_key, -score, path_len, candidate.handle)
 

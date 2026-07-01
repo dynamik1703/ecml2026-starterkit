@@ -285,7 +285,7 @@ class DispatchRanker:
             scene.strip()
             for scene in os.environ.get(
                 "ECML_DISPATCH_RANKER_SCENES",
-                "scene_3,scene_4",
+                "scene_4",
             ).split(",")
             if scene.strip()
         }
