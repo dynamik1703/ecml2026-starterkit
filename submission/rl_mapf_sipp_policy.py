@@ -9,6 +9,7 @@ from flatland.core.grid.grid4_utils import get_new_position
 from flatland.envs.rail_env_action import RailEnvActions
 
 from submission import runtime_context
+from submission.dispatch_ranker import DispatchRanker
 from submission.dla_first_hybrid_policy import DLAFirstHybridPolicy
 
 
@@ -167,6 +168,9 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             True,
         )
         self.mapf_trace = self._env_bool("ECML_MAPF_SIPP_TRACE", False)
+        self.dispatch_ranker = DispatchRanker()
+        self._dispatch_priority_scores: dict[int, float] = {}
+        self._last_mapf_candidates: list[MAPFCandidate] = []
         self._global_locks: dict[int, dict[str, Any]] = {}
         self._global_lock_block_counts: dict[tuple[int, int], int] = {}
         self._global_lock_env_id: int | None = None
@@ -718,6 +722,7 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             + self.mapf_wait_weight * float(candidate.wait_streak)
             + self.mapf_conflict_weight * float(candidate.conflict_degree)
             - self.mapf_occupied_target_penalty * float(candidate.occupied_target)
+            + self._dispatch_priority_scores.get(candidate.handle, 0.0)
         )
         path_len = candidate.path_len if math.isfinite(candidate.path_len) else 1.0e9
         return (slack_key, -score, path_len, candidate.handle)
@@ -1117,6 +1122,8 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
         observations: List[Any],
         actions: Dict[int, RailEnvActions],
     ) -> Dict[int, RailEnvActions]:
+        self._dispatch_priority_scores = {}
+        self._last_mapf_candidates = []
         if not self._mapf_should_run(env):
             return actions
 
@@ -1144,6 +1151,11 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             return actions
 
         self._annotate_conflict_degree(candidates)
+        self._last_mapf_candidates = list(candidates)
+        self._dispatch_priority_scores = self.dispatch_ranker.priority_scores(
+            env,
+            candidates,
+        )
         hard_waits = self._global_lock_waits(env, candidates)
         reserved_cells, reserved_edges = self._reserve_initial_state(env)
         planned = dict(actions)
