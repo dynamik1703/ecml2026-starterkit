@@ -187,6 +187,27 @@ class AdaptiveCompletionPolicy:
             "ECML_ADAPTIVE_AGENT_DLA_LATE_PROGRESS",
             0.0,
         )
+        self.start_throttle = self._env_bool(
+            "ECML_ADAPTIVE_START_THROTTLE",
+            False,
+        )
+        self.start_throttle_min_agents = self._env_int(
+            "ECML_ADAPTIVE_START_THROTTLE_MIN_AGENTS",
+            70,
+        )
+        self.start_throttle_max_steps = self._env_int(
+            "ECML_ADAPTIVE_START_THROTTLE_MAX_STEPS",
+            700,
+        )
+        self.start_throttle_max_new_starts = self._env_int(
+            "ECML_ADAPTIVE_START_THROTTLE_MAX_NEW_STARTS",
+            6,
+        )
+        self.start_throttle_active_fraction = self._env_float(
+            "ECML_ADAPTIVE_START_THROTTLE_ACTIVE_FRACTION",
+            0.55,
+        )
+        self.start_throttle_hold_action = RailEnvActions.DO_NOTHING
         self.wait_streaks: Dict[int, int] = {}
 
     @staticmethod
@@ -584,6 +605,81 @@ class AdaptiveCompletionPolicy:
             overrides += 1
         return adjusted
 
+    def _start_throttle_actions(
+        self,
+        env: Any,
+        handles: List[int],
+        observations: List[Any],
+        actions: Dict[int, RailEnvActions],
+    ) -> Dict[int, RailEnvActions]:
+        if not self.start_throttle:
+            return actions
+        try:
+            num_agents = int(env.get_num_agents())
+            max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        except Exception:
+            return actions
+        if num_agents < self.start_throttle_min_agents:
+            return actions
+        if self.start_throttle_max_steps > 0 and max_steps > self.start_throttle_max_steps:
+            return actions
+
+        active_agents = 0
+        start_candidates = []
+        obs_builder = runtime_context.get().obs_builder
+        observation_by_handle = {
+            handle: observation
+            for handle, observation in zip(handles, observations)
+        }
+        for handle in handles:
+            agent = env.agents[handle]
+            if self._is_done_agent(agent):
+                continue
+            if getattr(agent, "position", None) is not None:
+                active_agents += 1
+                continue
+            action_id = self._action_id(actions.get(handle, RailEnvActions.DO_NOTHING))
+            if action_id not in {1, 2, 3}:
+                continue
+            if self._mask_allows_action(
+                handle,
+                int(self.start_throttle_hold_action.value),
+                observation_by_handle.get(handle),
+            ):
+                start_candidates.append(handle)
+
+        if not start_candidates:
+            return actions
+
+        max_active = int(self.start_throttle_active_fraction * max(1, num_agents))
+        active_budget = max(0, max_active - active_agents)
+        start_budget = min(self.start_throttle_max_new_starts, active_budget)
+        if start_budget >= len(start_candidates):
+            return actions
+
+        def priority(handle: int) -> tuple[float, float, int]:
+            if obs_builder is None:
+                return (0.0, 0.0, handle)
+            try:
+                distance = float(obs_builder._current_distance_to_waypoint(handle))
+                slack = float(obs_builder._deadline_slack(handle, distance))
+            except Exception:
+                distance = 0.0
+                slack = 0.0
+            if not math.isfinite(slack):
+                slack = 0.0
+            if not math.isfinite(distance):
+                distance = 0.0
+            return (slack, -distance, handle)
+
+        allowed = set(sorted(start_candidates, key=priority)[:start_budget])
+        adjusted = dict(actions)
+        hold_action = self.start_throttle_hold_action
+        for handle in start_candidates:
+            if handle not in allowed:
+                adjusted[handle] = hold_action
+        return adjusted
+
     def act(self, observation: Any, **kwargs) -> RailEnvActions:
         self._refresh_env_choice()
         if self.use_dla_for_env:
@@ -603,11 +699,17 @@ class AdaptiveCompletionPolicy:
         env = runtime_context.get().env
         if env is None:
             return rl_actions
-        return self._agent_level_dla_overrides(
+        adjusted = self._start_throttle_actions(
             env,
             handles,
             observations,
             rl_actions,
+        )
+        return self._agent_level_dla_overrides(
+            env,
+            handles,
+            observations,
+            adjusted,
         )
 
 

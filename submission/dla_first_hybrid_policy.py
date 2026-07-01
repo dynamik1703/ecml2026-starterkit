@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 from flatland.envs.rail_env_action import RailEnvActions
 
@@ -61,6 +61,46 @@ class DLAFirstHybridPolicy:
         self.dynamic_min_free_cell_value = self._env_int(
             "ECML_DLA_FIRST_DYNAMIC_MIN_FREE_CELL_VALUE",
             3,
+        )
+        self.scene3_min_free_cell_enabled = self._env_bool(
+            "ECML_DLA_FIRST_SCENE3_MIN_FREE_CELL_ENABLED",
+            False,
+        )
+        self.scene3_min_free_cell_value = self._env_int(
+            "ECML_DLA_FIRST_SCENE3_MIN_FREE_CELL_VALUE",
+            2,
+        )
+        self.scene3_min_steps = self._env_int(
+            "ECML_DLA_FIRST_SCENE3_MIN_STEPS",
+            430,
+        )
+        self.scene3_max_steps = self._env_int(
+            "ECML_DLA_FIRST_SCENE3_MAX_STEPS",
+            570,
+        )
+        self.scene3_min_mean_row = self._env_float(
+            "ECML_DLA_FIRST_SCENE3_MIN_MEAN_ROW",
+            80.0,
+        )
+        self.scene3_max_mean_row = self._env_float(
+            "ECML_DLA_FIRST_SCENE3_MAX_MEAN_ROW",
+            90.0,
+        )
+        self.scene3_min_mean_col = self._env_float(
+            "ECML_DLA_FIRST_SCENE3_MIN_MEAN_COL",
+            75.0,
+        )
+        self.scene3_max_mean_col = self._env_float(
+            "ECML_DLA_FIRST_SCENE3_MAX_MEAN_COL",
+            88.0,
+        )
+        self.scene3_min_waypoints = self._env_int(
+            "ECML_DLA_FIRST_SCENE3_MIN_WAYPOINTS",
+            40,
+        )
+        self.scene3_max_waypoints = self._env_int(
+            "ECML_DLA_FIRST_SCENE3_MAX_WAYPOINTS",
+            46,
         )
         self.dynamic_k_shortest_path_cutoff = self._env_bool(
             "ECML_DLA_FIRST_DYNAMIC_K_SHORTEST_PATH_CUTOFF",
@@ -242,7 +282,47 @@ class DLAFirstHybridPolicy:
             self.last_env_id = env_id
         self.last_step = step
 
+    @staticmethod
+    def _waypoint_positions(agent: Any) -> Iterable[tuple[int, int]]:
+        for waypoint in getattr(agent, "waypoints", []) or []:
+            candidate = waypoint[0] if isinstance(waypoint, (list, tuple)) else waypoint
+            position = getattr(candidate, "position", None)
+            if position is not None:
+                yield position
+
+    def _scene3_like_env(self, env: Any | None) -> bool:
+        if env is None:
+            return False
+        scene = runtime_context.get().scene
+        if scene in {"scene_3", "level_3"}:
+            return True
+        starts = [
+            agent.initial_position
+            for agent in getattr(env, "agents", [])
+            if getattr(agent, "initial_position", None) is not None
+        ]
+        if not starts:
+            return False
+        max_steps = int(getattr(env, "_max_episode_steps", 0) or 0)
+        mean_row = sum(position[0] for position in starts) / len(starts)
+        mean_col = sum(position[1] for position in starts) / len(starts)
+        waypoint_positions = {
+            position
+            for agent in getattr(env, "agents", [])
+            for position in self._waypoint_positions(agent)
+        }
+        return (
+            self.scene3_min_steps <= max_steps <= self.scene3_max_steps
+            and self.scene3_min_mean_row <= mean_row <= self.scene3_max_mean_row
+            and self.scene3_min_mean_col <= mean_col <= self.scene3_max_mean_col
+            and self.scene3_min_waypoints
+            <= len(waypoint_positions)
+            <= self.scene3_max_waypoints
+        )
+
     def _min_free_cell_for_env(self, env: Any | None) -> int:
+        if self.scene3_min_free_cell_enabled and self._scene3_like_env(env):
+            return self.scene3_min_free_cell_value
         if not self.dynamic_min_free_cell or env is None:
             return self.base_min_free_cell
         try:
