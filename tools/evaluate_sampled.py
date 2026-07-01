@@ -142,7 +142,12 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
     env = load_sampling_env_generator()(env, line_length=args.line_length, scene=args.scene)
     observations, _ = env.reset(random_seed=seed)
     runtime_context.set_seed(seed)
-    runtime_context.set_scene(args.scene or "scene_5")
+    runtime_scene = args.runtime_scene
+    if runtime_scene == "__none__":
+        runtime_scene = None
+    elif runtime_scene is None:
+        runtime_scene = args.scene or "scene_5"
+    runtime_context.set_scene(runtime_scene)
 
     reward_values: list[float] = []
     positions: dict[int, list[Any]] = defaultdict(list)
@@ -177,6 +182,7 @@ def run_episode(args: argparse.Namespace, seed: int) -> dict[str, Any]:
         "max_episode_steps": env._max_episode_steps,
         "line_length": args.line_length,
         "scene": args.scene or "scene_5",
+        "runtime_scene": runtime_scene,
         "failed_agents": failed_agent_details(env, positions, actions_by_agent),
     }
 
@@ -205,6 +211,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scene",
         choices=["scene_1", "scene_2", "scene_3", "scene_4", "scene_5"],
+    )
+    parser.add_argument(
+        "--runtime-scene",
+        help=(
+            "Override runtime_context.scene independently from --scene. "
+            "Use __none__ to simulate the official no-scene context."
+        ),
     )
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-csv", type=Path)
