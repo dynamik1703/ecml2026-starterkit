@@ -11,6 +11,7 @@ from flatland.envs.rail_env_action import RailEnvActions
 from submission import runtime_context
 from submission.dispatch_ranker import DispatchRanker
 from submission.dla_first_hybrid_policy import DLAFirstHybridPolicy
+from submission.sequence_dispatcher import SequenceDispatchRanker
 
 
 @dataclass(frozen=True)
@@ -173,7 +174,9 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             0.0,
         )
         self.dispatch_ranker = DispatchRanker()
+        self.sequence_dispatch_ranker = SequenceDispatchRanker()
         self._dispatch_priority_scores: dict[int, float] = {}
+        self._sequence_dispatch_priority_scores: dict[int, float] = {}
         self._last_mapf_candidates: list[MAPFCandidate] = []
         self._global_locks: dict[int, dict[str, Any]] = {}
         self._global_lock_block_counts: dict[tuple[int, int], int] = {}
@@ -721,7 +724,10 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
             if self.mapf_slack_bucket <= 0.0
             else candidate.slack // self.mapf_slack_bucket
         )
-        dispatch_score = self._dispatch_priority_scores.get(candidate.handle, 0.0)
+        dispatch_score = (
+            self._dispatch_priority_scores.get(candidate.handle, 0.0)
+            + self._sequence_dispatch_priority_scores.get(candidate.handle, 0.0)
+        )
         score = (
             self.mapf_rl_weight * candidate.rl_go_advantage
             + self.mapf_wait_weight * float(candidate.wait_streak)
@@ -1129,6 +1135,7 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
         actions: Dict[int, RailEnvActions],
     ) -> Dict[int, RailEnvActions]:
         self._dispatch_priority_scores = {}
+        self._sequence_dispatch_priority_scores = {}
         self._last_mapf_candidates = []
         if not self._mapf_should_run(env):
             return actions
@@ -1158,6 +1165,9 @@ class RLMAPFSIPPPolicy(DLAFirstHybridPolicy):
 
         self._annotate_conflict_degree(candidates)
         self._last_mapf_candidates = list(candidates)
+        self._sequence_dispatch_priority_scores = (
+            self.sequence_dispatch_ranker.priority_scores(env, candidates)
+        )
         self._dispatch_priority_scores = self.dispatch_ranker.priority_scores(
             env,
             candidates,
