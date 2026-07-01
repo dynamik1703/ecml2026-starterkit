@@ -33,6 +33,10 @@ class SceneAwareCompetitionPolicy:
             "ECML_SCENE_AWARE_ADAPTIVE_MIN_AGENTS",
             70,
         )
+        self.adaptive_unknown_scene = self._env_bool(
+            "ECML_SCENE_AWARE_ADAPTIVE_UNKNOWN_SCENE",
+            True,
+        )
         self.mapf_policy: RLMAPFSIPPPolicy | None = None
         self.adaptive_policy: AdaptiveCompletionPolicy | None = None
 
@@ -42,6 +46,13 @@ class SceneAwareCompetitionPolicy:
             return int(os.environ.get(name, str(default)))
         except Exception:
             return default
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() not in {"0", "false", "no", "off", ""}
 
     def _mapf(self) -> RLMAPFSIPPPolicy:
         if self.mapf_policy is None:
@@ -57,7 +68,11 @@ class SceneAwareCompetitionPolicy:
 
     def _use_adaptive(self) -> bool:
         context = runtime_context.get()
-        if context.scene not in self.adaptive_scenes:
+        scene = context.scene
+        scene_unknown = not scene or not str(scene).startswith("scene_")
+        if scene not in self.adaptive_scenes and not (
+            self.adaptive_unknown_scene and scene_unknown
+        ):
             return False
         env = context.env
         if env is None:
